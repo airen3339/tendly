@@ -1,0 +1,32 @@
+<!doctype html><html><head><meta charset="utf-8">
+<!-- Source of docs/assets/banner-{light,dark}.png. Needs Inter (InterVariable.ttf) at the @font-face path below; render at 1280x400 with device scale 2, swapping THEME for light or dark. -->
+<style>
+@font-face{font-family:Inter;src:url(file:///tmp/readme-preview/fonts/inter/InterVariable.ttf);font-weight:100 900}
+html,body{margin:0;padding:0}
+body{width:1280px;height:400px;overflow:hidden;font-family:Inter,sans-serif;-webkit-font-smoothing:antialiased}
+.wrap{position:relative;width:1280px;height:400px;background:var(--bg);border-radius:24px;overflow:hidden}
+.glow{position:absolute;border-radius:50%;filter:blur(90px);opacity:var(--glow-o)}
+.g1{width:620px;height:620px;left:-140px;top:-220px;background:#0c8376}
+.g2{width:520px;height:520px;right:-120px;bottom:-260px;background:#7760b5}
+.grid{position:absolute;inset:0;background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);background-size:40px 40px;mask-image:radial-gradient(ellipse at 50% 50%,#000 20%,transparent 75%);-webkit-mask-image:radial-gradient(ellipse at 50% 50%,#000 20%,transparent 75%)}
+.mark{position:absolute;left:112px;top:92px;width:216px;height:216px;border-radius:52px;background:linear-gradient(145deg,#16a394 0%,#0c8376 55%,#085f56 100%);box-shadow:0 30px 60px -20px rgba(12,131,118,.55),inset 0 2px 0 rgba(255,255,255,.28),inset 0 -3px 0 rgba(0,0,0,.18)}
+.mark svg{position:absolute;inset:0}
+.text{position:absolute;left:392px;top:102px}
+h1{margin:0;font-size:104px;line-height:1;font-weight:800;letter-spacing:-0.045em;color:var(--ink)}
+h1 span{color:#0c8376}
+.tag{margin:22px 0 0;font-size:27px;font-weight:500;letter-spacing:-0.01em;color:var(--muted)}
+.pills{display:flex;gap:12px;margin-top:28px}
+.pill{font-size:16px;font-weight:600;padding:9px 16px;border-radius:999px;letter-spacing:.01em}
+.p1{background:var(--pill1);color:#7760b5}.p2{background:var(--pill2);color:#0c8376}.p3{background:var(--pill3);color:#c77916}
+.light{--bg:linear-gradient(135deg,#f8fafb 0%,#eef5f3 100%);--ink:#17202d;--muted:#5e6b7d;--line:rgba(23,32,45,.06);--glow-o:.16;--pill1:#efecf8;--pill2:#e1f2ee;--pill3:#fbf1e1}
+.dark{--bg:linear-gradient(135deg,#0f141b 0%,#131a24 100%);--ink:#f3f6f9;--muted:#9aa7b8;--line:rgba(255,255,255,.05);--glow-o:.30;--pill1:#2a2544;--pill2:#143a36;--pill3:#3d2d14}
+</style></head><body>
+<div class="wrap THEME">
+  <div class="glow g1"></div><div class="glow g2"></div><div class="grid"></div>
+  <div class="mark"><svg viewBox="0 0 56 56" width="216" height="216"><g fill="#fff"><rect x="15.5" y="11.5" width="7.7" height="33" rx="3.5" transform="skewX(-17)" transform-origin="19.3 28"/><rect x="32.8" y="11.5" width="7.7" height="33" rx="3.5" transform="skewX(17)" transform-origin="36.6 28"/><rect x="19.3" y="29" width="17.4" height="6" rx="3"/></g></svg></div>
+  <div class="text">
+    <h1>Agent<span>Dock</span></h1>
+    <p class="tag">One canvas for the official Claude Code and Codex CLIs,<br>on your own machine.</p>
+    <div class="pills"><span class="pill p1">Claude Code</span><span class="pill p2">Codex</span><span class="pill p3">Rust + Vue 3</span></div>
+  </div>
+</div></body></html>

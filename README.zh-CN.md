@@ -1,21 +1,28 @@
-# AgentDock
-
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/banner-dark.svg">
-    <img src="docs/assets/banner-light.svg" alt="AgentDock — 在你自己的机器上，用一张画布驾驭官方 Claude Code 与 Codex CLI。">
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/banner-dark.png">
+    <img src="docs/assets/banner-light.png" alt="AgentDock：在你自己的机器上，用一张画布驾驭官方 Claude Code 与 Codex CLI。" width="100%">
   </picture>
 </p>
 
 <p align="center">
-  <a href="https://github.com/wnzzer/agentdock/actions/workflows/check.yml"><img src="https://github.com/wnzzer/agentdock/actions/workflows/check.yml/badge.svg" alt="CI 状态"></a>
+  <a href="https://github.com/wnzzer/agentdock/actions/workflows/check.yml"><img src="https://img.shields.io/github/actions/workflow/status/wnzzer/agentdock/check.yml?branch=main&style=flat-square&label=CI&color=0c8376" alt="CI 状态"></a>
+  <a href="https://github.com/wnzzer/agentdock/releases"><img src="https://img.shields.io/github/v/release/wnzzer/agentdock?style=flat-square&label=release&color=0c8376" alt="最新版本"></a>
   <a href="https://www.npmjs.com/package/@wnzzer/agentdock"><img src="https://img.shields.io/npm/v/%40wnzzer%2Fagentdock?style=flat-square&label=npm&color=0c8376" alt="npm 版本"></a>
   <img src="https://img.shields.io/badge/node-%E2%89%A5%2024-0c8376?style=flat-square" alt="Node.js 24 及以上">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-7760b5?style=flat-square" alt="平台：macOS、Linux 和 Windows">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="许可证：MIT"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-7760b5?style=flat-square" alt="许可证：MIT"></a>
 </p>
 
-<p align="center"><a href="README.md">English</a> · <b>简体中文</b></p>
+<p align="center">
+  <a href="#快速开始">快速开始</a> ·
+  <a href="#特色功能">特色功能</a> ·
+  <a href="#工作原理">工作原理</a> ·
+  <a href="#文档">文档</a> ·
+  <a href="README.md">English</a>
+</p>
+
+<br>
 
 AgentDock 是官方 **Claude Code** 与 **Codex** CLI 的浏览器工作台。它运行在代码所在的机器上，把 Agent 会话、文件、Git diff 和终端放进一块可分屏、可停靠的画布，任何浏览器（包括手机）都能访问。
 
@@ -27,21 +34,64 @@ AgentDock 是官方 **Claude Code** 与 **Codex** CLI 的浏览器工作台。�
 
 ## 特色功能
 
-- **用的就是官方客户端。** 每个会话都是你本机已安装的 `claude` 或 `codex`。登录、MCP 服务、斜杠命令和权限确认与在终端里一致，升级 CLI 就能用上新模型。
-- **边做边纠正。** <kbd>Enter</kbd> 引导进行中的这一轮而不打断，<kbd>Alt</kbd>+<kbd>Enter</kbd> 排到下一轮，**中断并发送**直接改方向。
-- **所有项目一张画布。** 不同仓库的会话、文件、diff 和终端随意分屏、叠标签、拖动停靠。关闭窗格不结束进程，换个浏览器打开布局照旧。
-- **每个会话一个分支。** 给会话指定分支，它就在独立的 git worktree 里工作，两个 Agent 可以同时开发两个功能。
-- **账号与端点彼此隔离。** 每个会话自选官方账号、本机登录、自定义网关或独立客户端环境，5 小时与本周剩余额度一目了然。还能把对话从 Claude Code 交给 Codex，或反过来。
-- **任何屏幕都能用。** 空间不够时分屏自动折叠成标签页；手机上有抽屉侧边栏、底部弹出菜单，长按代替右键。
+<table>
+  <tr>
+    <td width="33%" valign="top">
+      <b>用的就是官方客户端</b><br><br>
+      每个会话都是你本机已安装的 <code>claude</code> 或 <code>codex</code>。登录、MCP 服务、斜杠命令和权限确认与在终端里一致，升级 CLI 就能用上新模型。
+    </td>
+    <td width="33%" valign="top">
+      <b>边做边纠正</b><br><br>
+      <kbd>Enter</kbd> 引导进行中的这一轮而不打断，<kbd>Alt</kbd>+<kbd>Enter</kbd> 排到下一轮，<b>中断并发送</b>直接改方向。
+    </td>
+    <td width="33%" valign="top">
+      <b>所有项目一张画布</b><br><br>
+      不同仓库的会话、文件、diff 和终端随意分屏、叠标签、拖动停靠。关闭窗格不结束进程，换个浏览器打开布局照旧。
+    </td>
+  </tr>
+  <tr>
+    <td width="33%" valign="top">
+      <b>每个会话一个分支</b><br><br>
+      给会话指定分支，它就在独立的 Git worktree 里工作，两个 Agent 可以同时开发两个功能。
+    </td>
+    <td width="33%" valign="top">
+      <b>账号与端点彼此隔离</b><br><br>
+      每个会话自选官方账号、本机登录、自定义网关或独立客户端环境，5 小时与本周剩余额度一目了然。还能把对话从 Claude Code 交给 Codex，或反过来。
+    </td>
+    <td width="33%" valign="top">
+      <b>任何屏幕都能用</b><br><br>
+      空间不够时分屏自动折叠成标签页；手机上有抽屉侧边栏、底部弹出菜单，长按代替右键。
+    </td>
+  </tr>
+</table>
+
+<br>
 
 <p align="center">
-  <img src="docs/assets/screenshot-steer.zh-CN.png" alt="进行中的一轮里被引导的消息，以及打开的发送菜单。" width="58%">
+  <img src="docs/assets/screenshot-steer.zh-CN.png" alt="进行中的一轮里被引导的消息，以及打开的发送菜单。" width="64%">
   &nbsp;
-  <img src="docs/assets/screenshot-mobile.zh-CN.png" alt="手机上的 AgentDock：分屏折叠成标签页与输入框。" width="27%">
+  <img src="docs/assets/screenshot-mobile.zh-CN.png" alt="手机上的 AgentDock：分屏折叠成标签页与输入框。" width="32%">
 </p>
+<p align="center">
+  <sub>左：引导消息加入进行中的一轮，发送菜单已打开。右：同一张画布在手机上的样子。</sub>
+</p>
+
+<table>
+  <tr>
+    <td width="33%"><img src="docs/assets/screenshot-accounts.zh-CN.png" alt="官方账号，带 5 小时与本周额度环。"></td>
+    <td width="33%"><img src="docs/assets/screenshot-endpoints.zh-CN.png" alt="端点菜单：本机登录、团队网关或隔离环境，以及交给 Codex 继续。"></td>
+    <td width="33%"><img src="docs/assets/screenshot-models.zh-CN.png" alt="输入框里的模型菜单。"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>官方账号，5 小时与本周额度一目了然</sub></td>
+    <td align="center"><sub>端点：本机登录、网关或隔离环境</sub></td>
+    <td align="center"><sub>模型与思考深度在输入框下方切换</sub></td>
+  </tr>
+</table>
 
 <details>
 <summary><b>完整功能</b></summary>
+<br>
 
 **画布**：递归分屏、拖到边缘停靠、标签页，以及 `1:1` / `2×2` / `1:2:1` 预设；每个文件和 Git 窗格绑定各自的仓库；布局保存在服务端；到处都有右键菜单。
 
@@ -94,16 +144,22 @@ allowed-origins = ["https://dock.example.com"]
 
 ## 工作原理
 
-```text
-  浏览器 ── Vue 3 画布：会话 · 文件 · Git · 终端
-     │  HTTP + WebSocket，同源
-     ▼
-  agentdock-server (Rust) ─────────────── SQLite (WAL) · ~/.agentdock
-     ├─ 工作区 / 文件 / Git 服务
-     ├─ PTY 进程监管 ────────────────────▶ 宿主机 shell
-     └─ 原生桥接 (Node, JSONL)
-           ├─ codex app-server ──────────▶ 官方 Codex
-           └─ claude stream-json ────────▶ 官方 Claude Code
+```mermaid
+flowchart LR
+  browser["<b>浏览器</b><br/>Vue 3 画布<br/>会话 · 文件 · Git · 终端"]
+  server["<b>agentdock-server</b> · Rust<br/>工作区 · 文件 · Git<br/>鉴权 · PTY 进程监管"]
+  db[("SQLite<br/>~/.agentdock")]
+  bridge["<b>原生桥接</b> · Node<br/>JSONL"]
+  claude["claude<br/>stream-json"]
+  codex["codex<br/>app-server"]
+  shell["宿主机 shell"]
+
+  browser <-- "HTTP + WebSocket<br/>同源" --> server
+  server --- db
+  server --> shell
+  server <--> bridge
+  bridge <--> claude
+  bridge <--> codex
 ```
 
 Rust 服务端负责协议、鉴权、持久化和进程监管，自身不运行 Agent 循环；Node 桥接把各客户端的官方接口映射为会话事件。

@@ -1,21 +1,28 @@
-# AgentDock
-
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/banner-dark.svg">
-    <img src="docs/assets/banner-light.svg" alt="AgentDock — one canvas for the official Claude Code and Codex CLIs, on your own machine.">
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/banner-dark.png">
+    <img src="docs/assets/banner-light.png" alt="AgentDock: one canvas for the official Claude Code and Codex CLIs, on your own machine." width="100%">
   </picture>
 </p>
 
 <p align="center">
-  <a href="https://github.com/wnzzer/agentdock/actions/workflows/check.yml"><img src="https://github.com/wnzzer/agentdock/actions/workflows/check.yml/badge.svg" alt="CI status"></a>
+  <a href="https://github.com/wnzzer/agentdock/actions/workflows/check.yml"><img src="https://img.shields.io/github/actions/workflow/status/wnzzer/agentdock/check.yml?branch=main&style=flat-square&label=CI&color=0c8376" alt="CI status"></a>
+  <a href="https://github.com/wnzzer/agentdock/releases"><img src="https://img.shields.io/github/v/release/wnzzer/agentdock?style=flat-square&label=release&color=0c8376" alt="Latest release"></a>
   <a href="https://www.npmjs.com/package/@wnzzer/agentdock"><img src="https://img.shields.io/npm/v/%40wnzzer%2Fagentdock?style=flat-square&label=npm&color=0c8376" alt="npm version"></a>
   <img src="https://img.shields.io/badge/node-%E2%89%A5%2024-0c8376?style=flat-square" alt="Node.js 24 or newer">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-7760b5?style=flat-square" alt="Platforms: macOS, Linux and Windows">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License: MIT"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-7760b5?style=flat-square" alt="License: MIT"></a>
 </p>
 
-<p align="center"><b>English</b> · <a href="README.zh-CN.md">简体中文</a></p>
+<p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#highlights">Highlights</a> ·
+  <a href="#how-it-works">How it works</a> ·
+  <a href="#documentation">Documentation</a> ·
+  <a href="README.zh-CN.md">简体中文</a>
+</p>
+
+<br>
 
 AgentDock is a browser workspace for the official **Claude Code** and **Codex** CLIs. It runs where your code lives and puts agent sessions, files, Git diffs and terminals on one canvas you can split and dock, from any browser, phone included.
 
@@ -27,21 +34,64 @@ It has no agent of its own: Codex runs through its official `app-server` and Cla
 
 ## Highlights
 
-- **The real clients.** Every session is the `claude` or `codex` you already have installed. Your sign-in, MCP servers, slash commands and permission prompts behave as in the terminal, and new models appear as soon as you upgrade the CLI.
-- **Steer while it works.** <kbd>Enter</kbd> steers the running turn without stopping it, <kbd>Alt</kbd>+<kbd>Enter</kbd> queues the next turn, and *Interrupt and send* changes course.
-- **Every project on one canvas.** Split, tab and dock sessions, files, diffs and terminals from different repositories. Closing a pane never ends its process, and the layout follows you to any browser.
-- **One branch per session.** Give a session its own branch and it works in a git worktree, so two agents can build two features at once.
-- **Accounts and endpoints, kept apart.** Each session picks an official account, the host's sign-in, a custom gateway or an isolated client home, with remaining 5-hour and weekly quota at a glance. Hand a conversation from Claude Code to Codex, or back.
-- **Any screen.** Splits fold into tabs when space runs out. On a phone you get a drawer sidebar, bottom-sheet menus and long-press for right-click.
+<table>
+  <tr>
+    <td width="33%" valign="top">
+      <b>The real clients</b><br><br>
+      Every session is the <code>claude</code> or <code>codex</code> you already have installed. Sign-in, MCP servers, slash commands and permission prompts behave as in the terminal, and new models appear as soon as you upgrade the CLI.
+    </td>
+    <td width="33%" valign="top">
+      <b>Steer while it works</b><br><br>
+      <kbd>Enter</kbd> steers the running turn without stopping it, <kbd>Alt</kbd>+<kbd>Enter</kbd> queues the next turn, and <i>Interrupt and send</i> changes course.
+    </td>
+    <td width="33%" valign="top">
+      <b>Every project on one canvas</b><br><br>
+      Split, tab and dock sessions, files, diffs and terminals from different repositories. Closing a pane never ends its process, and the layout follows you to any browser.
+    </td>
+  </tr>
+  <tr>
+    <td width="33%" valign="top">
+      <b>One branch per session</b><br><br>
+      Give a session its own branch and it works in a Git worktree, so two agents can build two features at once.
+    </td>
+    <td width="33%" valign="top">
+      <b>Accounts and endpoints, kept apart</b><br><br>
+      Each session picks an official account, the host's sign-in, a custom gateway or an isolated client home, with remaining 5-hour and weekly quota at a glance. Hand a conversation from Claude Code to Codex, or back.
+    </td>
+    <td width="33%" valign="top">
+      <b>Any screen</b><br><br>
+      Splits fold into tabs when space runs out. On a phone you get a drawer sidebar, bottom-sheet menus and long-press for right-click.
+    </td>
+  </tr>
+</table>
+
+<br>
 
 <p align="center">
-  <img src="docs/assets/screenshot-steer.png" alt="A steered message in the middle of a running turn, with the send menu open." width="58%">
+  <img src="docs/assets/screenshot-steer.png" alt="A steered message in the middle of a running turn, with the send menu open." width="64%">
   &nbsp;
-  <img src="docs/assets/screenshot-mobile.png" alt="AgentDock on a phone: the split folded into tabs and the composer." width="27%">
+  <img src="docs/assets/screenshot-mobile.png" alt="AgentDock on a phone: the split folded into tabs and the composer." width="32%">
 </p>
+<p align="center">
+  <sub>Left: a steered message joins the running turn, with the send menu open. Right: the same canvas on a phone.</sub>
+</p>
+
+<table>
+  <tr>
+    <td width="33%"><img src="docs/assets/screenshot-accounts.png" alt="Official accounts with 5-hour and weekly quota rings."></td>
+    <td width="33%"><img src="docs/assets/screenshot-endpoints.png" alt="The endpoint menu: host sign-in, a team gateway or an isolated client home, and hand-off to Codex."></td>
+    <td width="33%"><img src="docs/assets/screenshot-models.png" alt="The model menu in the message box."></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Official accounts, with 5-hour and weekly quota</sub></td>
+    <td align="center"><sub>Endpoints: host sign-in, gateway or isolated home</sub></td>
+    <td align="center"><sub>Model and thinking depth from the message box</sub></td>
+  </tr>
+</table>
 
 <details>
 <summary><b>All features</b></summary>
+<br>
 
 **Canvas**: recursive splits, drag-to-edge docking, tabs and `1:1` / `2×2` / `1:2:1` presets; each file and Git pane stays bound to its repository; layouts saved on the server; right-click menus throughout.
 
@@ -94,16 +144,22 @@ To reach it from another device, prefer **SSH forwarding** (`ssh -L 28789:127.0.
 
 ## How it works
 
-```text
-  Browser ── Vue 3 canvas: sessions · files · Git · terminals
-     │  HTTP + WebSocket, same origin
-     ▼
-  agentdock-server (Rust) ─────────────── SQLite (WAL) · ~/.agentdock
-     ├─ workspace / file / Git services
-     ├─ PTY supervisor ──────────────────▶ host shell
-     └─ native bridge (Node, JSONL)
-           ├─ codex app-server ──────────▶ official Codex
-           └─ claude stream-json ────────▶ official Claude Code
+```mermaid
+flowchart LR
+  browser["<b>Browser</b><br/>Vue 3 canvas<br/>sessions · files · Git · terminals"]
+  server["<b>agentdock-server</b> · Rust<br/>workspaces · files · Git<br/>auth · PTY supervisor"]
+  db[("SQLite<br/>~/.agentdock")]
+  bridge["<b>Native bridge</b> · Node<br/>JSONL"]
+  claude["claude<br/>stream-json"]
+  codex["codex<br/>app-server"]
+  shell["Host shell"]
+
+  browser <-- "HTTP + WebSocket<br/>same origin" --> server
+  server --- db
+  server --> shell
+  server <--> bridge
+  bridge <--> claude
+  bridge <--> codex
 ```
 
 The Rust server handles the protocol, auth, persistence and process supervision, and runs no agent loop itself. The Node bridge maps each client's official interface to session events.
