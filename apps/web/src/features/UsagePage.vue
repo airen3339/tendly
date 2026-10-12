@@ -59,6 +59,7 @@ const level = (percent: number) => percent >= 90 ? 'danger' : percent >= 70 ? 'w
 const resetText = (row: Allowance) => row.resets_at === null ? t('Reset · starts again with your next message') : t('Resets in {time}', { time: formatDuration(Math.max(0, row.resets_at - Date.now() / 1000)) });
 /** Why there is no estimate of what is left: nothing used yet gives nothing to scale from. */
 const noEstimate = (row: Allowance) => row.used_percent <= 0 ? t('Nothing used yet, so nothing to estimate from') : row.used_tokens === 0 ? t('No usage logged on this host in this window') : '';
+const estimateHint = (row: Allowance) => row.estimated_remaining_tokens === null ? undefined : row.low_confidence ? t('Too little used yet for a firm estimate.') : t('The largest this window has been seen to hold, times the share not yet used: use on other devices is counted.');
 
 /** The ten figures: what it cost, what it was made of, and how much work it was. */
 const tiles = computed(() => {
@@ -190,11 +191,15 @@ const insights = computed(() => {
       <section v-if="accounts.length" class="quota-row" :aria-label="t('Subscription allowance')">
         <article v-for="account in accounts" :key="account.id" class="quota-card">
           <header><ProviderIcon :provider="account.provider" :size="15" /><strong>{{ account.name }}</strong><span v-if="account.plan" class="plan">{{ account.plan }}</span></header>
-          <div v-for="row in account.windows" :key="row.window" class="quota-line" :title="resetText(row)">
+          <div v-for="row in account.windows" :key="row.window" :class="['quota-line', level(row.used_percent)]">
             <span class="quota-window">{{ windowShort(row) }}</span>
-            <span :class="['quota-bar', level(row.used_percent)]"><i :style="{ width: Math.min(100, row.used_percent) + '%' }" /></span>
-            <span class="quota-percent">{{ Math.round(row.used_percent) }}%</span>
-            <small class="quota-left"><template v-if="row.estimated_remaining_tokens !== null">{{ t('≈ {tokens} left', { tokens: formatTokens(row.estimated_remaining_tokens) }) }}<template v-if="row.estimated_remaining_cost !== null"> · {{ formatCost(row.estimated_remaining_cost) }}</template><template v-if="row.low_confidence"> ?</template> · </template><template v-else-if="noEstimate(row)">{{ noEstimate(row) }} · </template>{{ resetText(row) }}<template v-if="row.observed_at"> · {{ t('from the session log, {time} ago', { time: formatDuration(Math.max(0, Date.now() / 1000 - row.observed_at)) }) }}</template></small>
+            <span class="quota-amount" :title="estimateHint(row)">
+              <template v-if="row.estimated_remaining_tokens !== null"><strong>{{ row.low_confidence ? '~' : '' }}{{ formatTokens(row.estimated_remaining_tokens) }}</strong> {{ t('left') }}<em v-if="row.estimated_remaining_cost !== null">{{ formatCost(row.estimated_remaining_cost) }}</em></template>
+              <template v-else>{{ noEstimate(row) || t('Unavailable') }}</template>
+            </span>
+            <span class="quota-percent">{{ Math.max(0, 100 - Math.round(row.used_percent)) }}%</span>
+            <span class="quota-bar"><i :style="{ width: Math.max(0, 100 - row.used_percent) + '%' }" /></span>
+            <small class="quota-meta">{{ resetText(row) }}<template v-if="row.low_confidence && row.estimated_remaining_tokens !== null"> · {{ t('rough estimate') }}</template><template v-if="row.observed_at"> · {{ t('from the session log, {time} ago', { time: formatDuration(Math.max(0, Date.now() / 1000 - row.observed_at)) }) }}</template></small>
           </div>
         </article>
       </section>
@@ -308,12 +313,16 @@ const insights = computed(() => {
 .quota-card header{display:flex;align-items:center;gap:8px;font-size:var(--text-sm)}
 .quota-card header strong{font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .plan{margin-left:auto;padding:0 8px;border-radius:var(--radius-full);background:var(--fill);color:var(--ink-soft);font-size:var(--text-xs);line-height:20px}
-.quota-line{display:grid;grid-template-columns:24px minmax(0,1fr) 40px;align-items:center;gap:4px 8px;font-size:var(--text-xs);color:var(--muted)}
-.quota-left{grid-column:2 / 4;color:var(--muted)}
-.quota-bar{height:6px;border-radius:var(--radius-full);background:var(--fill);overflow:hidden}
-.quota-bar i{display:block;height:100%;border-radius:inherit;background:var(--ink-soft)}
-.quota-bar.warn i{background:var(--warn)}.quota-bar.danger i{background:var(--danger)}
-.quota-percent{text-align:right;color:var(--ink)}
+.quota-line{--quota:var(--teal);display:grid;grid-template-columns:24px minmax(0,1fr) auto;align-items:baseline;gap:4px 8px;font-size:var(--text-xs);color:var(--muted)}
+.quota-line.warn{--quota:var(--warn)}.quota-line.danger{--quota:var(--danger)}
+.quota-amount{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.quota-amount strong{font-size:var(--text-base);font-weight:650;color:var(--ink)}
+.quota-amount em{font-style:normal;margin-left:8px;color:var(--ink-soft)}
+.quota-percent{font-weight:600;color:var(--quota)}
+.quota-bar{grid-column:2 / 4;height:6px;border-radius:var(--radius-full);background:var(--fill);overflow:hidden}
+.quota-bar i{display:block;height:100%;border-radius:inherit;background:var(--quota);transition:width .6s ease}
+.quota-meta{grid-column:2 / 4}
+@media(prefers-reduced-motion:reduce){.quota-bar i{transition:none}}
 .filters{display:flex;flex-direction:column;gap:8px}
 .filter-row{display:flex;align-items:center;flex-wrap:wrap;gap:6px}
 .filter-label{display:inline-flex;align-items:center;gap:5px;width:64px;font-size:var(--text-xs);color:var(--muted)}
