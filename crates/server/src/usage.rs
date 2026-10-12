@@ -805,8 +805,11 @@ async fn put_prices(
 ///
 /// The provider reports only a percentage of the window used. Dividing what
 /// this host's logs show the account spent in the same window by that
-/// percentage estimates the whole window; what is left follows. It counts only
-/// use from this host, so an account also used elsewhere reads optimistic.
+/// percentage gives the window's size -- too small when the account is also
+/// used elsewhere, since the percentage counts that use and the logs do not.
+/// Every such reading is therefore a lower bound, and the largest of the last
+/// few windows is the best one: it is remembered, and what is left is that
+/// size times the share not yet used, whoever used the rest.
 #[derive(Serialize)]
 pub struct Allowance {
     pub account_id: String,
@@ -856,24 +859,97 @@ fn epoch(value: &Value) -> Option<i64> {
     }
 }
 
+/// What one window was seen to hold at least, in tokens and in API cost.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+struct Learned {
+    resets_at: i64,
+    tokens: u64,
+    cost: f64,
+}
+
+/// Learned sizes by account, window and plan: a new plan starts over.
+type Capacities = HashMap<String, Vec<Learned>>;
+
+/// Windows remembered per account: enough to have seen one used alone, few
+/// enough that a provider's change of limits is forgotten within a month.
+const LEARNED_WINDOWS: usize = 4;
+
+fn capacities_path(state_dir: &Path) -> PathBuf {
+    state_dir.join("allowance-capacity.json")
+}
+
+/// The window size a reading proves, if it is one to trust. Below a tenth
+/// used, a percentage rounded to the unit is too coarse to divide by; half a
+/// point is added so that the rounding never makes the bound too large.
+fn window_size(used_percent: f64, used_tokens: u64, used_cost: f64) -> Option<(u64, f64)> {
+    if used_percent < 10.0 || used_tokens == 0 {
+        return None;
+    }
+    let share = ((used_percent + 0.5) / 100.0).min(1.0);
+    Some(((used_tokens as f64 / share) as u64, used_cost / share))
+}
+
+/// Keep the largest size seen for each window, and only the latest windows.
+/// A window's reset time drifts by seconds between readings.
+fn learn(history: &mut Vec<Learned>, resets_at: i64, (tokens, cost): (u64, f64)) {
+    match history
+        .iter_mut()
+        .find(|seen| (seen.resets_at - resets_at).abs() < 600)
+    {
+        Some(seen) => {
+            seen.tokens = seen.tokens.max(tokens);
+            seen.cost = seen.cost.max(cost);
+        }
+        None => history.push(Learned {
+            resets_at,
+            tokens,
+            cost,
+        }),
+    }
+    history.sort_by_key(|seen| seen.resets_at);
+    let excess = history.len().saturating_sub(LEARNED_WINDOWS);
+    history.drain(..excess);
+}
+
+fn capacity(history: &[Learned]) -> Option<(u64, f64)> {
+    history
+        .iter()
+        .map(|seen| (seen.tokens, seen.cost))
+        .reduce(|a, b| (a.0.max(b.0), a.1.max(b.1)))
+}
+
+/// The window's size and what is left of it. With a learned size, what is
+/// left is its unused share; without one, the current reading is all there
+/// is, and it is extrapolated from the use this host saw, flagged as unsure.
 pub(crate) fn estimate(
     used_percent: f64,
     used_tokens: u64,
     used_cost: f64,
+    learned: Option<(u64, f64)>,
 ) -> (Option<u64>, Option<u64>, Option<f64>, Option<f64>, bool) {
+    if let Some((tokens, cost)) = learned {
+        let left = (1.0 - used_percent / 100.0).clamp(0.0, 1.0);
+        let cost = (cost > 0.0).then_some(cost);
+        return (
+            Some(tokens),
+            Some((tokens as f64 * left) as u64),
+            cost,
+            cost.map(|cost| cost * left),
+            false,
+        );
+    }
     if used_percent <= 0.0 || used_tokens == 0 {
         return (None, None, None, None, true);
     }
     let share = (used_percent / 100.0).min(1.0);
     let total = (used_tokens as f64 / share) as u64;
     let total_cost = (used_cost > 0.0).then(|| used_cost / share);
-    let low = used_percent < 5.0 || used_tokens < 100_000;
     (
         Some(total),
         Some(total.saturating_sub(used_tokens)),
         total_cost,
         total_cost.map(|cost| (cost - used_cost).max(0.0)),
-        low,
+        true,
     )
 }
 
@@ -881,7 +957,18 @@ async fn allowance(State(state): State<AppState>) -> Result<Json<Vec<Allowance>>
     let Json(accounts) = crate::accounts::list(State(state.clone())).await?;
     let prices = load_prices(&state.state_dir);
     let now = Utc::now().timestamp();
+    let path = capacities_path(&state.state_dir);
     let rows = tokio::task::spawn_blocking(move || {
+        // One request at a time reads, updates and writes the learned sizes.
+        static LEARNING: Mutex<()> = Mutex::new(());
+        let _learning = LEARNING
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut learned: Capacities = std::fs::read(&path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default();
+        let before = learned.clone();
         let mut rows = Vec::new();
         for account in accounts {
             let provider = account.provider;
@@ -939,13 +1026,26 @@ async fn allowance(State(state): State<AppState>) -> Result<Json<Vec<Allowance>>
                     tokens += call.tokens.total();
                     cost += prices.cost(call).unwrap_or(0.0);
                 }
+                let plan = account.plan.clone().or_else(|| logged_plan.clone());
+                let history = learned
+                    .entry(format!(
+                        "{}/{window}/{}",
+                        account.id,
+                        plan.as_deref().unwrap_or("")
+                    ))
+                    .or_default();
+                if let (Some(resets_at), Some(size)) =
+                    (resets_at, window_size(used_percent, tokens, cost))
+                {
+                    learn(history, resets_at, size);
+                }
                 let (total, remaining, total_cost, remaining_cost, low) =
-                    estimate(used_percent, tokens, cost);
+                    estimate(used_percent, tokens, cost, capacity(history));
                 rows.push(Allowance {
                     account_id: account.id.to_string(),
                     account: account.name.clone(),
                     provider,
-                    plan: account.plan.clone().or_else(|| logged_plan.clone()),
+                    plan,
                     window,
                     window_minutes: minutes,
                     used_percent,
@@ -961,6 +1061,12 @@ async fn allowance(State(state): State<AppState>) -> Result<Json<Vec<Allowance>>
                     observed_at,
                 });
             }
+        }
+        learned.retain(|_, history| !history.is_empty());
+        if learned != before
+            && let Ok(bytes) = serde_json::to_vec(&learned)
+        {
+            let _ = std::fs::write(&path, bytes);
         }
         rows
     })
@@ -1239,16 +1345,51 @@ mod tests {
     }
 
     #[test]
-    fn the_rest_of_a_window_is_extrapolated_from_what_was_spent_in_it() {
-        let (total, remaining, total_cost, remaining_cost, low) = estimate(25.0, 2_000_000, 10.0);
+    fn without_a_learned_size_the_window_is_extrapolated_and_unsure() {
+        let (total, remaining, total_cost, remaining_cost, low) =
+            estimate(25.0, 2_000_000, 10.0, None);
         assert_eq!((total, remaining), (Some(8_000_000), Some(6_000_000)));
         assert_eq!((total_cost, remaining_cost), (Some(40.0), Some(30.0)));
-        assert!(!low);
-        assert!(
-            estimate(2.0, 2_000_000, 1.0).4,
-            "two percent is too little to extrapolate from"
+        assert!(low);
+        assert_eq!(estimate(0.0, 10, 0.0, None).0, None);
+    }
+
+    #[test]
+    fn what_is_left_is_the_unused_share_of_the_largest_window_seen() {
+        let mut history = Vec::new();
+        assert_eq!(window_size(5.0, 2_000_000, 1.0), None, "too coarse");
+        // Used alone: 2M at 20% shows a window of about 9.8M.
+        learn(
+            &mut history,
+            1_000,
+            window_size(19.5, 1_950_000, 9.75).unwrap(),
         );
-        assert_eq!(estimate(0.0, 10, 0.0).0, None);
+        // The next window, shared with another device: the logs see less.
+        learn(
+            &mut history,
+            20_000,
+            window_size(39.5, 1_000_000, 5.0).unwrap(),
+        );
+        // The same window read again, its reset a few seconds off.
+        learn(
+            &mut history,
+            20_030,
+            window_size(49.5, 1_100_000, 5.5).unwrap(),
+        );
+        assert_eq!(history.len(), 2);
+        let size = capacity(&history).unwrap();
+        assert_eq!(size, (9_750_000, 48.75));
+        // Half used, whoever used it: half the window is left.
+        let (total, remaining, _, remaining_cost, low) = estimate(50.0, 300_000, 1.0, Some(size));
+        assert_eq!((total, remaining), (Some(9_750_000), Some(4_875_000)));
+        assert_eq!(remaining_cost, Some(24.375));
+        assert!(!low);
+        // A fresh window, nothing logged here yet, is all left.
+        assert_eq!(estimate(0.0, 0, 0.0, Some(size)).1, Some(9_750_000));
+        for at in 2..10 {
+            learn(&mut history, at * 20_000, (1, 0.0));
+        }
+        assert_eq!(history.len(), LEARNED_WINDOWS);
     }
 
     #[test]
