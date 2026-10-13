@@ -471,18 +471,42 @@ test('nested, counted and timed tool events are well-formed only with sane value
   assert.ok(!isChatEvent({ ...base, parent: '' }));
   assert.ok(!isChatEvent({ ...base, stats: { cost: 1 } }));
   assert.ok(!isChatEvent({ ...base, at: 'now' }));
-  assert.ok(isChatEvent({ type: 'settings', subagent_summaries: true }));
-  assert.ok(!isChatEvent({ type: 'settings', subagent_summaries: 'on' }));
-  assert.equal(conversationView([{ type: 'settings', subagent_summaries: true }]).subagentSummaries, true);
 });
 
 test('a subagent keeps the description it was started with after its input is replaced', () => {
   const view = conversationView([
     { type: 'tool', id: 'a', name: 'Agent', status: 'running', text: '{"description":"Scan the bridge","prompt":"…"}' },
     { type: 'tool', id: 'a', name: 'Agent', status: 'completed', text: 'Found three.' },
-    { type: 'tool', id: 'b', name: 'Bash', status: 'running', text: '{"description":"not a subagent"}' },
+    // A result that happens to be JSON is never read as a description.
+    { type: 'tool', id: 'b', name: 'Read', status: 'completed', text: '{"description":"from the result"}' },
   ]);
   assert.equal(view.items[0].label, 'Scan the bridge');
   assert.equal(view.items[0].text, 'Found three.');
   assert.equal(view.items[1].label, undefined);
+});
+
+test('every call is summed up from what its input already says', async () => {
+  const { toolLabel } = await import('./chat-model.ts');
+  assert.equal(toolLabel('{"command":"npm test","description":"Run the tests"}'), 'Run the tests');
+  assert.equal(toolLabel('{"command":"ls -la\\nrm x"}'), 'ls -la');
+  assert.equal(toolLabel('{"file_path":"/home/u/project/src/a.ts"}'), 'src/a.ts');
+  assert.equal(toolLabel('{"pattern":"TODO","path":"/repo/src"}'), 'TODO · repo/src');
+  assert.equal(toolLabel('{"url":"https://example.com/a"}'), 'example.com/a');
+  assert.equal(toolLabel('{}'), undefined);
+  assert.equal(toolLabel('not json'), undefined);
+});
+
+test('a call still running when its client exits is ended, not running for ever', () => {
+  const view = conversationView([
+    { type: 'tool', id: 'agent', name: 'Agent', status: 'running', text: '{}' },
+    { type: 'tool', id: 'inner', name: 'Bash', status: 'running', parent: 'agent' },
+    { type: 'tool', id: 'done', name: 'Read', status: 'completed', text: 'x' },
+    { type: 'exit' },
+    { type: 'ready' },
+  ]);
+  const [agent, done] = view.items;
+  assert.equal(agent.status, 'running');
+  assert.equal(agent.ended, true);
+  assert.equal(agent.children[0].ended, true);
+  assert.equal(done.ended, undefined);
 });

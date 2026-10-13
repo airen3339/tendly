@@ -1,4 +1,5 @@
 import { reactive } from 'vue';
+import { composeMessage, type Attachment } from './attachment-state';
 
 /**
  * Messages written while the agent is still working.
@@ -9,7 +10,12 @@ import { reactive } from 'vue';
  * the first one the moment the turn ends. Held per session in memory only: a
  * reload drops the queue rather than sending something the user no longer sees.
  */
-export interface QueuedMessage { id: string; text: string }
+/** Attachments wait with the words; a screenshot pasted mid-turn used to be
+ * refused here, and Enter then did nothing at all. */
+export interface QueuedMessage { id: string; text: string; attachments?: Attachment[] }
+
+/** What goes on the wire for a waiting message: its words, with its files named. */
+export function queuedContent(message: QueuedMessage) { return composeMessage(message.text, message.attachments ?? []); }
 
 const queues = reactive(new Map<string, QueuedMessage[]>());
 

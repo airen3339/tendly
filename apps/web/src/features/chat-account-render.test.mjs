@@ -27,7 +27,9 @@ test('real chat SFC renders a mobile composer, provider identity and endpoint co
   try {
     const html = await render(ChatSessionPane, { session: fixture(), profiles: [{ id: 'codex-profile', name: 'Codex work', provider: 'codex' }, { id: 'claude-profile', name: 'Other client account', provider: 'claude_code' }] });
     assert.ok(html.includes('class="chat-composer"')); assert.ok(html.includes('aria-label="Message your agent"')); assert.ok(html.includes('aria-label="Send message"'));
-    assert.ok(html.includes('Codex work')); assert.ok(!html.includes('Other client account'));
+    // Another client's profile is offered only as a move to that client, never as this session's endpoint.
+    const elsewhere = html.indexOf('Switch to another client');
+    assert.ok(html.includes('Codex work')); assert.ok(elsewhere > 0 && html.indexOf('Other client account') > elsewhere);
     assert.ok(html.includes('provider-glyph'), 'the existing Codex provider identity is rendered'); assert.ok(html.includes('chat-floating-menu')); assert.ok(!html.includes('Open native client view'), 'structured bridges do not pretend to be a live PTY fallback');
     assert.equal(calls, 0);
   } finally { globalThis.fetch = savedFetch; }

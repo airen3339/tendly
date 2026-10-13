@@ -88,6 +88,24 @@ export function keepsSelection(models,selected,reported){
   if(selected==='default')return true;
   return reported.toLowerCase().includes(selected.replace(/\[.*\]$/,'').toLowerCase());
 }
+/**
+ * A few words on what a call does, from what its input already says: the
+ * description the agent gave it, else the command, pattern, file or query. The
+ * interface reads the same fields for its cards (chat-model.ts toolLabel).
+ */
+export function callSummary(input){
+  if(!input||typeof input!=='object')return;
+  const text=key=>typeof input[key]==='string'&&input[key].trim()?input[key].trim():undefined;
+  const short=line=>{const first=line.split('\n')[0];return first.length>80?`${first.slice(0,79)}\u2026`:first;};
+  const file=path=>path.split(/[\\/]/).filter(Boolean).slice(-2).join('/');
+  const path=text('file_path')??text('notebook_path')??text('path'),pattern=text('pattern'),url=text('url');
+  if(text('description'))return short(text('description'));
+  if(text('command'))return short(text('command'));
+  if(pattern)return short(path?`${pattern} \u00b7 ${file(path)}`:pattern);
+  if(path)return file(path);
+  if(text('query'))return short(text('query'));
+  if(url)return short(url.replace(/^https?:\/\//,''));
+}
 /** Claude Code's stream-json control channel, rather than JSON-RPC. */
 const controlRequest=(id,method,params)=>({type:'control_request',request_id:id,request:{subtype:method,...params}});
 export class ClaudeChat extends ChatBase {
@@ -100,7 +118,7 @@ export class ClaudeChat extends ChatBase {
   /** The last progress summary logged per tool call. @type {Map<string, string> | undefined} */
   summaryOf;
   async initialize() {
-    this.launch=claudeLaunch(this.job);this.tools=new Map();this.summaries=false;
+    this.launch=claudeLaunch(this.job);this.tools=new Map();
     this.port=new NativeProcess(this.job.program,this.launch.args,this.job.cwd,message=>this.notification(message),message=>this.fatal(message),()=>this.fatal('Claude Code exited.'),{...this.options,frame:controlRequest});
     // This drives the user's installed native CLI, not SDK query() or an OAuth/token proxy.
     // Without forwardSubagentText the client sends only a subagent's tool calls,
@@ -146,15 +164,6 @@ export class ClaudeChat extends ChatBase {
    * that was asked for -- they differ when the client declines.
    */
   get permissionModes(){return ['ask','plan','accept_edits','danger'];}
-  /**
-   * Progress summaries cost a short model call about every 30 seconds per
-   * running subagent, so they are off until asked for. The client reads this
-   * option on every initialize, which is what lets it change mid-session.
-   */
-  async setSummaries(message) {
-    await this.port.rpc('initialize',{agentProgressSummaries:message.enabled});
-    this.summaries=message.enabled;this.settings(this.models,this.model,this.effort);
-  }
   async setPermissionMode(message) {
     if(this.active)throw Error('Wait for the current turn to finish before changing permissions.');
     const mode=CLAUDE_PERMISSION[message.mode];
@@ -298,7 +307,7 @@ export class ClaudeChat extends ChatBase {
     if(message.type==='assistant'){
       for(const block of blocks){
         if(block.type==='text'&&block.text?.trim())lines.push(block.text.trim());
-        else if(block.type==='tool_use'){lines.push(`\u2192 ${clip(block.name??'tool',120)}`);this.tool(block,'running',parent);}
+        else if(block.type==='tool_use'){const what=callSummary(block.input);lines.push(`\u2192 ${clip(block.name??'tool',120)}${what?` \u00b7 ${what}`:''}`);this.tool(block,'running',parent);}
       }
     }else if(message.type==='user'){
       for(const result of blocks)if(result.type==='tool_result'&&typeof result.tool_use_id==='string'&&this.tools.has(result.tool_use_id))this.result(result,parent);
@@ -331,7 +340,9 @@ export class ClaudeChat extends ChatBase {
     }else if(message.subtype==='task_updated'){
       if(message.patch?.is_backgrounded)this.background.add(id);
     }else if(message.subtype==='task_progress'){
-      // Progress repeats its summary until the subagent moves on; the log keeps one.
+      // A one-line status the client sends unasked for some tasks (a
+      // backgrounded MCP call's own word on itself). It repeats until it
+      // changes; the log keeps one.
       const summary=message.summary===this.summaryOf.get(id)?undefined:message.summary;
       if(typeof summary==='string')this.summaryOf.set(id,summary);
       card('running',summary);

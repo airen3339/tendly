@@ -47,10 +47,13 @@ export function descendants(tool: ToolItem, depth = 1): Array<{ tool: ToolItem; 
   return (tool.children ?? []).flatMap(child => [{ tool: child, depth }, ...descendants(child, depth + 1)]);
 }
 
+/** Running, and started by the client that is still there to finish it. */
+export const isLive = (tool: ToolItem) => tool.status === 'running' && !tool.ended;
+
 /** Subagents still at work anywhere in the conversation, outermost first. */
 export function runningSubagents(items: readonly ChatItem[]): ToolItem[] {
   const found: ToolItem[] = [];
-  const visit = (tool: ToolItem) => { if (tool.status === 'running' && SUBAGENT_TOOLS.has(tool.name)) found.push(tool); tool.children?.forEach(visit); };
+  const visit = (tool: ToolItem) => { if (isLive(tool) && SUBAGENT_TOOLS.has(tool.name)) found.push(tool); tool.children?.forEach(visit); };
   for (const item of items) if (item.type === 'tool') visit(item);
   return found;
 }
@@ -60,7 +63,7 @@ export function runningSubagents(items: readonly ChatItem[]): ToolItem[] {
  * while its child runs on leaves the child a row of its own. */
 export function subagentRoots(items: readonly ChatItem[]): ToolItem[] {
   const found: ToolItem[] = [];
-  const visit = (tool: ToolItem) => { if (tool.status === 'running' && SUBAGENT_TOOLS.has(tool.name)) found.push(tool); else tool.children?.forEach(visit); };
+  const visit = (tool: ToolItem) => { if (isLive(tool) && SUBAGENT_TOOLS.has(tool.name)) found.push(tool); else tool.children?.forEach(visit); };
   for (const item of items) if (item.type === 'tool') visit(item);
   return found;
 }
@@ -78,7 +81,7 @@ export const STALL_MS = 5 * 60_000;
 /** A running card the client has said nothing about for a while. Only cards
  * that report progress at all carry `at`; the rest are never called stalled. */
 export function stalledFor(tool: ToolItem, now: number): number | undefined {
-  if (tool.status !== 'running' || tool.at === undefined) return;
+  if (!isLive(tool) || tool.at === undefined) return;
   const quiet = now - tool.at;
   return quiet >= STALL_MS ? quiet : undefined;
 }

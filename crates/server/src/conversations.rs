@@ -40,9 +40,6 @@ pub struct ChatManager {
     /// saved preference. A choice made while the client is stopped waits here
     /// instead of being refused.
     permissions: Arc<Mutex<HashMap<SessionId, String>>>,
-    /// Whether each session asked for subagent progress summaries, kept for
-    /// the same reason as the permission mode: the client forgets on restart.
-    summaries: Arc<Mutex<HashMap<SessionId, bool>>>,
 }
 pub struct ChatRuntime {
     commands: mpsc::Sender<Value>,
@@ -134,19 +131,6 @@ impl ChatManager {
             .expect("chat permissions")
             .insert(id, mode.to_owned());
     }
-    fn chosen_summaries(&self, id: SessionId) -> Option<bool> {
-        self.summaries
-            .lock()
-            .expect("chat summaries")
-            .get(&id)
-            .copied()
-    }
-    fn choose_summaries(&self, id: SessionId, enabled: bool) {
-        self.summaries
-            .lock()
-            .expect("chat summaries")
-            .insert(id, enabled);
-    }
     fn channel(&self, id: SessionId) -> broadcast::Sender<Value> {
         self.channels
             .lock()
@@ -194,10 +178,6 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/api/sessions/{id}/conversation/permission",
             post(select_permission),
-        )
-        .route(
-            "/api/sessions/{id}/conversation/summaries",
-            post(select_summaries),
         )
         .route("/api/sessions/{id}/configuration", patch(configuration))
         .route("/api/sessions/{id}/chat/ws", get(socket))
@@ -381,12 +361,6 @@ pub async fn start_locked(state: &AppState, session: &Session) -> Result<Arc<Cha
     if let Some(mode) = mode {
         let _ = runtime
             .send(json!({"type": "permission", "mode": mode}))
-            .await;
-    }
-    // Only a choice someone made is reapplied; the default is the client's own.
-    if let Some(enabled) = state.chats.chosen_summaries(session.id) {
-        let _ = runtime
-            .send(json!({"type": "summaries", "enabled": enabled}))
             .await;
     }
     db(state, move |s| {
@@ -589,11 +563,6 @@ struct PermissionInput {
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct SummariesInput {
-    enabled: bool,
-}
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct ModelInput {
     #[serde(default)]
     model: Option<String>,
@@ -676,28 +645,6 @@ async fn select_permission(
     Ok(accepted(None, false))
 }
 
-/// Subagent progress summaries, which only Claude Code writes. Each costs a
-/// short model call, so the choice is the user's, made per session.
-async fn select_summaries(
-    State(state): State<AppState>,
-    Path(id): Path<SessionId>,
-    Json(input): Json<SummariesInput>,
-) -> Result<CommandAck> {
-    let _guard = state.operations.lock().await;
-    session_record(&state, id).await?;
-    state.chats.choose_summaries(id, input.enabled);
-    let Some(runtime) = state.chats.get(id).filter(|r| r.running()) else {
-        return Ok((
-            StatusCode::ACCEPTED,
-            Json(json!({"accepted":true,"id":null,"duplicate":false,"pending":true})),
-        ));
-    };
-    runtime
-        .send(json!({"type": "summaries", "enabled": input.enabled}))
-        .await?;
-    Ok(accepted(None, false))
-}
-
 /// Absent means "leave the depth as it is". A `null` would reach the bridge as a
 /// present-but-unusable value and be rejected, so the field is omitted entirely.
 fn model_command(model: Option<&str>, effort: Option<&str>) -> Value {
@@ -747,10 +694,6 @@ mod event_whitelist_tests {
         ] {
             assert!(normalize_event(bad.clone()).is_none(), "{bad}");
         }
-        let settings = normalize_event(json!({"type":"settings","subagent_summaries":true}))
-            .expect("the summary switch is a setting");
-        assert_eq!(settings["subagent_summaries"], true);
-        assert!(normalize_event(json!({"type":"settings","subagent_summaries":"yes"})).is_none());
     }
 
     #[test]
@@ -1150,7 +1093,6 @@ fn normalize_event(mut value: Value) -> Option<Value> {
             "models",
             "permission_mode",
             "permission_modes",
-            "subagent_summaries",
         ],
         "cleared" => &["type"],
         "message" => &["type", "id", "role", "text", "delta"],
@@ -1218,41 +1160,36 @@ fn normalize_event(mut value: Value) -> Option<Value> {
             let chars = |value: &Value, limit: usize| {
                 value.as_str().is_some_and(|v| v.chars().count() <= limit)
             };
-            object
-                .get("subagent_summaries")
-                .is_none_or(Value::is_boolean)
-                && object.get("model").is_none_or(|value| {
-                    value
-                        .as_str()
-                        .is_some_and(|v| !v.is_empty() && v.chars().count() <= 128)
-                })
-                && object.get("effort").is_none_or(|value| {
-                    value
-                        .as_str()
-                        .is_some_and(|v| providers::EFFORT_LEVELS.contains(&v))
-                })
-                && object.get("models").is_none_or(|value| {
-                    value.as_array().is_some_and(|rows| {
-                        rows.len() <= 64
-                            && rows.iter().all(|row| {
-                                row.get("id").is_some_and(|v| {
-                                    v.as_str().is_some_and(|v| !v.is_empty()) && chars(v, 128)
-                                }) && row.get("name").is_some_and(|v| chars(v, 128))
-                                    && row.get("description").is_none_or(|v| chars(v, 256))
-                                    && row.get("isDefault").is_none_or(Value::is_boolean)
-                                    && row.get("efforts").is_none_or(|v| {
-                                        v.as_array().is_some_and(|levels| {
-                                            levels.len() <= 16
-                                                && levels.iter().all(|level| {
-                                                    level.as_str().is_some_and(|level| {
-                                                        providers::EFFORT_LEVELS.contains(&level)
-                                                    })
+            object.get("model").is_none_or(|value| {
+                value
+                    .as_str()
+                    .is_some_and(|v| !v.is_empty() && v.chars().count() <= 128)
+            }) && object.get("effort").is_none_or(|value| {
+                value
+                    .as_str()
+                    .is_some_and(|v| providers::EFFORT_LEVELS.contains(&v))
+            }) && object.get("models").is_none_or(|value| {
+                value.as_array().is_some_and(|rows| {
+                    rows.len() <= 64
+                        && rows.iter().all(|row| {
+                            row.get("id").is_some_and(|v| {
+                                v.as_str().is_some_and(|v| !v.is_empty()) && chars(v, 128)
+                            }) && row.get("name").is_some_and(|v| chars(v, 128))
+                                && row.get("description").is_none_or(|v| chars(v, 256))
+                                && row.get("isDefault").is_none_or(Value::is_boolean)
+                                && row.get("efforts").is_none_or(|v| {
+                                    v.as_array().is_some_and(|levels| {
+                                        levels.len() <= 16
+                                            && levels.iter().all(|level| {
+                                                level.as_str().is_some_and(|level| {
+                                                    providers::EFFORT_LEVELS.contains(&level)
                                                 })
-                                        })
+                                            })
                                     })
-                            })
-                    })
+                                })
+                        })
                 })
+            })
         }
         "message" => {
             id() && text("text")

@@ -1,4 +1,5 @@
 import type { EndpointProfile, Session } from '@agentdock/protocol';
+import type { Attachment } from './attachment-state';
 
 /** A model exactly as the native client described it. `efforts` lists the
  * thinking depths that model supports; a model that states none supports none,
@@ -13,7 +14,7 @@ export interface ApprovalQuestion { id: string; header?: string; question: strin
 export interface ToolStats { tokens?: number; tools?: number; ms?: number }
 export type ChatEvent = ({ seq?: number } & (
   | { type: 'ready'; native_session_id?: string; commands?: string[] }
-  | { type: 'settings'; model?: string; effort?: string; models?: NativeModel[]; permission_mode?: string; permission_modes?: string[]; subagent_summaries?: boolean }
+  | { type: 'settings'; model?: string; effort?: string; models?: NativeModel[]; permission_mode?: string; permission_modes?: string[] }
   | { type: 'message'; id: string; role: 'user' | 'assistant'; text: string; delta?: boolean; steered?: boolean }
   | { type: 'tool'; id: string; name: string; status: 'running' | 'completed' | 'failed'; text?: string; activity?: string; parent?: string; stats?: ToolStats; at?: number }
   | { type: 'approval'; id: string; title: string; text: string; choices: string[]; questions?: ApprovalQuestion[]; scope?: ApprovalScope }
@@ -34,18 +35,31 @@ export type ChatItem =
   | { type: 'error'; id: string; text: string };
 
 /** A tool call; `children` are the calls a subagent made inside it, nested as deep as they went. */
-export interface ToolItem { type: 'tool'; id: string; name: string; status: 'running' | 'completed' | 'failed'; text: string; activity?: string; parent?: string; stats?: ToolStats; at?: number; label?: string; children?: ToolItem[] }
+export interface ToolItem { type: 'tool'; id: string; name: string; status: 'running' | 'completed' | 'failed'; text: string; activity?: string; parent?: string; stats?: ToolStats; at?: number; label?: string; ended?: boolean; children?: ToolItem[] }
 
 /** The tools that start a subagent. Claude Code renamed Task to Agent. */
 export const SUBAGENT_TOOLS = new Set(['Agent', 'Task']);
-/** What a subagent was asked to do, from the description in its call's input.
- * The input is replaced by the result later, so the first reading is kept. */
-function subagentLabel(input: string | undefined) {
+/**
+ * A few words on what a call does, from its input: what the agent said it was
+ * for, else the command, file, pattern or query it names. A bare "Bash" said
+ * nothing. Read only while the call runs, since its result replaces the input.
+ */
+export function toolLabel(input: string | undefined) {
   if (!input?.startsWith('{')) return;
-  try {
-    const description = (JSON.parse(input) as { description?: unknown }).description;
-    return typeof description === 'string' && description.trim() ? description.trim().slice(0, 120) : undefined;
-  } catch { return; }
+  let value: Record<string, unknown>;
+  try { value = JSON.parse(input) as Record<string, unknown>; } catch { return; }
+  const text = (key: string) => typeof value[key] === 'string' && (value[key] as string).trim() ? (value[key] as string).trim() : undefined;
+  const short = (line: string) => { const first = line.split('\n')[0]!; return first.length > 80 ? `${first.slice(0, 79)}…` : first; };
+  // The last two segments say which file without spelling out the whole path.
+  const file = (path: string) => path.split(/[\\/]/).filter(Boolean).slice(-2).join('/');
+  const described = text('description'), command = text('command'), path = text('file_path') ?? text('notebook_path') ?? text('path');
+  const pattern = text('pattern'), query = text('query'), url = text('url');
+  if (described) return short(described);
+  if (command) return short(command);
+  if (pattern) return short(path ? `${pattern} · ${file(path)}` : pattern);
+  if (path) return file(path);
+  if (query) return short(query);
+  if (url) return short(url.replace(/^https?:\/\//, ''));
 }
 
 /** Newest-first truncation: the latest subagent step matters more than its first. */
@@ -56,11 +70,18 @@ function clipTail(value: string, limit: number) {
 
 export function conversationView(events: readonly ChatEvent[], running?: boolean) {
   const items: ChatItem[] = [], indexes = new Map<string, number>(), seen = new Set<number>();
+  // A call still running when its client exits will never hear back: that
+  // process, and any subagent it ran, is gone. It is marked ended rather than
+  // left to read as running for ever after the client restarts.
+  const endRunning = () => {
+    for (let i = 0; i < items.length; i++) { const item = items[i]; if (item.type === 'tool' && item.status === 'running') items[i] = { ...item, ended: true }; }
+    for (const [id, tool] of nested) if (tool.status === 'running') nested.set(id, { ...tool, ended: true });
+  };
   // Calls made inside a subagent live here rather than in `items`, and are hung
   // under their parent once every event has been read.
   const nested = new Map<string, ToolItem>(), childrenOf = new Map<string, string[]>();
   let turn: 'idle' | 'running' | 'completed' | 'failed' | 'interrupted' = 'idle';
-  let ready = false, exited = false, commands: string[] = [], announced = false, models: NativeModel[] = [], model: string | undefined, effort: string | undefined, permissionMode: string | undefined, permissionModes: string[] = [], subagentSummaries: boolean | undefined, usage: { input_tokens?: number; output_tokens?: number; context_tokens?: number; context_window?: number } = {};
+  let ready = false, exited = false, commands: string[] = [], announced = false, models: NativeModel[] = [], model: string | undefined, effort: string | undefined, permissionMode: string | undefined, permissionModes: string[] = [], usage: { input_tokens?: number; output_tokens?: number; context_tokens?: number; context_window?: number } = {};
   for (const event of events) {
     if (event.seq !== undefined) { if (seen.has(event.seq)) continue; seen.add(event.seq); }
     if (event.type === 'message') {
@@ -77,7 +98,7 @@ export function conversationView(events: readonly ChatEvent[], running?: boolean
       const activity = event.activity === undefined ? before?.activity
         : clipTail(before?.activity ? `${before.activity}\n${event.activity}` : event.activity, MAX_ACTIVITY);
       const parent = event.parent ?? before?.parent, stats = event.stats ?? before?.stats, at = event.at ?? before?.at;
-      const label = before?.label ?? (SUBAGENT_TOOLS.has(event.name) ? subagentLabel(event.text) : undefined);
+      const label = before?.label ?? (event.status === 'running' ? toolLabel(event.text) : undefined);
       const next: ToolItem = { ...event, text: event.text ?? before?.text ?? '', ...(activity === undefined ? {} : { activity }), ...(parent === undefined ? {} : { parent }), ...(stats === undefined ? {} : { stats }), ...(at === undefined ? {} : { at }), ...(label === undefined ? {} : { label }) };
       // A parent trimmed out of history leaves its calls at the top rather than nowhere.
       if (parent !== undefined && index === undefined && parent !== event.id && (indexes.has('tool:' + parent) || nested.has(parent))) {
@@ -93,17 +114,17 @@ export function conversationView(events: readonly ChatEvent[], running?: boolean
       if (previous?.type === 'approval') previous.resolved = true;
     } else if (event.type === 'turn') turn = event.status;
     else if (event.type === 'ready') { ready = true; exited = false; commands = event.commands ?? []; announced = true; }
-    else if (event.type === 'settings') { if (event.subagent_summaries !== undefined) subagentSummaries = event.subagent_summaries; if (event.models?.length) models = event.models; if (event.model) model = event.model; if (event.effort) effort = event.effort; if (event.permission_mode) permissionMode = event.permission_mode; if (event.permission_modes?.length) permissionModes = event.permission_modes; }
+    else if (event.type === 'settings') { if (event.models?.length) models = event.models; if (event.model) model = event.model; if (event.effort) effort = event.effort; if (event.permission_mode) permissionMode = event.permission_mode; if (event.permission_modes?.length) permissionModes = event.permission_modes; }
     else if (event.type === 'usage') { const { seq: _seq, type: _type, ...values } = event; usage = { ...usage, ...values }; }
     // A new endpoint means a new native client: its command list is whatever it
     // announces next, never the previous client's.
-    else if (event.type === 'configuration') { for (const item of items) if (item.type === 'approval') item.resolved = true; indexes.clear(); nested.clear(); childrenOf.clear(); subagentSummaries = undefined; items.push(event); ready = false; turn = 'idle'; commands = []; announced = false; models = []; model = undefined; effort = undefined; permissionMode = undefined; permissionModes = []; }
+    else if (event.type === 'configuration') { endRunning(); for (const item of items) if (item.type === 'approval') item.resolved = true; indexes.clear(); nested.clear(); childrenOf.clear(); items.push(event); ready = false; turn = 'idle'; commands = []; announced = false; models = []; model = undefined; effort = undefined; permissionMode = undefined; permissionModes = []; }
     // The client cleared its own context. Keeping the transcript would show a
     // conversation the client can no longer refer to, which is what made
     // /clear look like it had done nothing.
     else if (event.type === 'cleared') { items.length = 0; indexes.clear(); nested.clear(); childrenOf.clear(); usage = {}; }
     else if (event.type === 'error') items.push({ type: 'error', id: 'error:' + (event.seq ?? items.length), text: event.message });
-    else if (event.type === 'exit') { exited = true; ready = false; if (turn === 'running') turn = 'interrupted'; for (const item of items) if (item.type === 'approval') item.resolved = true; }
+    else if (event.type === 'exit') { endRunning(); exited = true; ready = false; if (turn === 'running') turn = 'interrupted'; for (const item of items) if (item.type === 'approval') item.resolved = true; }
   }
   // Runtime state outranks stale display history after server restart. Old
   // approvals refer to lost native RPCs and cannot be answered as live ones.
@@ -113,7 +134,7 @@ export function conversationView(events: readonly ChatEvent[], running?: boolean
   };
   for (let i = 0; i < items.length; i++) { const item = items[i]; if (item.type === 'tool' && childrenOf.has(item.id)) items[i] = hang(item, 0); }
   if (running === false) { ready = false; if (turn === 'running') turn = 'interrupted'; for (const item of items) if (item.type === 'approval') item.resolved = true; }
-  return { items, turn, ready, exited, usage, commands, commandsAnnounced: announced, models, model, effort, permissionMode, permissionModes, subagentSummaries, awaitingApproval: items.some(item => item.type === 'approval' && !item.resolved) };
+  return { items, turn, ready, exited, usage, commands, commandsAnnounced: announced, models, model, effort, permissionMode, permissionModes, awaitingApproval: items.some(item => item.type === 'approval' && !item.resolved) };
 }
 
 /** WS events are already ordered. A replayed sequence must not append deltas twice. */
@@ -158,7 +179,6 @@ export function isChatEvent(value: unknown): value is ChatEvent {
       && (v.commands === undefined || Array.isArray(v.commands) && v.commands.length <= 400 && v.commands.every(name => typeof name === 'string' && /^[A-Za-z0-9][\w:-]{0,63}$/.test(name)));
     case 'settings': return (v.model === undefined || text('model')) && (v.effort === undefined || text('effort'))
       && (v.permission_mode === undefined || text('permission_mode'))
-      && (v.subagent_summaries === undefined || typeof v.subagent_summaries === 'boolean')
       && (v.permission_modes === undefined || Array.isArray(v.permission_modes) && v.permission_modes.length <= 8 && v.permission_modes.every(mode => typeof mode === 'string' && /^[a-z_]{1,24}$/.test(mode)))
       && (v.models === undefined || Array.isArray(v.models) && v.models.length <= 64 && v.models.every(entry => {
         if (!entry || typeof entry !== 'object') return false;
@@ -226,6 +246,8 @@ export function canClearContext(state: {
 
 export interface ChatDraft {
   text: string;
+  /** Files attached and not yet sent; kept here, with the text, past a tab switch. */
+  attachments?: Attachment[];
   pending?: {
     id: string;
     /** What went on the wire: trimmed, and with any attachment header. */

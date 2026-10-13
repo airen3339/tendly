@@ -41,4 +41,10 @@ test('each running subagent not inside another running one gets a dock row', asy
   const items = [agent('a', 'running', [agent('a1', 'running')]), agent('b', 'completed', [deep]), tool('c', 'Bash', 'running')];
   assert.deepEqual(subagentRoots(items).map(t => t.id), ['a', 'deep']);
   assert.equal(toolsById(items).get('deep'), deep);
+  // Ended with its client: neither a row nor a running subagent any more.
+  const ended = { ...agent('e', 'running'), ended: true };
+  assert.deepEqual(subagentRoots([ended]), []);
+  const { runningSubagents, stalledFor } = await import('./tool-runs.ts');
+  assert.deepEqual(runningSubagents([ended]), []);
+  assert.equal(stalledFor({ ...ended, at: 0 }, 10 * 60_000), undefined);
 });

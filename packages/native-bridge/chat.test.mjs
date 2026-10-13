@@ -418,15 +418,20 @@ test('task progress carries the client\'s counts and a summary only when it chan
   assert.deepEqual(events.map(event=>event.activity),['Reading the bridge',undefined,undefined]);
 });
 
-test('subagent summaries switch on through a second initialize and are reported back',async()=>{
-  const events=[],calls=[];
+test('a subagent\'s log names what each call was for, from the call\'s own input',async()=>{
+  const { callSummary }=await import('./chat-claude.mjs');
+  assert.equal(callSummary({command:'npm test',description:'Run the tests'}),'Run the tests');
+  assert.equal(callSummary({command:'ls -la\nrm x'}),'ls -la');
+  assert.equal(callSummary({file_path:'/home/u/project/src/a.ts'}),'src/a.ts');
+  assert.equal(callSummary({pattern:'TODO',path:'/repo/src'}),'TODO · repo/src');
+  assert.equal(callSummary({query:'vue scoped css'}),'vue scoped css');
+  assert.equal(callSummary({url:'https://example.com/a'}),'example.com/a');
+  assert.equal(callSummary({}),undefined);
+  const events=[];
   const chat=Object.create(ClaudeChat.prototype);
-  chat.emit=event=>events.push(event);chat.port={rpc:async(method,params)=>{calls.push([method,params]);return {};}};
-  chat.summaries=false;
-  await chat.setSummaries({enabled:true});
-  assert.deepEqual(calls,[['initialize',{agentProgressSummaries:true}]]);
-  assert.equal(events.at(-1).type,'settings');
-  assert.equal(events.at(-1).subagent_summaries,true);
+  chat.emit=event=>events.push(event);chat.tools=new Map([['agent-1','Agent']]);
+  chat.notification({type:'assistant',parent_tool_use_id:'agent-1',message:{content:[{type:'tool_use',id:'b1',name:'Bash',input:{command:'python3 check_length.py',description:'Check chapter lengths'}}]}});
+  assert.match(events.find(event=>event.activity).activity,/^→ Bash · Check chapter lengths$/);
 });
 
 test('a turn Claude starts by itself, after a background command finished, is shown rather than dropped',()=>{
