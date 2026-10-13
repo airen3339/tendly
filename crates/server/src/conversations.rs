@@ -290,10 +290,13 @@ pub async fn start_locked(state: &AppState, session: &Session) -> Result<Arc<Cha
         cwd: spec.cwd.to_string_lossy().into_owned(),
         resume_id: session.provider_session_id.clone(),
     };
-    // Codex can run in this process instead of under the Node bridge; which
-    // one is a deployment's choice (chat_adapter::codex_in_process).
-    if crate::chat_adapter::codex_in_process(session.provider) {
-        let adapter = crate::codex_chat::adapter(&spec.env, &spec.env_remove);
+    // Codex and Pi can run in this process instead of under the Node
+    // bridge; which is a deployment's choice (chat_adapter::in_process).
+    if crate::chat_adapter::in_process(session.provider) {
+        let adapter = match session.provider {
+            ProviderKind::Pi => crate::pi_chat::adapter(&spec.env, &spec.env_remove),
+            _ => crate::codex_chat::adapter(&spec.env, &spec.env_remove),
+        };
         return run_adapter(state, session, adapter, init).await;
     }
     let mut command = crate::bridge::node_command(&[], &state.chat_bridge);

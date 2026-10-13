@@ -1,5 +1,3 @@
-// Reached only through the parity tests until the switch selects it.
-#![allow(dead_code)]
 //! Pi, driven from this process: `pi --mode rpc` with no Node bridge in
 //! between. This is `packages/native-bridge/chat-pi.mjs` in Rust, on the
 //! shared core ([`crate::native_chat`]), and it produces the same events.

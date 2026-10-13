@@ -36,14 +36,20 @@ impl ChatInit {
     }
 }
 
-/// Whether Codex runs in this process ([`crate::codex_chat::CodexAdapter`])
-/// rather than under the Node bridge: `AGENTDOCK_CODEX_ADAPTER=rust`, which
-/// `codex_adapter = "rust"` in config.toml sets. Anything else, or nothing,
-/// is the bridge, so a problem in the Rust adapter is one setting from undone.
-/// Read at each start: a running conversation keeps the layer it began on.
-pub fn codex_in_process(provider: agentdock_domain::ProviderKind) -> bool {
-    provider == agentdock_domain::ProviderKind::Codex
-        && adapter_choice(std::env::var("AGENTDOCK_CODEX_ADAPTER").ok().as_deref())
+/// Whether `provider`'s conversations run in this process rather than under
+/// the Node bridge: `AGENTDOCK_CODEX_ADAPTER=rust` for Codex
+/// ([`crate::codex_chat`]), `AGENTDOCK_PI_ADAPTER=rust` for Pi
+/// ([`crate::pi_chat`]); `codex_adapter = "rust"` and `pi_adapter = "rust"` in
+/// config.toml set them. Anything else, or nothing, is the bridge, so a problem
+/// in a Rust client is one setting from undone. Read at each start: a running
+/// conversation keeps the layer it began on.
+pub fn in_process(provider: agentdock_domain::ProviderKind) -> bool {
+    let variable = match provider {
+        agentdock_domain::ProviderKind::Codex => "AGENTDOCK_CODEX_ADAPTER",
+        agentdock_domain::ProviderKind::Pi => "AGENTDOCK_PI_ADAPTER",
+        _ => return false,
+    };
+    adapter_choice(std::env::var(variable).ok().as_deref())
 }
 
 fn adapter_choice(value: Option<&str>) -> bool {
@@ -449,7 +455,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_bridge_runs_codex_unless_rust_is_asked_for() {
+    fn the_bridge_runs_a_client_unless_rust_is_asked_for() {
+        // Claude Code and terminals have no layer to choose yet.
+        assert!(!in_process(agentdock_domain::ProviderKind::ClaudeCode));
+        assert!(!in_process(agentdock_domain::ProviderKind::Terminal));
         assert!(!adapter_choice(None));
         assert!(!adapter_choice(Some("bridge")));
         assert!(!adapter_choice(Some("")));
