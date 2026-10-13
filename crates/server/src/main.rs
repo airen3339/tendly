@@ -10,11 +10,11 @@ mod api_tests;
 mod bridge;
 mod canvas;
 mod chat_adapter;
+#[cfg(test)]
+mod chat_parity_tests;
 mod checkouts;
 mod clients;
 mod codex_chat;
-#[cfg(test)]
-mod codex_parity_tests;
 mod conversations;
 mod daemon;
 mod directories;

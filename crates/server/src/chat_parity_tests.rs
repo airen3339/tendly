@@ -1,8 +1,9 @@
-//! The Rust Codex adapter against the Node bridge it replaces.
+//! The clients run in this process against the Node bridge they replace.
 //!
-//! Each scenario runs twice against the same synthetic app-server
-//! (`packages/native-bridge/fixtures/chat-cli.mjs`): once through `node
-//! chat.mjs` (BridgeAdapter) and once through the Rust Codex adapter. Both must produce
+//! Each scenario runs twice against the same synthetic client
+//! (`packages/native-bridge/fixtures/chat-cli.mjs` for Codex, `pi-cli.mjs` for
+//! Pi): once through `node chat.mjs` (BridgeAdapter) and once through the
+//! client's adapter here. Both must produce
 //! the same events, after the server's own validation, and send Codex the same
 //! messages. Approval ids are random, so they are compared by order of
 //! appearance; the scenario's directory is compared as a placeholder.
@@ -154,7 +155,7 @@ fn comparable(run: Run, dir: &str) -> (Vec<Value>, Vec<Value>) {
     };
     fn placeholder(value: Value, dir: &str) -> Value {
         match value {
-            Value::String(text) => Value::String(text.replace(dir, "<dir>")),
+            Value::String(text) => Value::String(untimed(&text.replace(dir, "<dir>"))),
             Value::Array(items) => {
                 Value::Array(items.into_iter().map(|v| placeholder(v, dir)).collect())
             }
@@ -188,13 +189,50 @@ fn comparable(run: Run, dir: &str) -> (Vec<Value>, Vec<Value>) {
     (events, native)
 }
 
-/// A fresh directory with the fixture app-server in it.
+/// A client under comparison: its provider id, its synthetic stand-in and
+/// the adapter that runs it here.
+struct Client {
+    provider: &'static str,
+    fixture: &'static str,
+    adapter: fn(&BTreeMap<String, String>, &[String]) -> crate::native_chat::NativeAdapter,
+}
+const CODEX: Client = Client {
+    provider: "codex",
+    fixture: "chat-cli.mjs",
+    adapter: crate::codex_chat::adapter,
+};
+const PI: Client = Client {
+    provider: "pi",
+    fixture: "pi-cli.mjs",
+    adapter: crate::pi_chat::adapter,
+};
+
+/// A turn Pi starts by itself is named for the moment it began
+/// (`pi-<ms>-<n>`); only the count is compared.
+fn untimed(text: &str) -> String {
+    let Some(rest) = text.strip_prefix("pi-") else {
+        return text.to_owned();
+    };
+    match rest.split_once('-') {
+        Some((millis, count))
+            if millis.len() >= 10 && millis.bytes().all(|b| b.is_ascii_digit()) =>
+        {
+            format!("pi-<t>-{count}")
+        }
+        _ => text.to_owned(),
+    }
+}
+
+/// A fresh directory with the client's fixture in it.
 fn scenario_dir(name: &str) -> PathBuf {
+    scenario_dir_for(&CODEX, name)
+}
+fn scenario_dir_for(client: &Client, name: &str) -> PathBuf {
     let dir =
         std::env::temp_dir().join(format!("agentdock-parity-{name}-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
-    let program = dir.join("chat-cli.mjs");
-    std::fs::copy(bridge_dir().join("fixtures/chat-cli.mjs"), &program).unwrap();
+    let program = dir.join(client.fixture);
+    std::fs::copy(bridge_dir().join("fixtures").join(client.fixture), &program).unwrap();
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -204,9 +242,12 @@ fn scenario_dir(name: &str) -> PathBuf {
 }
 
 fn init(dir: &std::path::Path, args: &[&str]) -> ChatInit {
+    init_for(&CODEX, dir, args)
+}
+fn init_for(client: &Client, dir: &std::path::Path, args: &[&str]) -> ChatInit {
     ChatInit {
-        provider: "codex".into(),
-        program: dir.join("chat-cli.mjs").to_string_lossy().into_owned(),
+        provider: client.provider.into(),
+        program: dir.join(client.fixture).to_string_lossy().into_owned(),
         args: args.iter().map(|a| a.to_string()).collect(),
         cwd: dir.to_string_lossy().into_owned(),
         resume_id: None,
@@ -214,8 +255,11 @@ fn init(dir: &std::path::Path, args: &[&str]) -> ChatInit {
 }
 
 async fn both(name: &str, args: &[&str], steps: &[Step]) {
+    both_for(&CODEX, name, args, steps).await;
+}
+async fn both_for(client: &Client, name: &str, args: &[&str], steps: &[Step]) {
     let bridge = {
-        let dir = scenario_dir(&format!("{name}-bridge"));
+        let dir = scenario_dir_for(client, &format!("{name}-bridge"));
         let log = dir.join("native.jsonl");
         let mut command = tokio::process::Command::new(crate::bridge::js_runtime());
         command
@@ -228,16 +272,16 @@ async fn both(name: &str, args: &[&str], steps: &[Step]) {
             .kill_on_drop(true);
         agentdock_runtime::process::own_group(command.as_std_mut());
         let adapter = BridgeAdapter::new(command.spawn().expect("node")).unwrap();
-        let run = drive(adapter, init(&dir, args), steps, &log).await;
+        let run = drive(adapter, init_for(client, &dir, args), steps, &log).await;
         let result = comparable(run, &dir.to_string_lossy());
         let _ = std::fs::remove_dir_all(&dir);
         result
     };
     let rust = {
-        let dir = scenario_dir(&format!("{name}-rust"));
+        let dir = scenario_dir_for(client, &format!("{name}-rust"));
         let log = dir.join("native.jsonl");
-        let adapter = crate::codex_chat::adapter(&environment(&log), &[]);
-        let run = drive(adapter, init(&dir, args), steps, &log).await;
+        let adapter = (client.adapter)(&environment(&log), &[]);
+        let run = drive(adapter, init_for(client, &dir, args), steps, &log).await;
         let result = comparable(run, &dir.to_string_lossy());
         let _ = std::fs::remove_dir_all(&dir);
         result
@@ -456,40 +500,6 @@ async fn steering_the_running_turn() {
     .await;
 }
 
-/// A steer sent before Codex has said which turn is running waits for the id
-/// (`early`), then joins that turn.
-#[tokio::test]
-async fn steering_before_the_turn_has_an_id() {
-    both(
-        "steer-early",
-        &[],
-        &[
-            Send(json!({"type":"message","id":"slow-a","content":"slow"})),
-            Send(json!({"type":"steer","id":"slow-b","content":"also this"})),
-            Wait(|e| turn(e, "slow-a", "completed")),
-        ],
-    )
-    .await;
-}
-
-/// An interrupt sent before the turn has an id is held until it has one, and
-/// then stops that turn.
-#[tokio::test]
-async fn interrupting_before_the_turn_has_an_id() {
-    both(
-        "interrupt-early",
-        &[],
-        &[
-            Send(json!({"type":"message","id":"slow-a","content":"slow"})),
-            Send(json!({"type":"interrupt"})),
-            Wait(|e| turn(e, "slow-a", "interrupted")),
-            Send(json!({"type":"message","id":"after","content":"simple"})),
-            Wait(|e| turn(e, "after", "completed")),
-        ],
-    )
-    .await;
-}
-
 #[tokio::test]
 async fn a_turn_that_refuses_steering_passes_it_on() {
     both(
@@ -597,6 +607,40 @@ async fn an_unusable_launch_option() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A steer sent before Codex has said which turn is running waits for the id
+/// (`early`), then joins that turn.
+#[tokio::test]
+async fn steering_before_the_turn_has_an_id() {
+    both(
+        "steer-early",
+        &[],
+        &[
+            Send(json!({"type":"message","id":"slow-a","content":"slow"})),
+            Send(json!({"type":"steer","id":"slow-b","content":"also this"})),
+            Wait(|e| turn(e, "slow-a", "completed")),
+        ],
+    )
+    .await;
+}
+
+/// An interrupt sent before the turn has an id is held until it has one, and
+/// then stops that turn.
+#[tokio::test]
+async fn interrupting_before_the_turn_has_an_id() {
+    both(
+        "interrupt-early",
+        &[],
+        &[
+            Send(json!({"type":"message","id":"slow-a","content":"slow"})),
+            Send(json!({"type":"interrupt"})),
+            Wait(|e| turn(e, "slow-a", "interrupted")),
+            Send(json!({"type":"message","id":"after","content":"simple"})),
+            Wait(|e| turn(e, "after", "completed")),
+        ],
+    )
+    .await;
+}
+
 /// An adapter dropped without `shutdown` still ends its conversation and the
 /// app-server it started.
 #[cfg(unix)]
@@ -625,4 +669,134 @@ async fn a_dropped_adapter_stops_its_app_server() {
     }
     let _ = std::fs::remove_dir_all(&dir);
     assert!(!alive(), "the app-server outlived its dropped adapter");
+}
+
+// --- Pi ----------------------------------------------------------------------
+
+#[tokio::test]
+async fn pi_a_message_with_its_reply_tools_and_usage() {
+    both_for(
+        &PI,
+        "pi-simple",
+        &[],
+        &[
+            Send(json!({"type":"message","id":"one","content":"hello"})),
+            Wait(|e| turn(e, "one", "completed")),
+        ],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn pi_confirmations_accepted_and_declined() {
+    both_for(
+        &PI,
+        "pi-confirm",
+        &[],
+        &[
+            Send(json!({"type":"message","id":"yes","content":"confirm"})),
+            Wait(|e| e["type"] == "approval"),
+            Answer("accept", none),
+            Wait(|e| turn(e, "yes", "completed")),
+            Send(json!({"type":"message","id":"no","content":"confirm"})),
+            WaitCount(|e| e["type"] == "approval", 2),
+            Answer("decline", none),
+            Wait(|e| turn(e, "no", "completed")),
+        ],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn pi_models_by_provider_and_depths() {
+    both_for(
+        &PI,
+        "pi-model",
+        &[],
+        &[
+            Send(json!({"type":"model","model":"kunlun/zai-org/GLM-5.3","effort":"high"})),
+            Wait(|e| {
+                e["type"] == "settings"
+                    && e["model"] == "kunlun/zai-org/GLM-5.3"
+                    && e["effort"] == "high"
+            }),
+            // A name without a provider, and approval modes Pi does not have.
+            Send(json!({"type":"model","model":"plain"})),
+            Wait(|e| e["type"] == "error"),
+            Send(json!({"type":"permission","mode":"ask"})),
+            WaitCount(|e| e["type"] == "error", 2),
+            Send(json!({"type":"message","id":"after","content":"hello"})),
+            Wait(|e| turn(e, "after", "completed")),
+        ],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn pi_interrupting_and_steering_a_running_turn() {
+    both_for(
+        &PI,
+        "pi-interrupt",
+        &[],
+        &[
+            Send(json!({"type":"message","id":"hold","content":"hold"})),
+            Wait(|e| turn(e, "hold", "running")),
+            Sleep(100),
+            Send(json!({"type":"steer","id":"more","content":"also this"})),
+            Send(json!({"type":"model","model":"agentdock/qwen-local"})),
+            Wait(|e| e["type"] == "error"),
+            Send(json!({"type":"interrupt"})),
+            Wait(|e| turn(e, "hold", "interrupted")),
+            // Steering with no turn running is a message of its own.
+            Send(json!({"type":"steer","id":"lone","content":"hello"})),
+            Wait(|e| turn(e, "lone", "completed")),
+        ],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn pi_a_resumed_session_and_an_unusable_option() {
+    both_for(
+        &PI,
+        "pi-resume",
+        &["--session", "pi-session-1", "--thinking", "high"],
+        &[
+            Send(json!({"type":"message","id":"one","content":"hello"})),
+            Wait(|e| turn(e, "one", "completed")),
+        ],
+    )
+    .await;
+}
+
+/// Pi's conversation ends with its dropped adapter too: the shared core does it.
+#[cfg(unix)]
+#[tokio::test]
+async fn pi_a_dropped_adapter_stops_pi() {
+    let dir = scenario_dir_for(&PI, "pi-dropped-rust");
+    let log = dir.join("native.jsonl");
+    let mut adapter = crate::pi_chat::adapter(&environment(&log), &[]);
+    adapter
+        .start(&init_for(&PI, &dir, &[]))
+        .await
+        .expect("start");
+    let mut pid = None;
+    for _ in 0..50 {
+        pid = adapter.pid();
+        if pid.is_some() {
+            break;
+        }
+        let _ = tokio::time::timeout(Duration::from_millis(100), adapter.next_event()).await;
+    }
+    let pid = pid.expect("a running Pi") as libc::pid_t;
+    drop(adapter);
+    let alive = || unsafe { libc::kill(pid, 0) } == 0;
+    for _ in 0..50 {
+        if !alive() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(!alive(), "Pi outlived its dropped adapter");
 }
