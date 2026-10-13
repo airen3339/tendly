@@ -16,8 +16,8 @@ use uuid::Uuid;
 
 const MAX_TEXT_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_GIT_OUTPUT: usize = 8 * 1024 * 1024;
-const GIT_TIMEOUT: Duration = Duration::from_secs(30);
-const COMMIT_TIMEOUT: Duration = Duration::from_secs(120);
+pub(crate) const GIT_TIMEOUT: Duration = Duration::from_secs(30);
+pub(crate) const COMMIT_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Structured error returned by workspace operations.
 #[derive(Debug, Clone, Serialize)]
@@ -91,6 +91,13 @@ pub struct GitStatus {
     pub ahead: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub behind: Option<u32>,
+    /// The remote-tracking branch this one follows, as `origin/main`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub upstream: Option<String>,
+    /// A merge, rebase, cherry-pick or revert that stopped part-way and waits
+    /// to be continued or aborted.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -149,7 +156,7 @@ pub fn safe_path(root: &Path, relative: &str) -> Result<PathBuf, IoError> {
     }
 }
 
-fn safe_relative(relative: &str) -> Result<PathBuf, IoError> {
+pub(crate) fn safe_relative(relative: &str) -> Result<PathBuf, IoError> {
     if relative.as_bytes().contains(&0) {
         return Err(IoError::new(400, "path contains NUL"));
     }
@@ -507,9 +514,16 @@ fn git_command(root: &Path, args: &[String]) -> Command {
     for (key, _) in std::env::vars().filter(|(k, _)| k.starts_with("GIT_")) {
         command.env_remove(key);
     }
+    // `stash` cleans what it took with a `:/` pathspec of its own, which
+    // literal pathspecs would leave behind; it gets its paths as `:(literal)`.
+    let pathspecs = if args.first().is_some_and(|arg| arg == "stash") {
+        "--noglob-pathspecs"
+    } else {
+        "--literal-pathspecs"
+    };
     command
         .args([
-            "--literal-pathspecs",
+            pathspecs,
             "-c",
             "color.ui=false",
             "-c",
@@ -521,12 +535,16 @@ fn git_command(root: &Path, args: &[String]) -> Command {
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_PAGER", "cat")
         .env("GIT_OPTIONAL_LOCKS", "0")
+        // Nothing here can answer an editor: continuing a merge or a rebase
+        // keeps the message Git prepared instead of waiting on one.
+        .env("GIT_EDITOR", "true")
+        .env("GIT_SEQUENCE_EDITOR", "true")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
     command
 }
-async fn run_git(
+pub(crate) async fn run_git(
     root: &Path,
     args: Vec<String>,
     duration: Duration,
@@ -589,13 +607,36 @@ pub async fn git_status(root: &Path) -> Result<GitStatus, IoError> {
     if !success {
         return Err(IoError::new(400, git_error(&stderr)));
     }
-    Ok(parse_git_status(&stdout))
+    let mut status = parse_git_status(&stdout);
+    status.operation = git_operation(&root).await;
+    Ok(status)
+}
+
+/// Which operation, if any, Git stopped in the middle of: its marker files sit
+/// in this checkout's own Git directory, so a worktree reports only its own.
+pub(crate) async fn git_operation(root: &Path) -> Option<String> {
+    let dir = git_text(root, &["rev-parse", "--absolute-git-dir"])
+        .await
+        .ok()
+        .flatten()?;
+    let dir = Path::new(&dir);
+    [
+        ("rebase-merge", "rebase"),
+        ("rebase-apply", "rebase"),
+        ("MERGE_HEAD", "merge"),
+        ("CHERRY_PICK_HEAD", "cherry-pick"),
+        ("REVERT_HEAD", "revert"),
+    ]
+    .into_iter()
+    .find(|(marker, _)| dir.join(marker).exists())
+    .map(|(_, name)| name.to_owned())
 }
 
 fn parse_git_status(bytes: &[u8]) -> GitStatus {
     let mut branch = None;
     let mut ahead = None;
     let mut behind = None;
+    let mut upstream = None;
     let mut files = Vec::new();
     let mut tokens = bytes.split(|b| *b == 0).peekable();
     while let Some(token) = tokens.next() {
@@ -607,6 +648,11 @@ fn parse_git_status(bytes: &[u8]) -> GitStatus {
             let (name, tracking) = value
                 .split_once("...")
                 .map_or((value.as_str(), ""), |(n, t)| (n, t));
+            upstream = tracking
+                .split(" [")
+                .next()
+                .filter(|name| !name.is_empty())
+                .map(str::to_owned);
             branch = Some(
                 if let Some(branch_name) = value.strip_prefix("No commits yet on ") {
                     branch_name.to_owned()
@@ -657,10 +703,12 @@ fn parse_git_status(bytes: &[u8]) -> GitStatus {
         files,
         ahead,
         behind,
+        upstream,
+        operation: None,
     }
 }
 
-fn git_error(stderr: &[u8]) -> String {
+pub(crate) fn git_error(stderr: &[u8]) -> String {
     let text = String::from_utf8_lossy(stderr).trim().to_string();
     if text.is_empty() {
         "git command failed".into()
@@ -914,9 +962,81 @@ pub struct GitBranches {
     pub current: Option<String>,
     pub branches: Vec<String>,
     pub worktrees: Vec<GitWorktree>,
+    /// The local branches again, with where each stands against its upstream.
+    pub local: Vec<GitRef>,
+    /// Remote-tracking branches, as `origin/main`.
+    pub remote: Vec<GitRef>,
 }
 
-async fn git_text(root: &Path, args: &[&str]) -> Result<Option<String>, IoError> {
+#[derive(Debug, Clone, Serialize)]
+pub struct GitRef {
+    pub name: String,
+    pub hash: String,
+    pub subject: String,
+    /// Committer time of the tip, in seconds.
+    pub date: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub upstream: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ahead: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub behind: Option<u32>,
+    /// The upstream it tracked has been deleted on the remote.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub gone: bool,
+}
+
+/// Branch tips, local and remote-tracking, read in one `for-each-ref`.
+async fn git_refs(root: &Path) -> Result<(Vec<GitRef>, Vec<GitRef>), IoError> {
+    let listing = git_text(
+        root,
+        &[
+            "for-each-ref",
+            "--sort=-committerdate",
+            "--format=%(refname)%1f%(symref)%1f%(objectname)%1f%(committerdate:unix)%1f%(upstream:short)%1f%(upstream:track,nobracket)%1f%(subject)",
+            "refs/heads",
+            "refs/remotes",
+        ],
+    )
+    .await?
+    .unwrap_or_default();
+    let (mut local, mut remote) = (Vec::new(), Vec::new());
+    for line in listing.lines() {
+        let fields: Vec<&str> = line.split('\x1f').collect();
+        let [refname, symref, hash, date, upstream, track, subject] = fields[..] else {
+            continue;
+        };
+        if !symref.is_empty() {
+            continue;
+        }
+        let count = |label: &str| {
+            track
+                .split(", ")
+                .find_map(|part| part.strip_prefix(label))
+                .and_then(|n| n.trim().parse().ok())
+        };
+        let mut entry = GitRef {
+            name: String::new(),
+            hash: hash.to_owned(),
+            subject: subject.to_owned(),
+            date: date.parse().unwrap_or_default(),
+            upstream: (!upstream.is_empty()).then(|| upstream.to_owned()),
+            ahead: count("ahead "),
+            behind: count("behind "),
+            gone: track == "gone",
+        };
+        if let Some(name) = refname.strip_prefix("refs/heads/") {
+            entry.name = name.to_owned();
+            local.push(entry);
+        } else if let Some(name) = refname.strip_prefix("refs/remotes/") {
+            entry.name = name.to_owned();
+            remote.push(entry);
+        }
+    }
+    Ok((local, remote))
+}
+
+pub(crate) async fn git_text(root: &Path, args: &[&str]) -> Result<Option<String>, IoError> {
     let (stdout, _stderr, success) = run_git(
         root,
         args.iter().map(|arg| (*arg).to_owned()).collect(),
@@ -938,7 +1058,10 @@ pub async fn git_branches(root: &Path) -> Result<GitBranches, IoError> {
     let listing = git_text(&root, &["worktree", "list", "--porcelain"])
         .await?
         .unwrap_or_default();
+    let (local, remote) = git_refs(&root).await?;
     Ok(GitBranches {
+        local,
+        remote,
         current,
         branches: branches
             .lines()
@@ -950,7 +1073,7 @@ pub async fn git_branches(root: &Path) -> Result<GitBranches, IoError> {
     })
 }
 
-fn parse_worktrees(listing: &str) -> Vec<GitWorktree> {
+pub(crate) fn parse_worktrees(listing: &str) -> Vec<GitWorktree> {
     listing
         .split("\n\n")
         .filter_map(|block| {
@@ -985,7 +1108,7 @@ fn parse_worktrees(listing: &str) -> Vec<GitWorktree> {
 }
 
 /// A name Git itself accepts for a branch, checked by Git rather than guessed.
-async fn valid_branch(root: &Path, branch: &str) -> Result<(), IoError> {
+pub(crate) async fn valid_branch(root: &Path, branch: &str) -> Result<(), IoError> {
     if branch.is_empty() || branch.len() > 200 || branch.starts_with('-') {
         return Err(IoError::new(400, "Invalid branch name"));
     }
@@ -995,17 +1118,59 @@ async fn valid_branch(root: &Path, branch: &str) -> Result<(), IoError> {
     }
 }
 
-/// Switch this checkout to another local branch, or create one here.
-/// Git refuses a switch that would overwrite uncommitted work, and that
-/// refusal is passed on rather than forced through.
-pub async fn git_switch(root: &Path, branch: &str, create: bool) -> Result<(), IoError> {
-    let root = dunce::canonicalize(root).map_err(IoError::from)?;
-    valid_branch(&root, branch).await?;
-    let mut args: Vec<String> = vec!["switch".into()];
-    if create {
-        args.push("-c".into());
+/// A revision -- a commit hash, branch, remote branch or tag -- that names a
+/// commit here, resolved to that commit's full hash. Git checks it; nothing
+/// shaped like an option ever reaches a command line as one.
+pub(crate) async fn valid_rev(root: &Path, rev: &str) -> Result<String, IoError> {
+    if rev.is_empty()
+        || rev.len() > 256
+        || rev.starts_with('-')
+        || rev.chars().any(|c| c.is_whitespace() || c.is_control())
+    {
+        return Err(IoError::new(400, "Invalid revision"));
     }
-    args.push(branch.to_owned());
+    git_text(
+        root,
+        &[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            "--end-of-options",
+            &format!("{rev}^{{commit}}"),
+        ],
+    )
+    .await?
+    .filter(|hash| !hash.is_empty())
+    .ok_or_else(|| IoError::new(404, format!("{rev} is not a commit in this repository")))
+}
+
+/// Switch this checkout to another local branch, or create one here --
+/// from HEAD, or from `start` (a commit or a remote branch, which the new
+/// branch then tracks). `detach` checks out the commit `branch` names without
+/// any branch. Git refuses a switch that would overwrite uncommitted work, and
+/// that refusal is passed on rather than forced through.
+pub async fn git_switch(
+    root: &Path,
+    branch: &str,
+    create: bool,
+    start: Option<&str>,
+    detach: bool,
+) -> Result<(), IoError> {
+    let root = dunce::canonicalize(root).map_err(IoError::from)?;
+    let mut args: Vec<String> = vec!["switch".into()];
+    if detach {
+        args.extend(["--detach".into(), valid_rev(&root, branch).await?]);
+    } else {
+        valid_branch(&root, branch).await?;
+        if create {
+            args.push("-c".into());
+        }
+        args.push(branch.to_owned());
+        if let Some(start) = start.filter(|_| create) {
+            valid_rev(&root, start).await?;
+            args.push(start.to_owned());
+        }
+    }
     let (_stdout, stderr, success) = run_git(&root, args, GIT_TIMEOUT).await?;
     if success {
         Ok(())
@@ -1146,12 +1311,16 @@ pub async fn git_worktree_add(root: &Path, branch: &str, create: bool) -> Result
     Ok(target)
 }
 
-pub async fn git_commit(root: &Path, message: &str) -> Result<String, IoError> {
+pub async fn git_commit(root: &Path, message: &str, amend: bool) -> Result<String, IoError> {
     if message.trim().is_empty() {
         return Err(IoError::new(400, "commit message is required"));
     }
     let root = dunce::canonicalize(root).map_err(IoError::from)?;
-    let args = vec!["commit".into(), "-m".into(), message.to_owned()];
+    let mut args: Vec<String> = vec!["commit".into()];
+    if amend {
+        args.push("--amend".into());
+    }
+    args.extend(["-m".into(), message.to_owned()]);
     let (_stdout, stderr, success) = run_git(&root, args, COMMIT_TIMEOUT).await?;
     if !success {
         return Err(IoError::new(400, git_error(&stderr)));
@@ -1889,27 +2058,31 @@ mod tests {
         let repo = TempRepo::new();
         fs::write(repo.path.join("a.txt"), "a\n").unwrap();
         git_stage(&repo.path, &["a.txt".into()]).await.unwrap();
-        git_commit(&repo.path, "first").await.unwrap();
+        git_commit(&repo.path, "first", false).await.unwrap();
         let start = git_branches(&repo.path).await.unwrap();
         let home = start.current.clone().expect("on a branch");
         assert_eq!(start.worktrees.len(), 1);
         assert!(start.worktrees[0].main);
 
-        git_switch(&repo.path, "feature/x", true).await.unwrap();
+        git_switch(&repo.path, "feature/x", true, None, false)
+            .await
+            .unwrap();
         assert_eq!(
             git_branches(&repo.path).await.unwrap().current.as_deref(),
             Some("feature/x")
         );
-        git_switch(&repo.path, &home, false).await.unwrap();
+        git_switch(&repo.path, &home, false, None, false)
+            .await
+            .unwrap();
         assert_eq!(
-            git_switch(&repo.path, "-rf", false)
+            git_switch(&repo.path, "-rf", false, None, false)
                 .await
                 .unwrap_err()
                 .status,
             400
         );
         assert_eq!(
-            git_switch(&repo.path, "no-such-branch", false)
+            git_switch(&repo.path, "no-such-branch", false, None, false)
                 .await
                 .unwrap_err()
                 .status,
@@ -1949,7 +2122,7 @@ mod tests {
         let repo = TempRepo::new();
         fs::write(repo.path.join("a.txt"), "a\n").unwrap();
         git_stage(&repo.path, &["a.txt".into()]).await.unwrap();
-        git_commit(&repo.path, "first").await.unwrap();
+        git_commit(&repo.path, "first", false).await.unwrap();
         let tree = git_worktree_add(&repo.path, "side", true).await.unwrap();
         let tree_text = tree.to_string_lossy().into_owned();
         // A rename is followed by the worktree that holds the branch.
@@ -2013,7 +2186,7 @@ mod tests {
         let repo = TempRepo::new();
         fs::write(repo.path.join("kept.txt"), "one\n").unwrap();
         git_stage(&repo.path, &["kept.txt".into()]).await.unwrap();
-        git_commit(&repo.path, "first").await.unwrap();
+        git_commit(&repo.path, "first", false).await.unwrap();
         // Staged work survives: discard goes back to the index, not to HEAD.
         fs::write(repo.path.join("kept.txt"), "two\n").unwrap();
         git_stage(&repo.path, &["kept.txt".into()]).await.unwrap();

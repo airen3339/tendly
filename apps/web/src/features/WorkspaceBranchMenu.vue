@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue';
+import type { GitBranches, GitOutcome, GitRef } from '@agentdock/protocol';
 import { ApiError, errorMessage, json, request, workspacePath } from './api';
 import { useI18n } from '../i18n';
 
@@ -10,24 +11,33 @@ import { useI18n } from '../i18n';
  * Shown wherever a workspace is named -- the status bar, the sidebar, the Git
  * pane -- as one control, so the three never disagree. A click switches the
  * directory; right-click, a long press or the row's "⋯" opens what else can
- * be done to a branch (rename, delete) or a worktree (remove). A session on a
+ * be done to a branch (merge, rebase, rename, delete) or a worktree (remove).
+ * A remote branch checks out as a local branch that tracks it. A session on a
  * branch of its own moves from its own chip instead.
  */
-interface Worktree { path: string; branch?: string | null; main: boolean }
-interface Repo { current?: string | null; branches: string[]; worktrees: Worktree[] }
+type Repo = GitBranches;
 const props = defineProps<{ workspaceId: string; branch?: string | null; compact?: boolean }>();
 const emit = defineEmits<{ switched: []; changed: [] }>();
 const { t } = useI18n();
-const open = ref(false), busy = ref(false), error = ref(''), created = ref('');
+const open = ref(false), busy = ref(false), error = ref(''), created = ref(''), note = ref(''), filter = ref('');
 const repo = ref<Repo>();
 const anchor = ref<HTMLElement>(), panel = ref<HTMLElement>();
 const place = ref<Record<string, string>>({});
 /** The row whose actions are showing, and what is being done to it. */
-const actions = ref<{ kind: 'branch' | 'worktree'; key: string }>();
+const actions = ref<{ kind: 'branch' | 'worktree' | 'remote'; key: string }>();
 const renaming = ref(''), renameTo = ref('');
-const confirming = ref<{ kind: 'delete' | 'remove'; key: string; force: boolean; reason?: string }>();
+const confirming = ref<{ kind: 'delete' | 'remove' | 'remote'; key: string; force: boolean; reason?: string }>();
 
 const worktrees = computed(() => (repo.value?.worktrees ?? []).filter(tree => !tree.main));
+const matches = (name: string) => !filter.value.trim() || name.toLowerCase().includes(filter.value.trim().toLowerCase());
+const details = computed(() => new Map((repo.value?.local ?? []).map(entry => [entry.name, entry])));
+const localNames = computed(() => (repo.value?.branches ?? []).filter(matches));
+const remotes = computed(() => (repo.value?.remote ?? []).filter(entry => matches(entry.name)));
+const showRemotes = ref(false);
+/** `origin/feature/x` checks out as `feature/x`. */
+const localFor = (remote: string) => remote.slice(remote.indexOf('/') + 1);
+const remoteOf = (remote: string) => remote.slice(0, remote.indexOf('/'));
+const track = (entry?: GitRef) => entry ? [entry.ahead ? `↑${entry.ahead}` : '', entry.behind ? `↓${entry.behind}` : '', entry.gone ? t('gone') : ''].filter(Boolean).join(' ') : '';
 /** Git checks a branch out in one place at a time; one a worktree holds cannot come here. */
 const heldElsewhere = (name: string) => worktrees.value.some(tree => tree.branch === name);
 // Worktree paths are the host's own: `\`-separated on a Windows server.
@@ -44,7 +54,7 @@ async function toggle() {
   document.addEventListener('pointerdown', outside, true);
 }
 function close() { open.value = false; resetRow(); document.removeEventListener('pointerdown', outside, true); }
-function resetRow() { actions.value = undefined; renaming.value = ''; confirming.value = undefined; blocking.value = undefined; }
+function resetRow() { actions.value = undefined; renaming.value = ''; confirming.value = undefined; blocking.value = undefined; note.value = ''; }
 function outside(event: Event) {
   const target = event.target as Node;
   if (!anchor.value?.contains(target) && !panel.value?.contains(target)) close();
@@ -66,17 +76,17 @@ async function run(work: () => Promise<Repo | unknown>, after?: () => void) {
   finally { busy.value = false; }
 }
 /** Sessions in the workspace directory that a switch would change the files under. */
-const blocking = ref<{ branch: string; create: boolean; titles: string[] }>();
-async function switchTo(branch: string, create = false, stopSessions = false) {
+const blocking = ref<{ branch: string; create: boolean; start?: string; titles: string[] }>();
+async function switchTo(branch: string, create = false, stopSessions = false, start?: string) {
   branch = branch.trim();
   if (!branch || branch === repo.value?.current || heldElsewhere(branch) || busy.value) return;
   busy.value = true; error.value = '';
   try {
-    await request(`${workspacePath(props.workspaceId)}/git/switch`, json('POST', { branch, create, stop_sessions: stopSessions }));
+    await request(`${workspacePath(props.workspaceId)}/git/switch`, json('POST', { branch, create, stop_sessions: stopSessions, ...(start ? { start_point: start } : {}) }));
     blocking.value = undefined; created.value = ''; close(); emit('switched'); emit('changed');
   } catch (cause) {
     const titles = cause instanceof ApiError && cause.status === 409 && !stopSessions ? await runningHere() : [];
-    if (titles.length) blocking.value = { branch, create, titles };
+    if (titles.length) blocking.value = { branch, create, start, titles };
     else error.value = errorMessage(cause);
   } finally { busy.value = false; }
 }
@@ -86,7 +96,24 @@ async function runningHere() {
     return sessions.filter(session => !session.checkout_path && ['running', 'starting', 'waiting'].includes(session.status)).map(session => session.title);
   } catch { return []; }
 }
-function showActions(kind: 'branch' | 'worktree', key: string) { renaming.value = ''; confirming.value = undefined; actions.value = actions.value?.key === key && actions.value.kind === kind ? undefined : { kind, key }; }
+/** A remote branch: its local branch if there is one, else a new one tracking it. */
+function checkoutRemote(name: string) {
+  const local = localFor(name);
+  if (repo.value?.branches.includes(local)) void switchTo(local);
+  else void switchTo(local, true, false, name);
+}
+/** Merge a branch into the current one, or rebase the current one onto it. */
+async function integrate(kind: 'merge' | 'rebase', rev: string) {
+  if (busy.value) return;
+  busy.value = true; error.value = ''; note.value = ''; actions.value = undefined;
+  try {
+    const outcome = await request<GitOutcome>(`${workspacePath(props.workspaceId)}/git/${kind}`, json('POST', { rev }));
+    note.value = outcome.conflicts ? t('Stopped on conflicts. Resolve them under Changes in the Git pane, then continue.') : t(kind === 'merge' ? 'Merged {branch}' : 'Rebased onto {branch}', { branch: rev });
+    emit('changed'); await load();
+  } catch (cause) { error.value = errorMessage(cause); }
+  finally { busy.value = false; }
+}
+function showActions(kind: 'branch' | 'worktree' | 'remote', key: string) { renaming.value = ''; confirming.value = undefined; actions.value = actions.value?.key === key && actions.value.kind === kind ? undefined : { kind, key }; }
 function beginRename(name: string) { actions.value = undefined; renaming.value = name; renameTo.value = name; }
 async function rename() {
   const from = renaming.value, to = renameTo.value.trim();
@@ -98,9 +125,15 @@ async function rename() {
  * and the second press is the forced one. */
 async function confirm() {
   const target = confirming.value; if (!target) return;
+  busy.value = true; error.value = '';
+  if (target.kind === 'remote') {
+    try { await request(`${workspacePath(props.workspaceId)}/git/push`, json('POST', { remote: remoteOf(target.key), branch: localFor(target.key), delete: true })); resetRow(); await load(); emit('changed'); }
+    catch (cause) { error.value = errorMessage(cause); }
+    finally { busy.value = false; }
+    return;
+  }
   const url = target.kind === 'delete' ? 'git/branches/delete' : 'git/worktrees/remove';
   const body = target.kind === 'delete' ? { branch: target.key, force: target.force } : { path: target.key, force: target.force };
-  busy.value = true; error.value = '';
   try { repo.value = await request<Repo>(`${workspacePath(props.workspaceId)}/${url}`, json('POST', body)); resetRow(); emit('changed'); }
   catch (cause) {
     const reason = errorMessage(cause);
@@ -121,22 +154,26 @@ onBeforeUnmount(close);
       <header>{{ t('Workspace directory branch') }}</header>
       <p>{{ t('Switches the directory every session here shares. A session in its own worktree is not affected. Right-click a branch or worktree for more.') }}</p>
       <p v-if="error" class="ws-branch-error" role="alert">{{ error }}</p>
+      <p v-else-if="note" class="ws-branch-ok" role="status">{{ note }}</p>
       <div v-if="blocking" class="ws-confirm ws-blocking" role="alertdialog">
         <p>{{ t('Switching to {branch} changes the files under these running sessions:', { branch: blocking.branch }) }}</p>
         <ul><li v-for="(title, index) in blocking.titles" :key="index">{{ title }}</li></ul>
         <p class="ws-branch-note">{{ t('End them and switch, or move a session to its own branch from its branch chip.') }}</p>
-        <div><button type="button" class="ws-btn danger solid" :disabled="busy" @click="switchTo(blocking.branch, blocking.create, true)">{{ t('End them and switch') }}</button><button type="button" class="ws-btn quiet" @click="blocking = undefined">{{ t('Cancel') }}</button></div>
+        <div><button type="button" class="ws-btn danger solid" :disabled="busy" @click="switchTo(blocking.branch, blocking.create, true, blocking.start)">{{ t('End them and switch') }}</button><button type="button" class="ws-btn quiet" @click="blocking = undefined">{{ t('Cancel') }}</button></div>
       </div>
       <p v-if="!repo && !error" class="ws-branch-note">{{ t('Loading…') }}</p>
       <template v-else-if="repo">
+ <input v-if="(repo.branches.length + (repo.remote?.length ?? 0)) > 8" v-model="filter" class="ws-filter" :placeholder="t('Filter branches')" :aria-label="t('Filter branches')" spellcheck="false" autocomplete="off" />
         <section>
-          <div v-for="name in repo.branches" :key="name" class="ws-row" :class="{ current: name === repo.current }" @contextmenu.prevent="showActions('branch', name)">
+          <div v-for="name in localNames" :key="name" class="ws-row" :class="{ current: name === repo.current }" @contextmenu.prevent="showActions('branch', name)">
             <form v-if="renaming === name" class="ws-rename" @submit.prevent="rename"><input v-model="renameTo" :aria-label="t('New name for {branch}', { branch: name })" maxlength="200" spellcheck="false" autocomplete="off" @vue:mounted="({ el }: { el: HTMLInputElement }) => { el.focus(); el.select(); }" /><button type="submit" class="ws-btn primary" :disabled="busy">{{ t('Rename') }}</button><button type="button" class="ws-btn quiet" @click="renaming=''">{{ t('Cancel') }}</button></form>
             <template v-else>
-              <button type="button" class="ws-row-main" :disabled="busy || heldElsewhere(name)" :title="heldElsewhere(name) ? t('Checked out in another worktree') : name === repo.current ? undefined : t('Switch this checkout to {branch}', { branch: name })" @click="switchTo(name)"><span>{{ name }}</span><small v-if="name === repo.current">{{ t('Current') }}</small><small v-else-if="heldElsewhere(name)">{{ t('In a worktree') }}</small></button>
+              <button type="button" class="ws-row-main" :disabled="busy || heldElsewhere(name)" :title="heldElsewhere(name) ? t('Checked out in another worktree') : name === repo.current ? undefined : t('Switch this checkout to {branch}', { branch: name })" @click="switchTo(name)"><span>{{ name }}</span><small v-if="track(details.get(name))" class="ws-track" :title="details.get(name)?.upstream">{{ track(details.get(name)) }}</small><small v-if="name === repo.current">{{ t('Current') }}</small><small v-else-if="heldElsewhere(name)">{{ t('In a worktree') }}</small></button>
               <button type="button" class="ws-more" :aria-label="t('More actions for {name}', { name })" :aria-expanded="actions?.kind === 'branch' && actions.key === name" @click="showActions('branch', name)">⋯</button>
             </template>
             <div v-if="actions?.kind === 'branch' && actions.key === name" class="ws-actions" role="menu">
+              <button v-if="repo.current && name !== repo.current" type="button" role="menuitem" class="ws-btn" :disabled="busy" @click="integrate('merge', name)">{{ t('Merge into {branch}', { branch: repo.current }) }}</button>
+              <button v-if="repo.current && name !== repo.current" type="button" role="menuitem" class="ws-btn" :disabled="busy" @click="integrate('rebase', name)">{{ t('Rebase onto this') }}</button>
               <button type="button" role="menuitem" class="ws-btn" @click="beginRename(name)">{{ t('Rename…') }}</button>
               <button type="button" role="menuitem" class="ws-btn danger" :disabled="name === repo.current || heldElsewhere(name)" :title="name === repo.current || heldElsewhere(name) ? t('A branch that is checked out cannot be deleted') : undefined" @click="actions = undefined; confirming = { kind: 'delete', key: name, force: false }">{{ t('Delete branch…') }}</button>
             </div>
@@ -145,6 +182,24 @@ onBeforeUnmount(close);
               <div><button type="button" class="ws-btn danger solid" :disabled="busy" @click="confirm">{{ t(confirming.force ? 'Delete anyway' : 'Delete') }}</button><button type="button" class="ws-btn quiet" @click="confirming = undefined">{{ t('Cancel') }}</button></div>
             </div>
           </div>
+        </section>
+        <section v-if="repo.remote?.length" class="ws-trees ws-remotes">
+          <button type="button" class="ws-section-toggle" :aria-expanded="showRemotes || !!filter.trim()" @click="showRemotes = !showRemotes"><span :class="{ open: showRemotes || !!filter.trim() }">›</span>{{ t('Remote branches') }} <small>{{ repo.remote.length }}</small></button>
+          <template v-if="showRemotes || filter.trim()">
+            <div v-for="entry in remotes" :key="entry.name" class="ws-row" @contextmenu.prevent="showActions('remote', entry.name)">
+              <button type="button" class="ws-row-main" :disabled="busy" :title="t('Check out {branch} as a local branch that tracks it', { branch: entry.name })" @click="checkoutRemote(entry.name)"><span>{{ entry.name }}</span><small v-if="repo.branches.includes(localFor(entry.name))">{{ t('Local') }}</small></button>
+              <button type="button" class="ws-more" :aria-label="t('More actions for {name}', { name: entry.name })" :aria-expanded="actions?.kind === 'remote' && actions.key === entry.name" @click="showActions('remote', entry.name)">⋯</button>
+              <div v-if="actions?.kind === 'remote' && actions.key === entry.name" class="ws-actions" role="menu">
+                <button v-if="repo.current" type="button" role="menuitem" class="ws-btn" :disabled="busy" @click="integrate('merge', entry.name)">{{ t('Merge into {branch}', { branch: repo.current }) }}</button>
+                <button v-if="repo.current" type="button" role="menuitem" class="ws-btn" :disabled="busy" @click="integrate('rebase', entry.name)">{{ t('Rebase onto this') }}</button>
+                <button type="button" role="menuitem" class="ws-btn danger" @click="actions = undefined; confirming = { kind: 'remote', key: entry.name, force: false }">{{ t('Delete from remote…') }}</button>
+              </div>
+              <div v-if="confirming?.kind === 'remote' && confirming.key === entry.name" class="ws-confirm" role="alertdialog">
+                <p>{{ t('Delete {branch} on {remote}? Everyone sharing the remote loses it.', { branch: localFor(entry.name), remote: remoteOf(entry.name) }) }}</p>
+                <div><button type="button" class="ws-btn danger solid" :disabled="busy" @click="confirm">{{ t('Delete') }}</button><button type="button" class="ws-btn quiet" @click="confirming = undefined">{{ t('Cancel') }}</button></div>
+              </div>
+            </div>
+          </template>
         </section>
         <form class="ws-create" @submit.prevent="switchTo(created, true)"><input v-model="created" :placeholder="t('New branch name')" maxlength="200" spellcheck="false" autocomplete="off" :aria-label="t('New branch name')" /><button type="submit" class="ws-btn primary" :disabled="busy || !created.trim()">{{ t('Create') }}</button></form>
         <section v-if="worktrees.length" class="ws-trees">
@@ -175,6 +230,14 @@ onBeforeUnmount(close);
 .ws-branch-panel{position:fixed;z-index:1200;overflow-y:auto;padding:8px;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface);box-shadow:var(--shadow-lg);font-size:var(--text-sm);color:var(--ink);text-align:left}
 .ws-branch-panel header{font-weight:600;margin:2px 4px}
 .ws-branch-panel>p{margin:4px 4px 8px;font-size:var(--text-xs);line-height:1.5;color:var(--muted)}
+.ws-branch-panel .ws-branch-ok{color:var(--ok-ink);background:var(--ok-soft);border-radius:var(--radius-sm);padding:6px 8px}
+.ws-filter{display:block;width:calc(100% - 8px);height:28px;margin:0 4px 6px;padding:0 8px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface);color:var(--ink);font:var(--text-sm) var(--mono)}
+.ws-track{color:var(--accent-ink)!important;font-family:var(--mono)!important}
+.ws-section-toggle{display:flex;align-items:center;gap:6px;width:100%;margin:2px 0;padding:4px 6px;border:0;border-radius:var(--radius-sm);background:none;font-size:var(--text-xs);color:var(--muted);cursor:pointer;text-align:left}
+.ws-section-toggle:hover{background:var(--sunken);color:var(--ink)}
+.ws-section-toggle>span{display:inline-block;width:10px;transition:transform var(--duration-fast)}
+.ws-section-toggle>span.open{transform:rotate(90deg)}
+.ws-section-toggle small{color:var(--faint)}
 .ws-branch-panel .ws-branch-error{color:var(--danger-ink);background:var(--danger-soft);border-radius:var(--radius-sm);padding:6px 8px}
 .ws-row{display:flex;flex-wrap:wrap;align-items:center;border-radius:var(--radius-sm)}
 .ws-row:hover{background:var(--sunken)}
@@ -189,7 +252,7 @@ onBeforeUnmount(close);
 .ws-more{flex-shrink:0;width:26px;height:26px;margin-right:2px;border:0;border-radius:var(--radius-sm);background:none;color:var(--muted);font-size:var(--text-base);line-height:1;cursor:pointer;opacity:0}
 .ws-row:hover .ws-more,.ws-more:focus-visible,.ws-more[aria-expanded=true]{opacity:1}
 .ws-more:hover{background:var(--fill);color:var(--ink)}
-.ws-actions{flex-basis:100%;display:flex;gap:6px;padding:2px 8px 8px}
+.ws-actions{flex-basis:100%;display:flex;flex-wrap:wrap;gap:6px;padding:2px 8px 8px}
 /* One set of buttons for the whole menu: neutral by default, filled only to
    commit a form, red only for what destroys something. */
 .ws-btn{height:28px;padding:0 10px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface);font-size:var(--text-xs);color:var(--ink-soft);cursor:pointer;white-space:nowrap}

@@ -23,6 +23,7 @@ mod embedded;
 mod environment;
 mod file_search;
 mod file_watch;
+mod git_ops;
 mod host_grants;
 mod installation;
 mod launch;
@@ -256,11 +257,20 @@ struct BranchInput {
     /// End the sessions running in the workspace directory, then switch.
     #[serde(default)]
     stop_sessions: bool,
+    /// With `create`: the commit or remote branch the new branch starts at.
+    #[serde(default)]
+    start_point: Option<String>,
+    /// Check out the commit `branch` names, on no branch.
+    #[serde(default)]
+    detach: bool,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CommitInput {
     message: String,
+    /// Replace the last commit with this one instead of adding another.
+    #[serde(default)]
+    amend: bool,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -718,6 +728,7 @@ fn router(state: AppState) -> Router {
         .merge(usage::routes())
         .merge(host_grants::routes())
         .merge(checkouts::routes())
+        .merge(git_ops::routes())
         .merge(preferences::routes())
         .merge(secrets::routes())
         .merge(agent::routes())
@@ -2059,7 +2070,14 @@ async fn git_switch(
     for session in busy {
         stop_session_locked(&state, session).await?;
     }
-    workspace_io::git_switch(&root(&state, id).await?, input.branch.trim(), input.create).await?;
+    workspace_io::git_switch(
+        &root(&state, id).await?,
+        input.branch.trim(),
+        input.create,
+        input.start_point.as_deref().map(str::trim),
+        input.detach,
+    )
+    .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 async fn git_commit(
@@ -2069,7 +2087,7 @@ async fn git_commit(
 ) -> Result<Json<Value>> {
     let _guard = state.operations.lock().await;
     Ok(Json(
-        json!({"commit":workspace_io::git_commit(&root(&state,id).await?,&input.message).await?}),
+        json!({"commit":workspace_io::git_commit(&root(&state,id).await?,&input.message,input.amend).await?}),
     ))
 }
 async fn get_layout(

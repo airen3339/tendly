@@ -4,6 +4,8 @@ pub(super) use tower::ServiceExt;
 mod archive_tests;
 #[path = "conversation_api_tests.rs"]
 mod conversation_tests;
+#[path = "git_ops_api_tests.rs"]
+mod git_ops_tests;
 #[path = "launch_api_tests.rs"]
 mod launch_tests;
 use axum::{

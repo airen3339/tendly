@@ -1,162 +1,232 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from "vue";
-import type { GitDiff, GitFile, GitStatus } from "@agentdock/protocol";
-import { errorMessage, json, request, workspacePath } from "./api";
-import { isChangedFile, isStagedFile, parseUnifiedDiff, pathsForGitFiles } from "./git-model";
-import { gitViewState } from "./git-view-state";
+import { computed, onBeforeUnmount, provide, ref, watch } from "vue";
+import type { GitBranches, GitOutcome, GitRemote, GitStash, GitStatus } from "@agentdock/protocol";
+import { errorMessage } from "./api";
+import { copyText } from "./clipboard";
+import { GIT_CONTEXT, gitGet, gitPost, isOutcome, type GitContext, type PromptAnswer, type PromptSpec } from "./git-context";
+import { isConflictedFile } from "./git-model";
+import { gitViewState, type GitView } from "./git-view-state";
+import GitChanges from "./GitChanges.vue";
+import GitHistory from "./GitHistory.vue";
+import GitStashes from "./GitStashes.vue";
+import GitPrompt from "./GitPrompt.vue";
+import GitRepoDialog from "./GitRepoDialog.vue";
 import Icon from "./Icon.vue";
 import WorkspaceBranchMenu from "./WorkspaceBranchMenu.vue";
 import ContextMenu from "./ContextMenu.vue";
 import { useMobile } from "./mobile";
 import { useI18n } from "../i18n";
+
+/**
+ * A workspace's repository: the working tree, its history and its stashes,
+ * with syncing against remotes in the toolbar. Every action goes through one
+ * `run`, so one thing happens at a time and the status always follows.
+ */
 const { t } = useI18n();
 const props = defineProps<{ workspaceId: string; refreshToken?: number }>();
 const emit = defineEmits<{ changed: [status: GitStatus]; openFile: [path: string] }>();
 const status = ref<GitStatus>({ branch: null, files: [] });
+const remotes = ref<GitRemote[]>([]);
 const viewState = computed(() => gitViewState(props.workspaceId));
-const selected = computed({ get: () => viewState.value.selected, set: value => { viewState.value.selected = value; } });
-const diff = ref<GitDiff>();
-const loading = ref(false), diffLoading = ref(false), busy = ref(false), error = ref(""), diffError = ref("");
+const view = computed<GitView>({ get: () => viewState.value.view ?? "changes", set: value => { viewState.value.view = value; detailOpen.value = false; } });
+const loading = ref(false), busy = ref(false), error = ref(""), notice = ref(""), warning = ref("");
 /** Why the status itself could not be read: not a repository, or no Git. The pane then has nothing to act on. */
 const unavailable = ref("");
-const message = computed({ get: () => viewState.value.message, set: value => { viewState.value.message = value; } });
-const notice = ref<{ hash: string; message: string }>();
-const stagedFiles = computed(() => status.value.files.filter(isStagedFile));
-const changedFiles = computed(() => status.value.files.filter(isChangedFile));
-const groups = computed(() => [{ title: "Staged changes", staged: true, files: stagedFiles.value }, { title: "Changes", staged: false, files: changedFiles.value }]);
-let revision = 0, diffRevision = 0, mutationEpoch = 0, alive = true;
-/** A phone shows the list or one diff, not both: a file opens its diff over
- * the list, and the back button returns to it. */
-const mobile = useMobile(), diffOpen = ref(false);
-const diffLines = computed(() => parseUnifiedDiff(diff.value?.diff ?? ""));
-async function openDiff(path: string, staged: boolean) {
-  const keepVisible = selected.value?.path === path && selected.value?.staged === staged && !!diff.value;
-  selected.value = { path, staged };
-  const requestId = ++diffRevision;
-  diffLoading.value = !keepVisible; diffError.value = ""; if (!keepVisible) diff.value = undefined;
-  try {
-    const result = await request<GitDiff>(`${workspacePath(props.workspaceId)}/git/diff?path=${encodeURIComponent(path)}&staged=${staged}`);
-    if (requestId === diffRevision && JSON.stringify(diff.value) !== JSON.stringify(result)) diff.value = result;
-  } catch (cause) { if (requestId === diffRevision) diffError.value = errorMessage(cause); }
-  finally { if (requestId === diffRevision) diffLoading.value = false; }
-}
+const revision = ref(0), stashCount = ref(0);
+/** A phone shows the list or one detail, not both: picking opens the detail over the list. */
+const mobile = useMobile(), detailOpen = ref(false);
+const conflicts = computed(() => status.value.files.filter(isConflictedFile).length);
+let statusRevision = 0, alive = true;
+
 async function refresh() {
-  const requestId = ++revision;
-  loading.value = true; error.value = ""; unavailable.value = "";
+  const requestId = ++statusRevision;
+  loading.value = true; unavailable.value = "";
   try {
-    const next = await request<GitStatus>(`${workspacePath(props.workspaceId)}/git/status`);
-    if (requestId !== revision) return;
+    const next = await gitGet<GitStatus>(props.workspaceId, "status");
+    if (!alive || requestId !== statusRevision) return;
     status.value = next; emit("changed", next);
-    const choice = selected.value;
-    const matching = choice && (choice.staged ? stagedFiles.value : changedFiles.value).some(file => file.path === choice.path);
-    if (choice && matching) await openDiff(choice.path, choice.staged);
-    else if (changedFiles.value[0]) await openDiff(changedFiles.value[0].path, false);
-    else if (stagedFiles.value[0]) await openDiff(stagedFiles.value[0].path, true);
-    else { selected.value = undefined; diff.value = undefined; diffRevision++; }
-  } catch (cause) { if (requestId === revision) { status.value = { branch: null, files: [] }; selected.value = undefined; diff.value = undefined; unavailable.value = errorMessage(cause); } }
-  finally { if (requestId === revision) loading.value = false; }
+  } catch (cause) { if (alive && requestId === statusRevision) { status.value = { branch: null, files: [] }; unavailable.value = errorMessage(cause); } }
+  finally { if (alive && requestId === statusRevision) loading.value = false; }
 }
-async function stage(files: GitFile[], unstage: boolean) {
-  if (!files.length || busy.value) return;
-  const workspaceId = props.workspaceId, epoch = mutationEpoch;
-  busy.value = true; error.value = ""; notice.value = undefined;
+async function loadRepo() {
+  try { remotes.value = await gitGet<GitRemote[]>(props.workspaceId, "remotes"); } catch { remotes.value = []; }
+  try { stashCount.value = (await gitGet<GitStash[]>(props.workspaceId, "stashes")).length; } catch { stashCount.value = 0; }
+}
+
+/** Read everything again: after a branch moved elsewhere, or on request. */
+function reload() { error.value = ""; revision.value++; void refresh(); void loadRepo(); }
+async function run<T>(work: () => Promise<T>, success?: string | ((result: T) => string | undefined)): Promise<T | undefined> {
+  if (busy.value) return undefined;
+  busy.value = true; error.value = ""; notice.value = ""; warning.value = "";
   try {
-    const paths = pathsForGitFiles(files);
-    await request(`${workspacePath(workspaceId)}/git/${unstage ? 'unstage' : 'stage'}`, json("POST", { paths }));
-    if (alive && epoch === mutationEpoch) await refresh();
-  } catch (cause) { if (alive && epoch === mutationEpoch) error.value = errorMessage(cause); }
-  finally { if (alive && epoch === mutationEpoch) busy.value = false; }
+    const result = await work();
+    if (!alive) return result;
+    if (isOutcome(result) && result.conflicts) { warning.value = t("Stopped on conflicts. Resolve them under Changes, then continue."); view.value = "changes"; }
+    else { const done = typeof success === "function" ? success(result) : success; if (done) notice.value = done; }
+    return result;
+  } catch (cause) { if (alive) error.value = errorMessage(cause); return undefined; }
+  finally {
+    if (alive) { busy.value = false; revision.value++; await refresh(); void loadRepo(); }
+  }
 }
-/**
- * Throwing away working-tree changes cannot be undone, so it always asks
- * first, naming how many files and whether any of them are new (new files are
- * deleted, not reverted). Only the unstaged group offers it: staged work is
- * never discarded from here.
- */
-const discardTarget = ref<GitFile[]>();
-const discardNew = computed(() => (discardTarget.value ?? []).filter(file => file.worktree === '?').length);
-async function discard() {
-  const files = discardTarget.value;
-  if (!files?.length || busy.value) return;
-  const workspaceId = props.workspaceId, epoch = mutationEpoch;
-  busy.value = true; error.value = ""; notice.value = undefined;
-  try {
-    await request(`${workspacePath(workspaceId)}/git/discard`, json("POST", { paths: files.map(file => file.path) }));
-    discardTarget.value = undefined;
-    if (alive && epoch === mutationEpoch) await refresh();
-  } catch (cause) { if (alive && epoch === mutationEpoch) error.value = errorMessage(cause); }
-  finally { if (alive && epoch === mutationEpoch) busy.value = false; }
+
+/** The dialog the views ask through; one at a time. */
+const prompt = ref<{ spec: PromptSpec; answer: (value: PromptAnswer | undefined) => void }>();
+function ask(spec: PromptSpec) { prompt.value?.answer(undefined); return new Promise<PromptAnswer | undefined>(resolve => { prompt.value = { spec, answer: value => { prompt.value = undefined; resolve(value); } }; }); }
+async function copy(text: string) { try { await copyText(text); notice.value = t("Copied"); } catch { error.value = t("Could not copy to the clipboard in this browser."); } }
+function showHistory(path?: string) { viewState.value.historyPath = path; view.value = "history"; }
+
+const context: GitContext = { workspaceId: () => props.workspaceId, status, remotes, busy, revision, detailOpen, run, refresh, ask, openFile: path => emit("openFile", path), showHistory, copy };
+provide(GIT_CONTEXT, context);
+
+// ------------------------------------------------------------------ sync
+const remoteName = computed(() => remotes.value.find(remote => remote.name === "origin")?.name ?? remotes.value[0]?.name);
+const fetchAll = () => run(() => gitPost(props.workspaceId, "fetch", {}), t("Fetched from every remote"));
+const pull = (mode?: string) => run(() => gitPost<GitOutcome>(props.workspaceId, "pull", mode ? { mode } : {}), outcome => outcome.conflicts ? undefined : t("Pulled {upstream}", { upstream: status.value.upstream ?? "" }));
+const push = () => run(() => gitPost<GitOutcome>(props.workspaceId, "push", {}), t("Pushed to {upstream}", { upstream: status.value.upstream ?? "" }));
+async function publish() {
+  if (!status.value.branch) return;
+  let remote = remoteName.value;
+  if (remotes.value.length > 1) {
+    const answer = await ask({ title: t("Publish {branch}", { branch: status.value.branch }), choices: [{ key: "remote", label: t("Remote"), value: remote!, options: remotes.value.map(entry => ({ value: entry.name, label: `${entry.name} · ${entry.url}` })) }], confirm: t("Publish") });
+    if (!answer) return; remote = String(answer.remote);
+  }
+  await run(() => gitPost(props.workspaceId, "push", { remote, set_upstream: true }), t("Published {branch} to {remote}", { branch: status.value.branch!, remote: remote! }));
 }
-async function commit() {
-  if (!message.value.trim() || !stagedFiles.value.length || busy.value) return;
-  const workspaceId = props.workspaceId, epoch = mutationEpoch, draft = viewState.value, sentMessage = message.value;
-  busy.value = true; error.value = ""; notice.value = undefined;
-  try {
-    const result = await request<{ commit: string }>(`${workspacePath(workspaceId)}/git/commit`, json("POST", { message: sentMessage.trim() }));
-    if (draft.message === sentMessage) draft.message = "";
-    if (alive && epoch === mutationEpoch) { notice.value = { hash: result.commit.slice(0, 10), message: sentMessage.split('\n')[0] }; await refresh(); }
-  } catch (cause) { if (alive && epoch === mutationEpoch) error.value = errorMessage(cause); }
-  finally { if (alive && epoch === mutationEpoch) busy.value = false; }
+async function forcePush() {
+  const answer = await ask({ title: t("Force push {branch}?", { branch: status.value.branch ?? "" }), description: t("Replaces {upstream} with your branch, dropping commits there that you do not have. It is refused if someone pushed since you last fetched (force-with-lease).", { upstream: status.value.upstream ?? t("the remote branch") }), confirm: t("Force push"), danger: true });
+  if (answer) await run(() => gitPost(props.workspaceId, "push", { force: true }), t("Force-pushed {branch}", { branch: status.value.branch ?? "" }));
 }
-/** Right-click on a changed file, or on a group of them. */
-const fileMenu = ref<{ x: number; y: number; staged: boolean; file?: GitFile }>();
-function openFileMenu(event: MouseEvent, staged: boolean, file?: GitFile) { event.preventDefault(); event.stopPropagation(); fileMenu.value = { x: event.clientX, y: event.clientY, staged, file }; }
-function menuAction(run: () => unknown) { fileMenu.value = undefined; void run(); }
-async function copyPath(path: string) {
-  fileMenu.value = undefined;
-  try { await navigator.clipboard.writeText(path); } catch { error.value = t("Could not copy to the clipboard in this browser."); }
+/** Merge another branch into this one, or rebase this one onto it. */
+async function integrate(kind: "merge" | "rebase") {
+  let branches: GitBranches;
+  try { branches = await gitGet<GitBranches>(props.workspaceId, "branches"); } catch (cause) { error.value = errorMessage(cause); return; }
+  const names = [...(branches.local ?? []).map(entry => entry.name).filter(name => name !== branches.current), ...(branches.remote ?? []).map(entry => entry.name)];
+  if (!names.length) { error.value = t("There is no other branch."); return; }
+  const current = branches.current ?? "HEAD";
+  const answer = await ask(kind === "merge"
+    ? { title: t("Merge into {branch}", { branch: current }), choices: [{ key: "rev", label: t("Branch to merge"), value: names[0], options: names.map(name => ({ value: name, label: name })) }], checks: [{ key: "no_ff", label: t("Always create a merge commit (--no-ff)") }, { key: "squash", label: t("Squash: stage the changes for one commit, without merging history") }], confirm: t("Merge") }
+    : { title: t("Rebase {branch}", { branch: current }), description: t("Replays the commits of {branch} on top of the branch you choose. Rewrites them: avoid it for commits already pushed and shared.", { branch: current }), choices: [{ key: "rev", label: t("Onto"), value: names[0], options: names.map(name => ({ value: name, label: name })) }], confirm: t("Rebase") });
+  if (!answer) return;
+  const rev = String(answer.rev);
+  await run(() => gitPost<GitOutcome>(props.workspaceId, kind, kind === "merge" ? { rev, no_ff: !!answer.no_ff, squash: !!answer.squash } : { rev }), outcome => outcome.conflicts ? undefined : t(kind === "merge" ? "Merged {branch}" : "Rebased onto {branch}", { branch: rev }));
 }
-watch(() => props.workspaceId, () => { revision++; diffRevision++; mutationEpoch++; busy.value = false; status.value = { branch: null, files: [] }; notice.value = undefined; diff.value = undefined; void refresh(); }, { immediate: true, flush: "sync" });
-watch(() => props.refreshToken, () => { if (!busy.value) void refresh(); });
-onBeforeUnmount(() => { alive = false; revision++; diffRevision++; mutationEpoch++; });
+async function stash(paths?: string[]) {
+  const answer = await ask({ title: paths?.length ? t("Stash {path}", { path: paths[0] }) : t("Stash changes"), fields: [{ key: "message", label: t("Message"), placeholder: t("What is this work?") }], checks: paths?.length ? [] : [{ key: "include_untracked", label: t("Include new (untracked) files"), value: true }, { key: "keep_index", label: t("Keep staged changes in place too") }], confirm: t("Stash") });
+  if (!answer) return;
+  await run(() => gitPost(props.workspaceId, "stashes", { message: String(answer.message ?? ""), include_untracked: paths?.length ? true : !!answer.include_untracked, keep_index: !!answer.keep_index, paths: paths ?? [] }), t("Changes stashed"));
+}
+const operationLabels: Record<string, string> = { merge: "Merge in progress", rebase: "Rebase in progress", "cherry-pick": "Cherry-pick in progress", revert: "Revert in progress" };
+const operationDone: Record<string, [string, string]> = { merge: ["Merge completed", "Merge aborted"], rebase: ["Rebase completed", "Rebase aborted"], "cherry-pick": ["Cherry-pick completed", "Cherry-pick aborted"], revert: ["Revert completed", "Revert aborted"] };
+function operation(action: "continue" | "abort" | "skip") {
+  const [completed, aborted] = operationDone[status.value.operation ?? "merge"];
+  return run(() => gitPost<GitOutcome>(props.workspaceId, "operation", { action }), outcome => outcome.conflicts ? undefined : t(action === "abort" ? aborted : completed));
+}
+const init = () => run(() => gitPost(props.workspaceId, "init"), t("Created a Git repository here"));
+
+const moreMenu = ref<{ x: number; y: number }>();
+function openMore(event: MouseEvent) { const box = (event.currentTarget as HTMLElement).getBoundingClientRect(); moreMenu.value = { x: box.right - 240, y: box.bottom + 4 }; }
+function menuAction(work: () => unknown) { moreMenu.value = undefined; void work(); }
+const showRepo = ref(false);
+
+watch(() => props.workspaceId, () => { statusRevision++; busy.value = false; status.value = { branch: null, files: [] }; notice.value = ""; error.value = ""; warning.value = ""; void refresh(); void loadRepo(); }, { immediate: true, flush: "sync" });
+// Files change often while agents work: the status follows every change,
+// history and stashes only while they are on screen.
+watch(() => props.refreshToken, () => { if (busy.value) return; void refresh(); if (view.value !== "changes") revision.value++; });
+onBeforeUnmount(() => { alive = false; statusRevision++; prompt.value?.answer(undefined); });
+const tabs = computed(() => [
+  { id: "changes" as const, label: t("Changes"), count: status.value.files.length },
+  { id: "history" as const, label: t("History") },
+  { id: "stashes" as const, label: t("Stashes"), count: stashCount.value },
+]);
 </script>
+
 <template>
-  <section :class="['git-pane', { 'is-phone': mobile, 'show-diff': mobile && diffOpen && !!selected }]">
-    <div class="content-toolbar"><span class="git-branch-bar"><WorkspaceBranchMenu :workspace-id="workspaceId" :branch="status.branch" @switched="refresh" @changed="refresh" /><span class="count-badge">{{ status.files.length }}</span></span><button class="icon-button" :disabled="busy || loading" :aria-label="t('Refresh Git changes')" @click="refresh"><Icon name="refresh" :size="15" /></button></div>
-    <div v-if="error" class="inline-error" role="alert">{{ error }}</div><div v-if="notice" class="inline-success" role="status">{{ t('Committed {hash} · {message}', notice) }}</div>
-    <div v-if="unavailable" class="pane-empty git-unavailable"><span class="empty-icon"><Icon name="git" :size="24" /></span><h3>{{ t('Git unavailable') }}</h3><p>{{ t('Register a Git repository to review changes here.') }}</p><details><summary>{{ t('Details') }}</summary><code>{{ unavailable }}</code></details></div>
-    <div v-else class="git-content">
-      <div class="git-sidebar">
-        <form class="commit-form" @submit.prevent="commit"><textarea v-model="message" :aria-label="t('Commit message')" :placeholder="t('Commit message…')" rows="2" :disabled="busy" /><button class="primary-button" :disabled="busy || !message.trim() || !stagedFiles.length"><Icon name="check" :size="14" />{{ busy ? t('Working…') : t('Commit staged ({count})', { count: stagedFiles.length }) }}</button></form>
-        <div v-if="discardTarget" class="confirmation-bar git-discard-confirm" role="alertdialog"><span>{{ discardTarget.length===1 ? t('Discard changes to {path}? This cannot be undone.', { path: discardTarget[0].path }) : t('Discard changes to {count} files? This cannot be undone.', { count: discardTarget.length }) }}<template v-if="discardNew"> {{ t('{count} new files will be deleted.', { count: discardNew }) }}</template></span><div class="toolbar-buttons"><button type="button" class="small-button danger" :disabled="busy" @click="discard">{{ t(busy ? 'Working…' : 'Discard') }}</button><button type="button" class="small-button" :disabled="busy" @click="discardTarget=undefined">{{ t('Cancel') }}</button></div></div>
-        <div class="git-groups"><section v-for="group in groups" :key="group.title" class="git-group" @contextmenu="openFileMenu($event, group.staged)"><header><strong>{{ t(group.title) }} <span>{{ group.files.length }}</span></strong><span class="git-group-actions"><button v-if="!group.staged" class="text-button danger-text" :disabled="busy || !group.files.length" @click="discardTarget=group.files">{{ t('Discard all') }}</button><button class="text-button" :disabled="busy || !group.files.length" @click="stage(group.files, group.staged)">{{ t(group.staged ? 'Unstage all' : 'Stage all') }}</button></span></header><div v-for="file in group.files" :key="file.path" :class="['git-file', { selected: selected?.path === file.path && selected.staged === group.staged }]" @contextmenu="openFileMenu($event, group.staged, file)"><button class="git-file-open" :title="file.original_path ? `${file.original_path} → ${file.path}` : file.path" @click="openDiff(file.path, group.staged); diffOpen = true"><span :class="['git-file-code', { staged: group.staged }]">{{ group.staged ? file.index : file.worktree }}</span><span>{{ file.path }}</span></button><button v-if="!group.staged" class="icon-button git-discard" :aria-label="t('Discard changes to {path}', { path: file.path })" :title="t('Discard changes')" :disabled="busy" @click="discardTarget=[file]">↺</button><button class="icon-button" :aria-label="t(group.staged ? 'Unstage {path}' : 'Stage {path}', { path: file.path })" :disabled="busy" @click="stage([file], group.staged)">{{ group.staged ? '−' : '+' }}</button></div><p v-if="!group.files.length" class="group-empty">{{ t(error ? 'Git unavailable' : loading ? 'Checking…' : group.staged ? 'Nothing staged' : 'Working tree clean') }}</p></section></div>
-      </div>
-      <div class="diff-view">
-        <div v-if="selected" class="diff-title"><button v-if="mobile" type="button" class="icon-button git-back" :aria-label="t('Back to changes')" @click="diffOpen = false"><Icon name="chevron" :size="18" /></button><span class="truncate" :title="selected.path">{{ selected.path }}</span><span class="diff-badge">{{ t(selected.staged ? 'Staged' : 'Working tree') }}</span><button class="icon-button" :aria-label="t('Open changed file in editor')" @click="emit('openFile', selected.path)"><Icon name="file" :size="14" /></button></div>
-        <div v-if="diffLoading" class="pane-empty"><p>{{ t('Loading diff…') }}</p></div>
-        <div v-else-if="diffError" class="inline-error" role="alert">{{ diffError }}</div>
-        <div v-else-if="!selected" class="pane-empty"><span class="empty-icon teal"><Icon name="check" :size="26" /></span><h3>{{ t(loading ? 'Checking changes…' : 'All clear') }}</h3><p>{{ t('File changes appear here as you and your agents work.') }}</p></div>
-        <template v-else-if="diff"><div v-if="diff.binary" class="inline-notice">{{ t('Binary file changed. Open it in Explorer for a preview.') }}</div><div v-if="diff.truncated" class="inline-notice">{{ t('This diff was truncated by the server output limit.') }}</div><div v-if="diff.diff" class="diff-lines" tabindex="0" :aria-label="t('Unified Git diff')"><div v-for="(line, index) in diffLines" :key="index" :class="['diff-line', line.kind]"><span class="line-number">{{ line.before }}</span><span class="line-number">{{ line.after }}</span><code>{{ line.text || ' ' }}</code></div></div><div v-else class="pane-empty"><p>{{ t('No textual diff for this change.') }}</p></div></template>
-      </div>
+  <section :class="['git-pane', { 'is-phone': mobile, 'show-diff': mobile && detailOpen }]">
+    <div class="content-toolbar git-toolbar">
+      <span class="git-branch-bar"><WorkspaceBranchMenu :workspace-id="workspaceId" :branch="status.branch" @switched="reload" @changed="reload" /><span v-if="status.upstream" class="git-upstream" :title="t('Tracks {upstream}', { upstream: status.upstream })">{{ status.upstream }}</span></span>
+      <span v-if="!unavailable" class="toolbar-buttons git-sync">
+        <template v-if="status.upstream">
+          <button type="button" :class="['git-sync-button', { due: status.behind }]" :disabled="busy" :title="t('Pull from {upstream}', { upstream: status.upstream })" :aria-label="t('Pull from {upstream}', { upstream: status.upstream })" @click="pull()"><Icon name="download" :size="14" /><span v-if="status.behind">{{ status.behind }}</span></button>
+          <button type="button" :class="['git-sync-button', { due: status.ahead }]" :disabled="busy" :title="t('Push to {upstream}', { upstream: status.upstream })" :aria-label="t('Push to {upstream}', { upstream: status.upstream })" @click="push"><Icon name="upload" :size="14" /><span v-if="status.ahead">{{ status.ahead }}</span></button>
+        </template>
+        <button v-else-if="status.branch && remotes.length" type="button" class="small-button" :disabled="busy" :title="t('Push {branch} and track it', { branch: status.branch })" @click="publish"><Icon name="upload" :size="13" />{{ t('Publish branch') }}</button>
+        <button v-if="remotes.length" type="button" class="icon-button" :disabled="busy" :title="t('Fetch from every remote')" :aria-label="t('Fetch from every remote')" @click="fetchAll"><Icon name="sync" :size="15" /></button>
+        <button type="button" class="icon-button" :aria-label="t('More Git actions')" :title="t('More Git actions')" @click="openMore"><Icon name="more" :size="15" /></button>
+        <button class="icon-button" :disabled="busy || loading" :aria-label="t('Refresh Git changes')" :title="t('Refresh Git changes')" @click="reload"><Icon name="refresh" :size="15" /></button>
+      </span>
     </div>
-    <ContextMenu v-if="fileMenu" :x="fileMenu.x" :y="fileMenu.y" :label="t('Change actions')" @close="fileMenu = undefined">
-      <template v-if="fileMenu.file">
-        <button role="menuitem" @click="menuAction(() => openDiff(fileMenu!.file!.path, fileMenu!.staged))">{{ t('Show diff') }}</button>
-        <button role="menuitem" @click="menuAction(() => emit('openFile', fileMenu!.file!.path))"><Icon name="file" :size="13" />{{ t('Open changed file in editor') }}</button>
-        <button role="menuitem" @click="copyPath(fileMenu.file.path)">{{ t('Copy path') }}</button>
+    <nav v-if="!unavailable" class="git-tabs" role="tablist" :aria-label="t('Git views')">
+      <button v-for="tab in tabs" :key="tab.id" type="button" role="tab" :aria-selected="view === tab.id" :class="{ selected: view === tab.id }" @click="view = tab.id">{{ tab.label }}<span v-if="tab.count" class="count-badge">{{ tab.count }}</span></button>
+      <span v-if="busy" class="git-working"><i class="state-dot running" />{{ t('Working…') }}</span>
+    </nav>
+    <div v-if="status.operation" class="confirmation-bar git-operation" role="status">
+      <span><strong>{{ t(operationLabels[status.operation]) }}</strong> · {{ conflicts === 1 ? t('One conflicted file. Resolve it, mark it resolved, then continue.') : conflicts ? t('{count} conflicted files. Resolve them, mark them resolved, then continue.', { count: conflicts }) : t('No conflicts left. Continue to finish.') }}</span>
+      <span class="flex-spacer" />
+      <button type="button" class="small-button primary" :disabled="busy || !!conflicts" @click="operation('continue')">{{ t('Continue') }}</button>
+      <button v-if="status.operation !== 'merge'" type="button" class="small-button" :disabled="busy" @click="operation('skip')">{{ t('Skip') }}</button>
+      <button type="button" class="small-button danger" :disabled="busy" @click="operation('abort')">{{ t('Abort') }}</button>
+    </div>
+    <div v-if="error" class="inline-error git-message" role="alert"><span>{{ error }}</span><button type="button" class="icon-button" :aria-label="t('Dismiss')" @click="error = ''"><Icon name="close" :size="13" /></button></div>
+    <div v-else-if="warning && !status.operation" class="inline-notice git-message" role="alert"><span>{{ warning }}</span><button type="button" class="icon-button" :aria-label="t('Dismiss')" @click="warning = ''"><Icon name="close" :size="13" /></button></div>
+    <div v-else-if="notice" class="inline-success git-message" role="status"><span>{{ notice }}</span><button type="button" class="icon-button" :aria-label="t('Dismiss')" @click="notice = ''"><Icon name="close" :size="13" /></button></div>
+    <div v-if="unavailable" class="pane-empty git-unavailable"><span class="empty-icon"><Icon name="git" :size="24" /></span><h3>{{ t('Git unavailable') }}</h3><p>{{ t('This directory is not a Git repository yet. Create one here to track changes, or register a repository as the workspace.') }}</p><button type="button" class="primary-button" :disabled="busy" @click="init"><Icon name="plus" :size="14" />{{ t('Initialize repository') }}</button><details><summary>{{ t('Details') }}</summary><code>{{ unavailable }}</code></details></div>
+    <GitChanges v-else-if="view === 'changes'" @stash="stash" />
+    <GitHistory v-else-if="view === 'history'" />
+    <GitStashes v-else @stash="stash()" @count="count => stashCount = count" />
+    <ContextMenu v-if="moreMenu" :x="moreMenu.x" :y="moreMenu.y" :width="240" :label="t('More Git actions')" @close="moreMenu = undefined">
+      <template v-if="remotes.length">
+        <div class="context-menu-label">{{ t('Sync') }}</div>
+        <button role="menuitem" :disabled="busy" @click="menuAction(fetchAll)"><Icon name="sync" :size="13" />{{ t('Fetch from every remote') }}</button>
+        <button role="menuitem" :disabled="busy || !status.upstream" @click="menuAction(() => pull('merge'))"><Icon name="download" :size="13" />{{ t('Pull (merge)') }}</button>
+        <button role="menuitem" :disabled="busy || !status.upstream" @click="menuAction(() => pull('rebase'))">{{ t('Pull (rebase)') }}</button>
+        <button role="menuitem" :disabled="busy || !status.upstream" @click="menuAction(() => pull('ff-only'))">{{ t('Pull (fast-forward only)') }}</button>
+        <button role="menuitem" :disabled="busy || !status.upstream" @click="menuAction(push)"><Icon name="upload" :size="13" />{{ t('Push') }}</button>
+        <button role="menuitem" :disabled="busy || !status.branch" @click="menuAction(publish)">{{ t('Publish branch to…') }}</button>
+        <button role="menuitem" class="danger" :disabled="busy || !status.upstream" @click="menuAction(forcePush)">{{ t('Force push…') }}</button>
         <hr />
-        <button role="menuitem" :disabled="busy" @click="menuAction(() => stage([fileMenu!.file!], fileMenu!.staged))">{{ t(fileMenu.staged ? 'Unstage' : 'Stage') }}</button>
-        <button v-if="!fileMenu.staged" role="menuitem" class="danger" :disabled="busy" @click="menuAction(() => { discardTarget = [fileMenu!.file!]; })">{{ t('Discard changes…') }}</button>
       </template>
-      <template v-else>
-        <button role="menuitem" :disabled="busy || !(fileMenu.staged ? stagedFiles : changedFiles).length" @click="menuAction(() => stage(fileMenu!.staged ? stagedFiles : changedFiles, fileMenu!.staged))">{{ t(fileMenu.staged ? 'Unstage all' : 'Stage all') }}</button>
-        <button v-if="!fileMenu.staged" role="menuitem" class="danger" :disabled="busy || !changedFiles.length" @click="menuAction(() => { discardTarget = changedFiles; })">{{ t('Discard all') }}…</button>
-      </template>
+      <div class="context-menu-label">{{ t('Branch') }}</div>
+      <button role="menuitem" :disabled="busy || !!status.operation" @click="menuAction(() => integrate('merge'))">{{ t('Merge a branch into this one…') }}</button>
+      <button role="menuitem" :disabled="busy || !!status.operation || !status.branch" @click="menuAction(() => integrate('rebase'))">{{ t('Rebase this branch onto…') }}</button>
+      <button role="menuitem" :disabled="busy || !status.files.length" @click="menuAction(() => stash())"><Icon name="archive" :size="13" />{{ t('Stash all changes…') }}</button>
       <hr />
-      <button role="menuitem" :disabled="busy || loading" @click="menuAction(refresh)"><Icon name="refresh" :size="13" />{{ t('Refresh Git changes') }}</button>
+      <button role="menuitem" @click="menuAction(() => { showRepo = true; })"><Icon name="settings" :size="13" />{{ t('Remotes and tags…') }}</button>
     </ContextMenu>
+    <GitPrompt v-if="prompt" :key="prompt.spec.title" :spec="prompt.spec" @answer="prompt.answer" />
+    <GitRepoDialog v-if="showRepo" @close="showRepo = false" />
   </section>
 </template>
 
-<style scoped>
-.git-group-actions{display:flex;align-items:center;gap:10px}
-.git-discard{color:var(--muted);font-size:var(--text-base)}
-.git-discard:hover:not(:disabled){color:var(--danger)}
-.git-discard-confirm{margin:0 0 10px}
-
-/* The composer's chips open upward; this one sits at the top of its pane. */
+<style>
+.git-toolbar{gap:6px}
 .git-branch-bar{display:flex;align-items:center;gap:8px;min-width:0;font-size:var(--text-sm);font-weight:600}
+.git-upstream{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:var(--text-xs) var(--mono);color:var(--faint)}
+.git-sync{gap:2px}
+.git-sync-button{display:inline-flex;align-items:center;gap:3px;height:28px;min-width:28px;padding:0 7px;border:0;border-radius:var(--radius-sm);background:none;color:var(--muted);font:600 var(--text-xs) var(--mono);cursor:pointer}
+.git-sync-button:hover:not(:disabled){background:var(--fill);color:var(--ink)}
+.git-sync-button.due{color:var(--accent-ink);background:var(--accent-soft)}
+.git-sync-button:disabled{opacity:.5;cursor:not-allowed}
+.git-tabs{display:flex;align-items:center;gap:2px;padding:4px 8px;border-bottom:1px solid var(--fill);flex-shrink:0}
+.git-tabs>button{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border:0;border-radius:var(--radius-full);background:none;color:var(--muted);font-size:var(--text-xs);font-weight:550;cursor:pointer}
+.git-tabs>button:hover{background:var(--fill);color:var(--ink)}
+.git-tabs>button.selected{background:var(--fill-hover);color:var(--ink)}
+.git-tabs .count-badge{min-width:17px;padding:1px 4px}
+.git-working{display:inline-flex;align-items:center;gap:6px;margin-left:auto;font-size:var(--text-xs);color:var(--muted)}
+.git-operation{flex-shrink:0}
+.git-message{display:flex;align-items:flex-start;gap:8px;white-space:pre-wrap}
+.git-message>span{flex:1;min-width:0;max-height:160px;overflow:auto}
+.git-message>.icon-button{width:22px;height:22px;color:inherit;opacity:.7}
+.git-pane .segmented{display:inline-flex;padding:2px;border-radius:var(--radius-full);background:var(--fill)}
+.git-pane .segmented button,.git-repo-tabs button{height:22px;padding:0 9px;border:0;border-radius:var(--radius-full);background:none;color:var(--muted);font-size:var(--text-xs);cursor:pointer;white-space:nowrap}
+.git-pane .segmented button.selected,.git-repo-tabs button.selected{background:var(--surface);color:var(--ink);box-shadow:var(--shadow-sm)}
+.git-repo-tabs{display:inline-flex;padding:2px;border-radius:var(--radius-full);background:var(--fill)}
+.git-repo-tabs button{height:26px;padding:0 12px}
 .git-unavailable details{margin-top:var(--space-3);max-width:420px;font-size:var(--text-xs);color:var(--muted)}
 .git-unavailable summary{cursor:pointer}
 .git-unavailable code{display:block;margin-top:var(--space-2);padding:var(--space-2) var(--space-3);border-radius:var(--radius-sm);background:var(--fill);font-family:var(--mono);text-align:left;overflow-wrap:anywhere;white-space:pre-wrap}
+@container git (max-width: 420px){.git-upstream{display:none}}
+.git-pane.is-phone .git-tabs{padding:6px 10px}
+.git-pane.is-phone .git-tabs>button{height:34px;padding:0 14px;font-size:var(--text-sm)}
+.git-pane.is-phone.show-diff>.git-tabs,.git-pane.is-phone.show-diff>.git-operation{display:none}
 </style>

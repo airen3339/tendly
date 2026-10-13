@@ -71,7 +71,22 @@ export interface EndpointProfile {
 
 export interface FileEntry { name: string; path: string; kind: "file" | "directory" | "symlink" | "other"; size: number; }
 export interface GitFile { index: string; worktree: string; path: string; original_path?: string; }
-export interface GitStatus { branch: string | null; files: GitFile[]; ahead?: number; behind?: number; }
+/** `operation`: a merge, rebase, cherry-pick or revert stopped part-way. */
+export type GitOperation = "merge" | "rebase" | "cherry-pick" | "revert";
+export interface GitStatus { branch: string | null; files: GitFile[]; ahead?: number; behind?: number; upstream?: string; operation?: GitOperation; }
+/** One commit in a log. `refs` are Git's decorations: `HEAD -> main`, `origin/main`, `tag: v1`. Times are in seconds. */
+export interface GitCommit { hash: string; parents: string[]; author: string; email: string; date: number; refs: string[]; subject: string; }
+export interface GitLog { commits: GitCommit[]; more: boolean; }
+export interface GitChangedFile { status: string; path: string; original_path?: string; added?: number; removed?: number; untracked?: boolean; }
+export interface GitCommitDetail { hash: string; parents: string[]; author: string; email: string; date: number; committer: string; committer_email: string; commit_date: number; refs: string[]; message: string; files: GitChangedFile[]; truncated: boolean; }
+export interface GitRef { name: string; hash: string; subject: string; date: number; upstream?: string; ahead?: number; behind?: number; gone?: boolean; }
+export interface GitWorktree { path: string; branch?: string | null; main: boolean; }
+export interface GitBranches { current?: string | null; branches: string[]; worktrees: GitWorktree[]; local?: GitRef[]; remote?: GitRef[]; }
+export interface GitRemote { name: string; url: string; push_url?: string; }
+export interface GitStash { index: number; hash: string; message: string; date: number; untracked: boolean; }
+export interface GitTag { name: string; hash: string; annotated: boolean; subject: string; date: number; }
+/** How an operation that can stop part-way ended. */
+export interface GitOutcome { conflicts: boolean; message: string; }
 export interface GitDiff { diff: string; path: string | null; staged: boolean; binary: boolean; truncated: boolean; }
 export interface TextFile { path: string; content: string; version: string; }
 export interface NativeHistorySource { id:string; provider:AgentProviderKind; label:string; path:string; available:boolean; config_env?:string|null; }

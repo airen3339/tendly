@@ -205,10 +205,46 @@ GET  /api/workspaces/:id/git/status
 GET  /api/workspaces/:id/git/diff?path=src/main.rs&staged=false
 POST /api/workspaces/:id/git/stage   {paths:["src/main.rs"]}
 POST /api/workspaces/:id/git/unstage {paths:["src/main.rs"]}
-POST /api/workspaces/:id/git/commit  {message:"..."}
+POST /api/workspaces/:id/git/discard {paths:["src/main.rs"]}
+POST /api/workspaces/:id/git/apply   {path,patch,cached?,reverse?}
+POST /api/workspaces/:id/git/commit  {message:"...",amend?}
+POST /api/workspaces/:id/git/ignore  {path}
+POST /api/workspaces/:id/git/init
+
+GET  /api/workspaces/:id/git/log?rev=&path=&all=&skip=&limit=
+GET  /api/workspaces/:id/git/commit/detail?rev=&stash=
+GET  /api/workspaces/:id/git/commit/diff?rev=&path=&original_path=&untracked=
+
+GET  /api/workspaces/:id/git/branches
+POST /api/workspaces/:id/git/switch  {branch,create?,start_point?,detach?,stop_sessions?}
+POST /api/workspaces/:id/git/merge   {rev,no_ff?,squash?}
+POST /api/workspaces/:id/git/rebase  {rev}
+POST /api/workspaces/:id/git/cherry-pick {rev}
+POST /api/workspaces/:id/git/revert  {rev}
+POST /api/workspaces/:id/git/reset   {rev,mode:"soft"|"mixed"|"hard"}
+POST /api/workspaces/:id/git/operation {action:"continue"|"abort"|"skip"}
+POST /api/workspaces/:id/git/resolve {path,side:"ours"|"theirs"}
+
+GET  /api/workspaces/:id/git/remotes
+POST /api/workspaces/:id/git/remotes        {name,url}
+POST /api/workspaces/:id/git/remotes/edit   {name,to?,url?}
+POST /api/workspaces/:id/git/remotes/remove {name}
+POST /api/workspaces/:id/git/fetch {remote?}
+POST /api/workspaces/:id/git/pull  {mode?:"merge"|"rebase"|"ff-only"}
+POST /api/workspaces/:id/git/push  {remote?,branch?,set_upstream?,force?,tag?,delete?}
+
+GET  /api/workspaces/:id/git/stashes
+POST /api/workspaces/:id/git/stashes       {message?,include_untracked?,keep_index?,paths?}
+POST /api/workspaces/:id/git/stashes/apply {index,hash,pop?}
+POST /api/workspaces/:id/git/stashes/drop  {index,hash}
+GET  /api/workspaces/:id/git/tags
+POST /api/workspaces/:id/git/tags        {name,rev?,message?}
+POST /api/workspaces/:id/git/tags/delete {name}
 ```
 
-Status includes `branch`, `files[{index,worktree,path,original_path?}]`, and optional ahead/behind counts. Diff supports staged, deleted and untracked files. No shell interpolation, external diff or textconv; output is bounded at 8 MiB per command and timeouts are enforced. Git hooks/signing remain native for explicit commits. No network Git actions are implemented.
+Status includes `branch`, `files[{index,worktree,path,original_path?}]`, optional ahead/behind counts, `upstream` (`origin/main`) and `operation` when a merge, rebase, cherry-pick or revert stopped part-way. Branches add `local` and `remote` with each tip's hash, subject, date and, for local branches, upstream and ahead/behind. Diff supports staged, deleted and untracked files. No shell interpolation, external diff or textconv; output is bounded at 8 MiB per command and timeouts are enforced. Git hooks/signing remain native for explicit commits. No editor is ever opened: continuing an operation keeps the message Git prepared.
+
+Every revision, branch, tag and remote name is checked by Git (`rev-parse --verify`, `check-ref-format`) before use, and nothing shaped like an option reaches a command line as one. Remote URLs using `ext::` or `fd::` are refused. `apply` takes one hunk of a diff the client showed, for exactly one named file. Merge, rebase, cherry-pick, revert, pull, stash apply and continue return `{conflicts,message}`: conflicts are an outcome, not an error, and the conflicted files appear in status to resolve. Stash apply and drop name both the index and the hash the client saw, and are refused if the stash list moved. Fetch, pull and push use the host's Git credentials (SSH agent or credential helper); with prompts disabled, a remote that needs a password fails with Git's message instead of waiting.
 
 ## Profiles
 
