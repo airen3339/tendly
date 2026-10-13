@@ -232,6 +232,9 @@ function limitTitle(slot: 'primary' | 'secondary', limit?: AccountLimit) {
   return t(slot === 'primary' ? 'Primary window' : 'Secondary window');
 }
 onMounted(() => { void load(); });
+// Opened straight from a link, the page mounts before the server has said what it
+// supports; load once it has, instead of showing an empty list until a revisit.
+watch(supported, (now, before) => { if (now && !before) void load(); });
 onBeforeUnmount(() => { disposed = true; revision++; controller?.abort(); });
 </script>
 

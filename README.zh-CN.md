@@ -6,10 +6,10 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/wnzzer/agentdock/actions/workflows/check.yml"><img src="https://img.shields.io/github/actions/workflow/status/wnzzer/agentdock/check.yml?branch=main&style=flat-square&label=CI&color=0c8376" alt="CI 状态"></a>
-  <a href="https://github.com/wnzzer/agentdock/releases"><img src="https://img.shields.io/github/v/release/wnzzer/agentdock?style=flat-square&label=release&color=0c8376" alt="最新版本"></a>
-  <a href="https://www.npmjs.com/package/@wnzzer/agentdock"><img src="https://img.shields.io/npm/v/%40wnzzer%2Fagentdock?style=flat-square&label=npm&color=0c8376" alt="npm 版本"></a>
-  <img src="https://img.shields.io/badge/node-%E2%89%A5%2024-0c8376?style=flat-square" alt="Node.js 24 及以上">
+  <a href="https://github.com/wnzzer/agentdock/actions/workflows/check.yml"><img src="https://img.shields.io/github/actions/workflow/status/wnzzer/agentdock/check.yml?branch=main&style=flat-square&label=CI&color=0f7f70" alt="CI 状态"></a>
+  <a href="https://github.com/wnzzer/agentdock/releases"><img src="https://img.shields.io/github/v/release/wnzzer/agentdock?style=flat-square&label=release&color=0f7f70" alt="最新版本"></a>
+  <a href="https://www.npmjs.com/package/@wnzzer/agentdock"><img src="https://img.shields.io/npm/v/%40wnzzer%2Fagentdock?style=flat-square&label=npm&color=0f7f70" alt="npm 版本"></a>
+  <img src="https://img.shields.io/badge/node-%E2%89%A5%2024-0f7f70?style=flat-square" alt="Node.js 24 及以上">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-7760b5?style=flat-square" alt="平台：macOS、Linux 和 Windows">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-7760b5?style=flat-square" alt="许可证：MIT"></a>
 </p>
@@ -68,9 +68,9 @@ AgentDock 是官方 **Claude Code** 与 **Codex** CLI 的浏览器工作台。�
 <br>
 
 <p align="center">
-  <img src="docs/assets/screenshot-steer.zh-CN.png" alt="进行中的一轮里被引导的消息，以及打开的发送菜单。" width="64%">
+  <img src="docs/assets/screenshot-steer.zh-CN.png" alt="进行中的一轮里被引导的消息，以及打开的发送菜单。" width="70%">
   &nbsp;
-  <img src="docs/assets/screenshot-mobile.zh-CN.png" alt="手机上的 AgentDock：分屏折叠成标签页与输入框。" width="32%">
+  <img src="docs/assets/screenshot-mobile.zh-CN.png" alt="手机上的 AgentDock：分屏折叠成标签页与输入框。" width="26%">
 </p>
 <p align="center">
   <sub>左：引导消息加入进行中的一轮，发送菜单已打开。右：同一张画布在手机上的样子。</sub>
@@ -101,7 +101,7 @@ AgentDock 是官方 **Claude Code** 与 **Codex** CLI 的浏览器工作台。�
 
 **账号与环境**：官方账号登录与额度；引入本机配置或创建隔离的端点配置；会话级环境变量与密钥引用；各客户端默认值保存在服务端。
 
-**主机**：状态栏显示 CPU 与内存；中英文界面。
+**主机与外观**：状态栏显示 CPU 与内存；中英文界面；明暗两种模式与三套配色，界面字体和对话字体可分开选，文字大小可调。
 
 </details>
 

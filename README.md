@@ -6,10 +6,10 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/wnzzer/agentdock/actions/workflows/check.yml"><img src="https://img.shields.io/github/actions/workflow/status/wnzzer/agentdock/check.yml?branch=main&style=flat-square&label=CI&color=0c8376" alt="CI status"></a>
-  <a href="https://github.com/wnzzer/agentdock/releases"><img src="https://img.shields.io/github/v/release/wnzzer/agentdock?style=flat-square&label=release&color=0c8376" alt="Latest release"></a>
-  <a href="https://www.npmjs.com/package/@wnzzer/agentdock"><img src="https://img.shields.io/npm/v/%40wnzzer%2Fagentdock?style=flat-square&label=npm&color=0c8376" alt="npm version"></a>
-  <img src="https://img.shields.io/badge/node-%E2%89%A5%2024-0c8376?style=flat-square" alt="Node.js 24 or newer">
+  <a href="https://github.com/wnzzer/agentdock/actions/workflows/check.yml"><img src="https://img.shields.io/github/actions/workflow/status/wnzzer/agentdock/check.yml?branch=main&style=flat-square&label=CI&color=0f7f70" alt="CI status"></a>
+  <a href="https://github.com/wnzzer/agentdock/releases"><img src="https://img.shields.io/github/v/release/wnzzer/agentdock?style=flat-square&label=release&color=0f7f70" alt="Latest release"></a>
+  <a href="https://www.npmjs.com/package/@wnzzer/agentdock"><img src="https://img.shields.io/npm/v/%40wnzzer%2Fagentdock?style=flat-square&label=npm&color=0f7f70" alt="npm version"></a>
+  <img src="https://img.shields.io/badge/node-%E2%89%A5%2024-0f7f70?style=flat-square" alt="Node.js 24 or newer">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-7760b5?style=flat-square" alt="Platforms: macOS, Linux and Windows">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-7760b5?style=flat-square" alt="License: MIT"></a>
 </p>
@@ -68,9 +68,9 @@ It has no agent of its own: Codex runs through its official `app-server` and Cla
 <br>
 
 <p align="center">
-  <img src="docs/assets/screenshot-steer.png" alt="A steered message in the middle of a running turn, with the send menu open." width="64%">
+  <img src="docs/assets/screenshot-steer.png" alt="A steered message in the middle of a running turn, with the send menu open." width="70%">
   &nbsp;
-  <img src="docs/assets/screenshot-mobile.png" alt="AgentDock on a phone: the split folded into tabs and the composer." width="32%">
+  <img src="docs/assets/screenshot-mobile.png" alt="AgentDock on a phone: the split folded into tabs and the composer." width="26%">
 </p>
 <p align="center">
   <sub>Left: a steered message joins the running turn, with the send menu open. Right: the same canvas on a phone.</sub>
@@ -101,7 +101,7 @@ It has no agent of its own: Codex runs through its official `app-server` and Cla
 
 **Accounts and environment**: official account sign-in and quota; import the host's configuration or create isolated endpoint profiles; per-session environment variables with secret references; per-client defaults stored on the server.
 
-**Host**: CPU and memory in the status bar; English and Chinese UI.
+**Host and appearance**: CPU and memory in the status bar; English and Chinese UI; light and dark with three palettes, separate interface and conversation fonts, and a text size.
 
 </details>
 
