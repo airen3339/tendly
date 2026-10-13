@@ -34,3 +34,5 @@ notify = "8"
 
 [dev-dependencies]
 tokio-tungstenite = "0.29"
+# A paused clock, for the model-list cache tests.
+tokio = { workspace = true, features = ["test-util"] }

@@ -137,36 +137,107 @@ pub(crate) fn parse_models(value: Value, source_url: String) -> Result<ModelCata
                 .unwrap_or(false),
     })
 }
-/// How long a profile's model list is reused. Every session view asks for it
-/// when it opens, and for an official account the answer comes from starting
-/// the client itself -- seconds of work, repeated on every tab switch, for a
-/// list that changes when the CLI is upgraded or the profile is edited.
-const CATALOG_REUSE: Duration = Duration::from_secs(300);
+/// A value read from somewhere slow, kept: a fresh one is returned as it is,
+/// a stale one as it is while one refresh runs in the background, and only
+/// the first read for a key waits. A failed refresh keeps what was there.
+pub struct Revalidating<T> {
+    entries: std::sync::Mutex<std::collections::HashMap<String, (tokio::time::Instant, T)>>,
+    refreshing: std::sync::Mutex<std::collections::HashSet<String>>,
+    fresh: Duration,
+    /// An entry not read for this long is forgotten (an edited profile's).
+    keep: Duration,
+}
 
-/// `discover`, reusing a recent answer for the same profile. The key is the
-/// whole profile, so editing it asks again at once.
+impl<T: Clone + Send + 'static> Revalidating<T> {
+    pub fn new(fresh: Duration, keep: Duration) -> std::sync::Arc<Self> {
+        std::sync::Arc::new(Self {
+            entries: Default::default(),
+            refreshing: Default::default(),
+            fresh,
+            keep,
+        })
+    }
+    pub async fn get<E, F, Fut>(self: &std::sync::Arc<Self>, key: String, fetch: F) -> Result<T, E>
+    where
+        E: Send + 'static,
+        F: FnOnce() -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = Result<T, E>> + Send + 'static,
+    {
+        let cached = self
+            .entries
+            .lock()
+            .expect("revalidating cache")
+            .get(&key)
+            .cloned();
+        if let Some((at, value)) = cached {
+            if at.elapsed() >= self.fresh
+                && self
+                    .refreshing
+                    .lock()
+                    .expect("revalidating cache")
+                    .insert(key.clone())
+            {
+                let cache = self.clone();
+                tokio::spawn(async move {
+                    if let Ok(value) = fetch().await {
+                        cache.store(key.clone(), value);
+                    }
+                    cache
+                        .refreshing
+                        .lock()
+                        .expect("revalidating cache")
+                        .remove(&key);
+                });
+            }
+            return Ok(value);
+        }
+        let value = fetch().await?;
+        self.store(key, value.clone());
+        Ok(value)
+    }
+    fn store(&self, key: String, value: T) {
+        let mut entries = self.entries.lock().expect("revalidating cache");
+        entries.retain(|_, (at, _)| at.elapsed() < self.keep);
+        entries.insert(key, (tokio::time::Instant::now(), value));
+    }
+}
+
+/// How long a profile's model list counts as current. Older, it is still
+/// shown at once while it is asked again in the background: for an official
+/// account the answer comes from starting the client itself, seconds of work,
+/// for a list that changes when the CLI is upgraded or the profile is edited.
+const CATALOG_FRESH: Duration = Duration::from_secs(300);
+
+fn catalogs() -> &'static std::sync::Arc<Revalidating<ModelCatalog>> {
+    static CATALOGS: std::sync::OnceLock<std::sync::Arc<Revalidating<ModelCatalog>>> =
+        std::sync::OnceLock::new();
+    CATALOGS.get_or_init(|| Revalidating::new(CATALOG_FRESH, Duration::from_secs(24 * 3600)))
+}
+
+/// `discover`, through the cache: the key is the whole profile, so editing it
+/// asks again at once; a list once read is never waited for again.
 pub async fn discover_cached(
     state: &crate::AppState,
     profile: &EndpointProfile,
 ) -> Result<ModelCatalog, ApiError> {
-    use std::{
-        collections::HashMap,
-        sync::{Mutex, OnceLock},
-        time::Instant,
-    };
-    static RECENT: OnceLock<Mutex<HashMap<String, (Instant, ModelCatalog)>>> = OnceLock::new();
-    let recent = RECENT.get_or_init(Default::default);
     let key = serde_json::to_string(profile).unwrap_or_default();
-    if let Some((at, catalog)) = recent.lock().expect("model catalog cache").get(&key)
-        && at.elapsed() < CATALOG_REUSE
-    {
-        return Ok(catalog.clone());
-    }
-    let catalog = discover(state, profile).await?;
-    let mut recent = recent.lock().expect("model catalog cache");
-    recent.retain(|_, (at, _)| at.elapsed() < CATALOG_REUSE);
-    recent.insert(key, (Instant::now(), catalog.clone()));
-    Ok(catalog)
+    let (state, profile) = (state.clone(), profile.clone());
+    catalogs()
+        .get(key, move || async move { discover(&state, &profile).await })
+        .await
+}
+
+/// Reads every profile's model list in the background as the server starts,
+/// one at a time, so even the first view of a session does not wait for one.
+pub fn warm(state: crate::AppState) {
+    tokio::spawn(async move {
+        let Ok(profiles) = crate::db(&state, |s| s.list_endpoint_profiles()).await else {
+            return;
+        };
+        for profile in profiles {
+            let _ = discover_cached(&state, &profile).await;
+        }
+    });
 }
 
 pub async fn discover(
@@ -454,6 +525,82 @@ pub(crate) fn parse_claude_models(value: Value) -> Result<ModelCatalog, ApiError
         source_url: "claude://initialize".into(),
         has_more: false,
     })
+}
+
+#[cfg(test)]
+mod revalidating_tests {
+    use super::Revalidating;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    use std::time::Duration;
+
+    fn counted(
+        calls: &Arc<AtomicUsize>,
+        value: &'static str,
+    ) -> impl FnOnce() -> std::future::Ready<Result<String, ()>> + Send + 'static {
+        let calls = calls.clone();
+        move || {
+            calls.fetch_add(1, Ordering::SeqCst);
+            std::future::ready(Ok(value.to_owned()))
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn only_the_first_read_waits_and_a_stale_one_is_answered_at_once() {
+        let cache = Revalidating::new(Duration::from_secs(300), Duration::from_secs(3600));
+        let calls = Arc::new(AtomicUsize::new(0));
+        assert_eq!(
+            cache.get("p".into(), counted(&calls, "v1")).await,
+            Ok("v1".into())
+        );
+        assert_eq!(
+            cache.get("p".into(), counted(&calls, "v2")).await,
+            Ok("v1".into())
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "fresh: not asked again");
+        tokio::time::advance(Duration::from_secs(301)).await;
+        // Stale: the old answer at once, and one refresh behind it.
+        assert_eq!(
+            cache.get("p".into(), counted(&calls, "v2")).await,
+            Ok("v1".into())
+        );
+        assert_eq!(
+            cache.get("p".into(), counted(&calls, "v3")).await,
+            Ok("v1".into())
+        );
+        tokio::task::yield_now().await;
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            2,
+            "one refresh, however many asked"
+        );
+        assert_eq!(
+            cache.get("p".into(), counted(&calls, "v4")).await,
+            Ok("v2".into())
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_failed_refresh_keeps_what_was_there() {
+        let cache = Revalidating::new(Duration::from_secs(300), Duration::from_secs(3600));
+        let calls = Arc::new(AtomicUsize::new(0));
+        assert_eq!(
+            cache.get("p".into(), counted(&calls, "v1")).await,
+            Ok("v1".into())
+        );
+        tokio::time::advance(Duration::from_secs(301)).await;
+        let failing = || std::future::ready(Err::<String, ()>(()));
+        assert_eq!(cache.get("p".into(), failing).await, Ok("v1".into()));
+        tokio::task::yield_now().await;
+        assert_eq!(
+            cache.get("p".into(), counted(&calls, "v2")).await,
+            Ok("v1".into())
+        );
+        // A first read that fails is the caller's to see.
+        assert_eq!(cache.get("q".into(), failing).await, Err(()));
+    }
 }
 
 #[cfg(test)]

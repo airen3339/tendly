@@ -649,6 +649,7 @@ async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
         metrics: open_metrics(&database),
     };
     usage::warm(state.clone());
+    model_catalog::warm(state.clone());
     price_list::spawn_refresh(state.state_dir.clone());
     if let Some(metrics) = state.metrics.clone() {
         resources::spawn_recorder(state.clone(), metrics);
