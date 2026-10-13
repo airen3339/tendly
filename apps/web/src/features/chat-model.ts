@@ -1,5 +1,6 @@
 import type { EndpointProfile, Session } from '@agentdock/protocol';
 import type { Attachment } from './attachment-state';
+import { opensHtmlBlock } from './html-subset';
 
 /** A model exactly as the native client described it. `efforts` lists the
  * thinking depths that model supports; a model that states none supports none,
@@ -372,7 +373,7 @@ export function sessionConfigurationPayload(
 }
 
 export type MarkdownInline = { type: 'text' | 'strong' | 'em' | 'code'; text: string } | { type: 'link'; text: string; href: string } | { type: 'image'; alt: string; src: string } | { type: 'file'; text: string; path: string; line?: number; code: boolean };
-export type MarkdownBlock = { type: 'paragraph' | 'heading' | 'quote'; text: string; level?: number } | { type: 'code'; text: string; language: string } | { type: 'list'; ordered: boolean; items: string[] } | { type: 'table'; header: string[]; align: Array<'left' | 'center' | 'right' | undefined>; rows: string[][] };
+export type MarkdownBlock = { type: 'paragraph' | 'heading' | 'quote'; text: string; level?: number } | { type: 'code'; text: string; language: string } | { type: 'list'; ordered: boolean; items: string[] } | { type: 'table'; header: string[]; align: Array<'left' | 'center' | 'right' | undefined>; rows: string[][] } | { type: 'rule' } | { type: 'html'; text: string };
 /**
  * No HTML or executable URL schemes. The renderer uses Vue text nodes.
  *
@@ -423,11 +424,17 @@ function tableCells(line: string): string[] {
   return cells;
 }
 const TABLE_DIVIDER = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/;
+const RULE = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
+/** `===` or `---` under a paragraph: the line above is a heading. */
+const UNDERLINE = /^ {0,3}(=+|-+)[ \t]*$/;
 /**
  * The same blocks, each with the 0-based source line it starts on. The file
  * pane uses it to keep its source and preview aligned; messages do not need it.
+ *
+ * `html` reads HTML blocks as such (see html-subset.ts): a file's README is
+ * written in it. A message keeps every `<` as the text it is.
  */
-export function markdownBlocksWithLines(text: string): Array<{ block: MarkdownBlock; line: number }> {
+export function markdownBlocksWithLines(text: string, options: { html?: boolean } = {}): Array<{ block: MarkdownBlock; line: number }> {
   const lines = text.replace(/\r\n/g, '\n').split('\n'), blocks: Array<{ block: MarkdownBlock; line: number }> = [];
   for (let i = 0; i < lines.length;) {
     const line = lines[i];
@@ -435,9 +442,22 @@ export function markdownBlocksWithLines(text: string): Array<{ block: MarkdownBl
     const start = i;
     const fence = line.match(/^\s*```([^`]*)$/);
     if (fence) { const body: string[] = []; i++; while (i < lines.length && !/^\s*```\s*$/.test(lines[i])) body.push(lines[i++]); if (i < lines.length) i++; blocks.push({ line: start, block: { type: 'code', language: fence[1].trim(), text: body.join('\n') } }); continue; }
-    const heading = line.match(/^(#{1,6})\s+(.*)$/);
+    const heading = line.match(/^(#{1,6})\s+(.*?)(?:\s+#+)?\s*$/);
     if (heading) { blocks.push({ line: start, block: { type: 'heading', level: heading[1].length, text: heading[2] } }); i++; continue; }
-    if (/^>\s?/.test(line)) { blocks.push({ line: start, block: { type: 'quote', text: line.replace(/^>\s?/, '') } }); i++; continue; }
+    if (options.html && opensHtmlBlock(line)) {
+      // A comment runs to its close; any other block to the next blank line.
+      const comment = /^\s*<!--/.test(line), body: string[] = [];
+      if (comment) { while (i < lines.length) { body.push(lines[i]); if (lines[i++].includes('-->')) break; } }
+      else while (i < lines.length && lines[i].trim()) body.push(lines[i++]);
+      blocks.push({ line: start, block: { type: 'html', text: body.join('\n') } }); continue;
+    }
+    if (RULE.test(line)) { blocks.push({ line: start, block: { type: 'rule' } }); i++; continue; }
+    // Consecutive quoted lines are one quote, as they read.
+    if (/^\s*>/.test(line)) {
+      const body: string[] = [];
+      while (i < lines.length && /^\s*>/.test(lines[i])) body.push(lines[i++].replace(/^\s*>\s?/, ''));
+      blocks.push({ line: start, block: { type: 'quote', text: body.join('\n') } }); continue;
+    }
     // A GFM table: a row, a divider of dashes, then rows until one without a pipe.
     if (line.includes('|') && i + 1 < lines.length && TABLE_DIVIDER.test(lines[i + 1])) {
       const header = tableCells(line), divider = tableCells(lines[i + 1]);
@@ -455,13 +475,19 @@ export function markdownBlocksWithLines(text: string): Array<{ block: MarkdownBl
       blocks.push({ line: start, block: { type: 'list', ordered, items } }); continue;
     }
     const body = [line]; i++;
-    while (i < lines.length && lines[i].trim() && !/^(?:\s*```|#{1,6}\s|>\s?|\s*(?:[-*+]|\d+\.)\s)/.test(lines[i]) && !(lines[i].includes('|') && TABLE_DIVIDER.test(lines[i + 1] ?? ''))) body.push(lines[i++]);
-    blocks.push({ line: start, block: { type: 'paragraph', text: body.join('\n') } });
+    let level: number | undefined;
+    while (i < lines.length && lines[i].trim()) {
+      const next = lines[i], underline = next.match(UNDERLINE);
+      if (underline) { level = underline[1][0] === '=' ? 1 : 2; i++; break; }
+      if (/^(?:\s*```|#{1,6}\s|\s*>|\s*(?:[-*+]|\d+\.)\s)/.test(next) || RULE.test(next) || (next.includes('|') && TABLE_DIVIDER.test(lines[i + 1] ?? '')) || (options.html && opensHtmlBlock(next))) break;
+      body.push(lines[i++]);
+    }
+    blocks.push({ line: start, block: level ? { type: 'heading', level, text: body.join(' ') } : { type: 'paragraph', text: body.join('\n') } });
   }
   return blocks;
 }
-export function markdownBlocks(text: string): MarkdownBlock[] {
-  return markdownBlocksWithLines(text).map(entry => entry.block);
+export function markdownBlocks(text: string, options: { html?: boolean } = {}): MarkdownBlock[] {
+  return markdownBlocksWithLines(text, options).map(entry => entry.block);
 }
 
 const IMAGE_EXTENSION = /\.(png|apng|jpe?g|jpe|jfif|gif|webp|svg|avif|bmp|ico|tiff?|tga|qoi)$/i;

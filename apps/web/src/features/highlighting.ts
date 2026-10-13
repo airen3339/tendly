@@ -32,6 +32,19 @@ export function languageFor(path: string): string | undefined {
   return LANGUAGES[extension] ?? BY_NAME[name];
 }
 
+/** Names a code fence uses that are neither an extension nor a grammar id. */
+const FENCE_NAMES: Record<string, string> = {
+  shell: 'bash', console: 'bash', shellsession: 'bash', html: 'xml', svelte: 'xml', golang: 'go', py: 'python', rs: 'rust', 'c++': 'cpp', 'c#': 'csharp', yml: 'yaml', docker: 'dockerfile', make: 'makefile',
+};
+
+/** The grammar for a code fence's ```lang, or undefined to leave it plain. */
+export function fenceLanguage(name: string): string | undefined {
+  const value = name.trim().split(/[\s{,]/)[0].toLowerCase();
+  if (!value) return undefined;
+  const language = FENCE_NAMES[value] ?? (SUPPORTED.has(value) ? value : LANGUAGES[value]);
+  return language && SUPPORTED.has(language) ? language : undefined;
+}
+
 /**
  * Whether this kind of file is prose, and so should wrap.
  *

@@ -68,3 +68,14 @@ test('prose wraps and code does not, because only one of them has a column to ke
   assert.equal(wrapsProse(languageFor('app.ts')), false);
   assert.equal(wrapsProse(languageFor('Dockerfile')), false);
 });
+
+test('a code fence names its language the ways people write it', async () => {
+  const { fenceLanguage } = await import('./highlighting.ts');
+  assert.equal(fenceLanguage('ts'), 'typescript');
+  assert.equal(fenceLanguage('Rust'), 'rust');
+  assert.equal(fenceLanguage('shell'), 'bash');
+  assert.equal(fenceLanguage('html'), 'xml');
+  assert.equal(fenceLanguage('js {1,3}'), 'javascript');
+  assert.equal(fenceLanguage('text'), undefined);
+  assert.equal(fenceLanguage(''), undefined);
+});

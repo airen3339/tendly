@@ -14,7 +14,8 @@ import MediaPreview from "./MediaPreview.vue";
 import { mediaKind, type MediaKind } from "./media-kind";
 import { useI18n } from "../i18n";
 const { t } = useI18n();
-const props = defineProps<{ workspaceId: string; path?: string }>();
+/** The workspace's name, shown ahead of the path: the pane has no bar of its own for it. */
+const props = defineProps<{ workspaceId: string; path?: string; workspaceName?: string }>();
 const emit = defineEmits<{ saved: []; browse: [] }>();
 const loading = ref(false), saving = ref(false), error = ref(""), success = ref("");
 const conflict = ref(false), confirmReload = ref(false), mediaFailed = ref(false);
@@ -85,7 +86,7 @@ watch(editor, element => {
   if (!element) return;
   // A scrollbar appears when the content grows, which changes the content box
   // without changing the border box -- so the content box is what is watched.
-  watcher = new ResizeObserver(measureGutter);
+  watcher = new ResizeObserver(() => { measureGutter(); measureRows(); });
   watcher.observe(element);
   measureGutter();
 });
@@ -97,11 +98,59 @@ watch(editor, element => {
  * the last line 11px out of register at the bottom of a file. A transform has
  * no such limit, so the layers stay locked together everywhere.
  */
+let scrolled = { left: 0, top: 0 };
 function syncScroll(event: Event) {
   const source = event.target as HTMLTextAreaElement;
-  const content = highlightLayer.value?.firstElementChild as HTMLElement | undefined;
-  if (content) content.style.transform = `translate(${-source.scrollLeft}px, ${-source.scrollTop}px)`;
+  scrolled = { left: source.scrollLeft, top: source.scrollTop };
+  followScroll();
 }
+/** The layers that move with the text: the highlighted copy, the line numbers and the caret's band. */
+function followScroll() {
+  const content = highlightLayer.value?.firstElementChild as HTMLElement | undefined;
+  if (content) content.style.transform = `translate(${-scrolled.left}px, ${-scrolled.top}px)`;
+  for (const track of [numbersTrack.value, bandTrack.value]) if (track) track.style.transform = `translateY(${-scrolled.top}px)`;
+}
+
+/**
+ * Line numbers, and a band behind the line the caret is on.
+ *
+ * Code is laid out in rows of one height, so its numbers are one column of
+ * text. Prose wraps, and a line there is as tall as the rows it took: its
+ * number goes where the hidden copy (measure, below) found the line to start.
+ * Past a few thousand lines of prose that measuring costs more than numbers
+ * are worth, and they are left out.
+ */
+const LINE = 20, TOP = 12;
+const numbersTrack = ref<HTMLElement>(), bandTrack = ref<HTMLElement>();
+const lineCount = computed(() => draft.value.content.split("\n").length);
+const digits = computed(() => Math.max(2, String(lineCount.value).length));
+const showNumbers = computed(() => !wrapped.value || lineCount.value <= 5000);
+const plainNumbers = computed(() => wrapped.value ? "" : Array.from({ length: lineCount.value }, (_, index) => index + 1).join("\n"));
+const rows = ref<{ tops: number[]; heights: number[] }>({ tops: [], heights: [] });
+let rowsFrame = 0;
+function measureRows() {
+  cancelAnimationFrame(rowsFrame);
+  rowsFrame = requestAnimationFrame(() => {
+    if (!wrapped.value || !showNumbers.value || !showEditor.value) return;
+    const tops = measure();
+    rows.value = { tops: tops.slice(), heights };
+  });
+}
+const caretLine = ref(-1);
+function trackCaret() {
+  const input = editor.value;
+  if (!input || document.activeElement !== input) { caretLine.value = -1; return; }
+  let line = 0;
+  for (let at = input.value.indexOf("\n"); at !== -1 && at < input.selectionStart; at = input.value.indexOf("\n", at + 1)) line++;
+  caretLine.value = line;
+}
+const band = computed(() => {
+  const line = caretLine.value;
+  if (line < 0) return undefined;
+  if (!wrapped.value) return { top: TOP + line * LINE, height: LINE };
+  const top = rows.value.tops[line];
+  return top === undefined ? undefined : { top, height: rows.value.heights[line] ?? LINE };
+});
 
 /**
  * Prose wraps; code does not.
@@ -115,6 +164,9 @@ function syncScroll(event: Event) {
  * highlighted copy stays registered with the text on top of it.
  */
 const wrapped = computed(() => wrapsProse(language.value));
+const fileName = computed(() => props.path?.split("/").pop() ?? "");
+/** Where the file sits: the workspace, then each folder down to it. */
+const crumbs = computed(() => [props.workspaceName, ...(props.path?.split("/").slice(0, -1) ?? [])].filter(Boolean).map(part => `${part} / `).join(""));
 /**
  * Markdown is read and written side by side: the source on the left, the
  * rendered result on the right, scrolled together. A pane too narrow for two
@@ -154,7 +206,7 @@ watch(pane, element => {
  * as the several rows it really takes. Measured only when asked, and again
  * only after the text or the width has changed.
  */
-let measured = { content: "", width: -1 }, offsets: number[] = [];
+let measured = { content: "", width: -1 }, offsets: number[] = [], heights: number[] = [];
 function measure(): number[] {
   const box = mirror.value, input = editor.value;
   if (!box || !input) return offsets;
@@ -162,6 +214,7 @@ function measure(): number[] {
   if (offsets.length && content === measured.content && width === measured.width) return offsets;
   box.innerHTML = content.split("\n").map(line => `<div>${escapeHtml(line) || "\u200b"}</div>`).join("");
   offsets = Array.from(box.children, child => (child as HTMLElement).offsetTop);
+  heights = Array.from(box.children, child => (child as HTMLElement).offsetHeight);
   measured = { content, width };
   return offsets;
 }
@@ -335,25 +388,31 @@ const stopWatching = onFilesChanged((workspaceId, paths) => {
   else { mediaVersion.value++; mediaFailed.value = false; }
 });
 watch([() => props.workspaceId, () => props.path], () => { revision++; saving.value = false; error.value = ""; success.value = ""; mediaFailed.value = false; binary.value = false; loading.value = false; conflict.value = false; confirmReload.value = false; if (!draft.value.loaded) void read(); else if (kind.value === "text") void hostChanged(); else mediaVersion.value++; }, { immediate: true, flush: "sync" });
-onBeforeUnmount(() => { revision++; watcher?.disconnect(); paneWatcher?.disconnect(); clearTimeout(driverTimer); stopWatching(); });
+document.addEventListener("selectionchange", trackCaret);
+watch([() => draft.value.content, wrapped, showEditor, editor], measureRows, { flush: "post" });
+// A band or column drawn anew starts where the text already is.
+watch([numbersTrack, bandTrack], followScroll, { flush: "post" });
+onBeforeUnmount(() => { revision++; document.removeEventListener("selectionchange", trackCaret); cancelAnimationFrame(rowsFrame); watcher?.disconnect(); paneWatcher?.disconnect(); clearTimeout(driverTimer); stopWatching(); });
 </script>
 <template>
   <div v-if="!path" class="pane-empty"><span class="empty-icon"><Icon name="file" :size="28" /></span><h3>{{ t('Your files, right here') }}</h3><p>{{ t('Open a file from Explorer, or drag it into this pane.') }}</p><button class="secondary-button" @click="emit('browse')">{{ t('Browse files') }}</button></div>
   <div v-else ref="pane" class="file-pane" @keydown.meta.s.prevent="save" @keydown.ctrl.s.prevent="save">
-    <div class="content-toolbar"><span class="truncate" :title="path">{{ path }}<b v-if="dirty" class="dirty-indicator" :title="t('Unsaved changes')">●</b></span><div class="toolbar-buttons"><a class="icon-button" :href="url" download :aria-label="t('Download {path}', { path })"><Icon name="download" :size="15" /></a><div v-if="isMarkdown && kind === 'text'" class="md-modes" role="group" :aria-label="t('Markdown view')"><button v-for="choice in modeChoices" :key="choice.mode" type="button" :class="{ active: view === choice.mode }" :aria-pressed="view === choice.mode" @click="setMode(choice.mode)">{{ t(choice.label) }}</button></div><template v-if="kind === 'text'"><button class="icon-button" :aria-label="t('Reload file from host')" :disabled="loading || saving" @click="reload"><Icon name="refresh" :size="15" /></button><button class="small-button primary" :disabled="!dirty || saving || loading" @click="save"><Icon name="save" :size="13" />{{ t(saving ? 'Saving…' : dirty ? 'Save' : 'Saved') }}</button></template></div></div>
+    <div class="content-toolbar"><span class="file-crumbs" :title="workspaceName ? `${workspaceName} / ${path}` : path"><Icon name="folder" :size="12" /><span class="file-crumbs-path">{{ crumbs }}</span><strong>{{ fileName }}</strong><b v-if="dirty" class="dirty-indicator" :title="t('Unsaved changes')">●</b></span><div class="toolbar-buttons"><a class="icon-button" :href="url" download :aria-label="t('Download {path}', { path })"><Icon name="download" :size="15" /></a><div v-if="isMarkdown && kind === 'text'" class="md-modes" role="group" :aria-label="t('Markdown view')"><button v-for="choice in modeChoices" :key="choice.mode" type="button" :class="{ active: view === choice.mode }" :aria-pressed="view === choice.mode" @click="setMode(choice.mode)">{{ t(choice.label) }}</button></div><template v-if="kind === 'text'"><button class="icon-button" :aria-label="t('Reload file from host')" :disabled="loading || saving" @click="reload"><Icon name="refresh" :size="15" /></button><button class="small-button primary" :disabled="!dirty || saving || loading" @click="save"><Icon name="save" :size="13" />{{ t(saving ? 'Saving…' : dirty ? 'Save' : 'Saved') }}</button></template></div></div>
     <div v-if="error" class="inline-error" role="alert">{{ conflict ? t(error) : error }}</div>
     <div v-if="success" class="inline-success" role="status">{{ t(success) }}</div>
     <div v-if="confirmReload" class="confirmation-bar">{{ t('Reloading discards this unsaved draft.') }}<button class="small-button danger" @click="read">{{ t('Discard draft & reload') }}</button><button class="small-button" @click="confirmReload = false">{{ t('Keep draft') }}</button></div>
     <div v-if="loading" class="pane-empty"><p>{{ t('Reading file from host…') }}</p></div>
     <div v-else-if="kind === 'text' && draft.loaded" :class="['text-body', { 'is-split': view === 'split' }]">
-      <div v-if="showEditor" class="code-surface" :class="{ 'is-wrapped': wrapped }">
+      <div v-if="showEditor" class="code-surface" :class="{ 'is-wrapped': wrapped, 'has-numbers': showNumbers }" :style="{ '--digits': digits }">
+        <div v-if="band" class="code-band" aria-hidden="true"><div ref="bandTrack" class="code-band-track"><div class="code-band-line" :style="{ top: band.top + 'px', height: band.height + 'px' }" /></div></div>
         <pre v-if="highlighted !== undefined" ref="highlightLayer" class="code-highlight" :style="{ right: gutter + 'px' }" aria-hidden="true"><code v-html="highlighted" /></pre>
-        <div v-if="isMarkdown" ref="mirror" class="code-mirror" :style="{ right: gutter + 'px' }" aria-hidden="true" />
-        <textarea ref="editor" v-model="draft.content" :class="['code-editor', { 'is-overlaid': highlighted !== undefined, 'is-composing': composing }]" :aria-label="t('Edit {path}', { path })" spellcheck="false" autocapitalize="off" autocomplete="off" @input="success = ''" @scroll="editorScrolled" @keydown="editorKey" @compositionstart="composing = true" @compositionend="composing = false" />
+        <div v-if="wrapped" ref="mirror" class="code-mirror" :style="{ right: gutter + 'px' }" aria-hidden="true" />
+        <textarea ref="editor" v-model="draft.content" :class="['code-editor', { 'is-overlaid': highlighted !== undefined, 'is-composing': composing }]" :aria-label="t('Edit {path}', { path })" spellcheck="false" autocapitalize="off" autocomplete="off" @input="success = ''" @scroll="editorScrolled" @keydown="editorKey" @compositionstart="composing = true" @compositionend="composing = false" @focus="trackCaret" @blur="caretLine = -1" />
+        <div v-if="showNumbers" class="code-numbers" aria-hidden="true"><div ref="numbersTrack"><template v-if="!wrapped">{{ plainNumbers }}<span v-if="caretLine >= 0" class="is-current" :style="{ top: TOP + caretLine * LINE + 'px' }">{{ caretLine + 1 }}</span></template><template v-else><span v-for="(top, index) in rows.tops" :key="index" :class="{ 'is-current': index === caretLine }" :style="{ top: top + 'px' }">{{ index + 1 }}</span></template></div></div>
       </div>
-      <div v-if="showPreview" ref="preview" class="markdown-preview" :title="view === 'preview' ? t('Double-click a passage to edit it') : undefined" @scroll="previewScrolled" @dblclick="editAt"><MarkdownContent :text="draft.content" :image-url="(p: string) => assetUrl(workspaceId, p)" :base="path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : ''" source-lines /></div>
+      <div v-if="showPreview" ref="preview" class="markdown-preview" :title="view === 'preview' ? t('Double-click a passage to edit it') : undefined" @scroll="previewScrolled" @dblclick="editAt"><MarkdownContent :text="draft.content" :image-url="(p: string) => assetUrl(workspaceId, p)" :base="path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : ''" source-lines html /></div>
     </div>
     <MediaPreview v-else-if="kind !== 'text'" :url="url" :kind="kind" :name="path?.split('/').pop() ?? ''" />
-    <div class="content-footer"><span>{{ kind === 'converted' ? t('image preview') : kind === 'binary' ? t('No preview') : kind !== 'text' ? t(`${kind} preview`) : isMarkdown && view === 'preview' ? t('Rendered markdown') : oversize ? t('Plain text · too large to highlight') : language ? language : t('Plain text editor') }}</span><span v-if="kind === 'text' && draft.loaded">{{ t('{count} lines · {status}', { count: draft.content.split('\n').length, status: t(dirty ? 'Unsaved draft' : 'In sync at last read') }) }}</span></div>
+    <div class="content-footer"><span>{{ kind === 'converted' ? t('image preview') : kind === 'binary' ? t('No preview') : kind !== 'text' ? t(`${kind} preview`) : isMarkdown && view === 'preview' ? t('Rendered markdown') : oversize ? t('Plain text · too large to highlight') : language ? language : t('Plain text editor') }}</span><span v-if="kind === 'text' && draft.loaded">{{ t('{count} lines · {status}', { count: lineCount, status: t(dirty ? 'Unsaved draft' : 'In sync at last read') }) }}</span></div>
   </div>
 </template>

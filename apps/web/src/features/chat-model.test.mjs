@@ -597,3 +597,26 @@ test('history let go from the front says where reading older history resumes', (
   assert.equal(bounded.dropped, 6);
   assert.ok(!('dropped' in pruneChatEvents(events)));
 });
+
+test('rules, underlined headings and multi-line quotes read as a document does', async () => {
+  const { markdownBlocks } = await import('./chat-model.ts');
+  assert.deepEqual(markdownBlocks('Title\n=====\n\nPart\n---\n\n***\n\n> one\n> two'), [
+    { type: 'heading', level: 1, text: 'Title' },
+    { type: 'heading', level: 2, text: 'Part' },
+    { type: 'rule' },
+    { type: 'quote', text: 'one\ntwo' },
+  ]);
+  assert.deepEqual(markdownBlocks('## Closed ##'), [{ type: 'heading', level: 2, text: 'Closed' }]);
+});
+
+test('HTML blocks are read as such only when asked, and a message keeps them as text', async () => {
+  const { markdownBlocks } = await import('./chat-model.ts');
+  const text = '<p align="center">\n  <img src="a.png">\n</p>\n\n<!-- a\nnote -->\nAfter';
+  assert.deepEqual(markdownBlocks(text, { html: true }), [
+    { type: 'html', text: '<p align="center">\n  <img src="a.png">\n</p>' },
+    { type: 'html', text: '<!-- a\nnote -->' },
+    { type: 'paragraph', text: 'After' },
+  ]);
+  assert.equal(markdownBlocks(text)[0].type, 'paragraph');
+  assert.deepEqual(markdownBlocks('Generic <T> stays prose', { html: true }), [{ type: 'paragraph', text: 'Generic <T> stays prose' }]);
+});

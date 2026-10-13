@@ -32,16 +32,18 @@
 
 /* The highlighted copy and the textarea must lay text out identically, or the
    two drift apart as the file scrolls. Every property that affects metrics is
-   declared once here and inherited by both. */
-.code-surface { position: relative; flex: 1; min-height: 0; min-width: 0; display: flex; overflow: hidden; }
+   declared once here and inherited by all three. The left padding makes room
+   for the line numbers, which sit over it: --digits is the widest number. */
+.code-surface { position: relative; flex: 1; min-height: 0; min-width: 0; display: flex; overflow: hidden; background: var(--surface); --code-left: 16px; }
+.code-surface.has-numbers { --code-left: calc(var(--digits, 2) * 1ch + 36px); }
 .code-surface > .code-highlight, .code-surface > .code-editor, .code-surface > .code-mirror {
-  margin: 0; padding: 15px 14px; border: 0;
-  font: var(--text-xs)/21px var(--mono);
-  tab-size: 2; white-space: pre; overflow-wrap: normal;
+  margin: 0; padding: 12px 18px 12px var(--code-left); border: 0;
+  font: var(--text-md)/20px var(--mono);
+  tab-size: 4; white-space: pre; overflow-wrap: normal;
 }
 .code-highlight {
   position: absolute; inset: 0; overflow: hidden; pointer-events: none;
-  background: var(--surface); color: var(--ink-soft);
+  background: transparent; color: var(--syn-text);
 }
 /* Moved rather than scrolled, so it cannot clamp before the textarea does. */
 .code-highlight code {
@@ -58,33 +60,86 @@
   position: relative; background: transparent; color: transparent;
   caret-color: var(--ink); -webkit-text-fill-color: transparent;
 }
-.code-editor.is-overlaid::selection { background: #3b8fd940; -webkit-text-fill-color: transparent; } /* translucent: the text beneath must show through */
+.code-editor::selection { background: var(--code-selection); }
+.code-editor.is-overlaid::selection { background: var(--code-selection); -webkit-text-fill-color: transparent; } /* translucent: the text beneath must show through */
 /* An input method draws its candidate text in the textarea, and the overlay
    below has not been told about it yet. For that moment the textarea inks
    itself and covers the overlay, so what is being typed can be seen. */
-.code-editor.is-overlaid.is-composing { background: var(--surface); color: var(--ink-soft); -webkit-text-fill-color: currentColor; }
+.code-editor.is-overlaid.is-composing { background: var(--surface); color: var(--syn-text); -webkit-text-fill-color: currentColor; }
 .code-editor.is-overlaid.is-composing::selection { background: var(--info-line); -webkit-text-fill-color: currentColor; }
-.markdown-preview { flex: 1; min-height: 0; overflow: auto; padding: 22px clamp(16px, 4cqw, 40px); background: var(--surface); }
-.markdown-preview .chat-markdown { max-width: 760px; margin: 0 auto; font-size: var(--text-md); line-height: 1.85; color: var(--ink); }
+/* Line numbers, over the editor's left padding, and the band behind the line
+   the caret is on. Both move with the text the way the highlighted copy does. */
+.code-numbers { position: absolute; top: 0; bottom: 0; left: 0; z-index: 2; width: calc(var(--code-left) - 12px); overflow: hidden; pointer-events: none; background: var(--surface); border-right: 1px solid var(--fill); }
+.code-numbers > div { position: relative; padding: 12px 12px 12px 0; font: var(--text-sm)/20px var(--mono); color: var(--code-gutter); text-align: right; white-space: pre; font-variant-numeric: tabular-nums; will-change: transform; }
+.code-numbers span { position: absolute; right: 12px; line-height: 20px; }
+.code-numbers .is-current { padding-left: 6px; background: var(--surface); color: var(--ink); font-weight: 600; }
+.code-band { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.code-band-track { position: absolute; inset: 0 0 auto 0; will-change: transform; }
+.code-band-line { position: absolute; left: 0; right: 0; background: var(--code-line); }
+.markdown-preview { flex: 1; min-height: 0; overflow: auto; padding: 28px clamp(18px, 5cqw, 48px) 48px; background: var(--surface); }
+.markdown-preview .chat-markdown { max-width: 820px; margin: 0 auto; font-size: var(--text-base); line-height: 1.7; color: var(--ink); }
 .markdown-preview .chat-markdown > :first-child { margin-top: 0; }
+/* A document's headings step down in size, as a document's should; a
+   message keeps its own smaller ones. */
+.markdown-preview .chat-markdown :is(h1, h2, h3, h4, h5, h6) { color: var(--ink); font-weight: 650; line-height: 1.3; margin: 1.6em 0 .6em; }
+.markdown-preview .chat-markdown h1 { font-size: 1.85em; padding-bottom: .3em; border-bottom: 1px solid var(--border); }
+.markdown-preview .chat-markdown h2 { font-size: 1.45em; padding-bottom: .3em; border-bottom: 1px solid var(--border); }
+.markdown-preview .chat-markdown h3 { font-size: 1.2em; }
+.markdown-preview .chat-markdown h4 { font-size: 1em; }
+.markdown-preview .chat-markdown :is(h5, h6) { font-size: .9em; color: var(--ink-soft); }
+.markdown-preview .chat-markdown p { margin: 0 0 1em; }
+.markdown-preview .chat-markdown :is(ul, ol) { margin: 0 0 1em; padding-left: 1.7em; }
+.markdown-preview .chat-markdown li { margin: .25em 0; }
+.markdown-preview .chat-markdown blockquote { margin: 0 0 1em; padding: 2px 1em; border-left: 4px solid var(--line-strong); color: var(--ink-soft); }
+.markdown-preview .chat-markdown blockquote p { margin: 0; }
+.markdown-preview .chat-markdown .chat-code { margin: 0 0 1em; }
+.markdown-preview .chat-markdown pre { font-size: var(--text-sm); line-height: 1.6; padding: 14px 16px; }
+.markdown-preview .chat-markdown .chat-table { margin: 0 0 1em; }
+.markdown-preview .chat-markdown img { max-width: 100%; }
 
-/* hljs token colours, tuned to the light palette rather than its own theme. */
-.code-highlight .hljs-comment, .code-highlight .hljs-quote { color: var(--faint); font-style: italic; }
-.code-highlight .hljs-keyword, .code-highlight .hljs-selector-tag, .code-highlight .hljs-literal,
-.code-highlight .hljs-type, .code-highlight .hljs-doctag { color: var(--violet); }
-.code-highlight .hljs-string, .code-highlight .hljs-regexp, .code-highlight .hljs-addition { color: var(--ok-ink); }
-.code-highlight .hljs-number, .code-highlight .hljs-symbol, .code-highlight .hljs-bullet { color: #b5713a; }
-.code-highlight .hljs-title, .code-highlight .hljs-section, .code-highlight .hljs-name,
-.code-highlight .hljs-selector-id, .code-highlight .hljs-selector-class { color: var(--info); }
-.code-highlight .hljs-attr, .code-highlight .hljs-attribute, .code-highlight .hljs-variable,
-.code-highlight .hljs-template-variable { color: var(--accent-ink); }
-.code-highlight .hljs-built_in, .code-highlight .hljs-class .hljs-title { color: #a15c2c; }
-.code-highlight .hljs-meta { color: var(--muted); }
-.code-highlight .hljs-deletion { color: var(--danger); }
-.code-highlight .hljs-emphasis { font-style: italic; }
-.code-highlight .hljs-strong { font-weight: 600; }
+/* Elements the shared renderer draws beyond paragraphs, in a file and a message alike. */
+.chat-markdown hr { height: 0; margin: 1.5em 0; border: 0; border-top: 1px solid var(--line); }
+.chat-markdown h4, .chat-markdown h5, .chat-markdown h6 { font-size: var(--text-md); line-height: 1.45; margin: 14px 0 6px; }
+.chat-markdown h1 { font-size: var(--text-xl); }
+.chat-markdown li.is-task { list-style: none; margin-left: -1.3em; }
+.chat-markdown .task-box { display: inline-grid; place-items: center; width: 14px; height: 14px; margin-right: 7px; vertical-align: -2px; border: 1px solid var(--line-strong); border-radius: var(--radius-xs); background: var(--surface); color: var(--on-accent); font-size: var(--text-xs); line-height: 1; }
+.chat-markdown .task-box.is-done { background: var(--accent); border-color: var(--accent); }
+.chat-markdown .md-html { margin: 0 0 1em; }
+.chat-markdown .md-html:empty { display: none; }
+.chat-markdown .md-html p { white-space: normal; }
+.chat-markdown .md-html [align="center"] { text-align: center; }
+.chat-markdown .md-html [align="right"] { text-align: right; }
+.chat-markdown .md-html img { max-width: 100%; height: auto; vertical-align: middle; }
+.chat-markdown .md-html .chat-inline-image { display: inline-block; max-height: none; margin: 0; border: 0; border-radius: 0; background: none; }
+.markdown-preview .chat-inline-image { max-width: 100%; max-height: none; }
+.chat-markdown .md-html summary { cursor: pointer; font-weight: 600; }
+.chat-markdown .md-html table { width: 100%; border-collapse: collapse; }
+.chat-markdown .md-html :is(td, th) { padding: 12px 14px; border: 1px solid var(--border); line-height: 1.6; }
+.chat-markdown kbd { display: inline-block; padding: 1px 6px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: var(--radius-xs); background: var(--sunken); font: .85em var(--mono); }
+/* A remote image in a README -- a badge, usually -- is not fetched: what it
+   says is shown instead, and stays a link where it was one. */
+.chat-markdown .md-remote-image { display: inline-flex; align-items: center; margin: 2px; padding: 1px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--sunken); color: var(--ink-soft); font-size: var(--text-xs); line-height: 18px; vertical-align: middle; }
+.chat-markdown a .md-remote-image { color: var(--accent-ink); }
 
-.code-editor { display: block; flex: 1; min-height: 0; width: 100%; resize: none; border: 0; padding: 15px 14px; color: var(--ink-soft); background: var(--surface); font: var(--text-xs)/21px var(--mono); tab-size: 2; white-space: pre; overflow: auto; outline-offset: -2px !important; }
+/* Syntax colours (--syn-* in styles.css), for every place code is shown:
+   the editor's highlighted copy, a code block in markdown, and a file read
+   from outside the workspace. */
+:is(.code-highlight, .chat-code, .host-file-body) :is(.hljs-comment, .hljs-quote) { color: var(--syn-comment); }
+:is(.code-highlight, .chat-code, .host-file-body) :is(.hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-doctag, .hljs-meta .hljs-keyword) { color: var(--syn-keyword); }
+:is(.code-highlight, .chat-code, .host-file-body) :is(.hljs-string, .hljs-regexp, .hljs-meta .hljs-string) { color: var(--syn-string); }
+:is(.code-highlight, .chat-code, .host-file-body) :is(.hljs-number, .hljs-symbol, .hljs-bullet, .hljs-link) { color: var(--syn-number); }
+:is(.code-highlight, .chat-code, .host-file-body) :is(.hljs-title, .hljs-title.function_, .hljs-section) { color: var(--syn-title); }
+:is(.code-highlight, .chat-code, .host-file-body) :is(.hljs-type, .hljs-built_in, .hljs-title.class_, .hljs-class .hljs-title, .hljs-params .hljs-type) { color: var(--syn-type); }
+:is(.code-highlight, .chat-code, .host-file-body) :is(.hljs-attr, .hljs-attribute, .hljs-variable, .hljs-template-variable, .hljs-property, .hljs-selector-id, .hljs-selector-class, .hljs-selector-attr) { color: var(--syn-attr); }
+:is(.code-highlight, .chat-code, .host-file-body) :is(.hljs-name, .hljs-tag) { color: var(--syn-tag); }
+:is(.code-highlight, .chat-code, .host-file-body) :is(.hljs-meta, .hljs-subst) { color: var(--syn-meta); }
+:is(.code-highlight, .chat-code, .host-file-body) .hljs-addition { color: var(--syn-addition); background: var(--syn-addition-bg); }
+:is(.code-highlight, .chat-code, .host-file-body) .hljs-deletion { color: var(--syn-deletion); background: var(--syn-deletion-bg); }
+:is(.code-highlight, .chat-code, .host-file-body) .hljs-emphasis { font-style: italic; }
+:is(.code-highlight, .chat-code, .host-file-body) .hljs-strong { font-weight: 600; }
+.markdown-preview .chat-markdown .chat-code pre, .chat-markdown .chat-code pre code { color: var(--syn-text); }
+
+.code-editor { display: block; flex: 1; min-height: 0; width: 100%; resize: none; border: 0; color: var(--syn-text); background: transparent; overflow: auto; outline-offset: -2px !important; }
 .dirty-indicator { color: #b6a065; font-size: var(--text-xs); }.media-preview { display: flex; flex-direction: column; flex: 1; min-height: 0; align-items: center; justify-content: center; overflow: auto; padding: 20px; background: var(--sunken); gap: 15px; }.image-preview { background-color: var(--sunken); background-image: linear-gradient(45deg,color-mix(in srgb, var(--fill-hover) 50%, transparent) 25%,transparent 25%),linear-gradient(-45deg,color-mix(in srgb, var(--fill-hover) 50%, transparent) 25%,transparent 25%),linear-gradient(45deg,transparent 75%,color-mix(in srgb, var(--fill-hover) 50%, transparent) 75%),linear-gradient(-45deg,transparent 75%,color-mix(in srgb, var(--fill-hover) 50%, transparent) 75%); background-size: 20px 20px; background-position: 0 0,0 10px,10px -10px,-10px 0; }
 .media-preview img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; box-shadow: var(--shadow-md); }.media-preview video { max-width: 100%; max-height: 100%; border-radius: var(--radius-sm); }.media-preview audio { max-width: 100%; }.media-preview p { color: var(--muted); font-size: var(--text-xs); line-height: 20px; text-align: center; }.pdf-preview { width: 100%; flex: 1; min-height: 0; border: 0; background: var(--bg); }
 .agent-session-pane { display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0; }
@@ -214,3 +269,9 @@
 .native-terminal.dark .terminal-upload { border-color: var(--term-line); background: var(--term-raised); color: var(--term-muted); }
 .native-terminal.dark .terminal-upload-text strong { color: var(--term-ink); }
 @media (any-pointer: fine) { .terminal-uploads { bottom: 12px; } }
+/* A file's toolbar says where it is: the workspace and folders, quietly, then its name. */
+.content-toolbar > .file-crumbs { flex: 1 1 auto; gap: 0; min-width: 0; color: var(--muted); }
+.file-crumbs > svg { margin-right: 6px; }
+.file-crumbs-path { flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; }
+.file-crumbs > strong { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-weight: 600; }
+.file-crumbs > .dirty-indicator { margin-left: 6px; }
