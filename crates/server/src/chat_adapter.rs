@@ -36,6 +36,20 @@ impl ChatInit {
     }
 }
 
+/// Whether Codex runs in this process ([`crate::codex_chat::CodexAdapter`])
+/// rather than under the Node bridge: `AGENTDOCK_CODEX_ADAPTER=rust`, which
+/// `codex_adapter = "rust"` in config.toml sets. Anything else, or nothing,
+/// is the bridge, so a problem in the Rust adapter is one setting from undone.
+/// Read at each start: a running conversation keeps the layer it began on.
+pub fn codex_in_process(provider: agentdock_domain::ProviderKind) -> bool {
+    provider == agentdock_domain::ProviderKind::Codex
+        && adapter_choice(std::env::var("AGENTDOCK_CODEX_ADAPTER").ok().as_deref())
+}
+
+fn adapter_choice(value: Option<&str>) -> bool {
+    value.is_some_and(|value| value.trim().eq_ignore_ascii_case("rust"))
+}
+
 /// One decision a person can give a native request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Decision {
@@ -433,6 +447,16 @@ impl ClientAdapter for BridgeAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_bridge_runs_codex_unless_rust_is_asked_for() {
+        assert!(!adapter_choice(None));
+        assert!(!adapter_choice(Some("bridge")));
+        assert!(!adapter_choice(Some("")));
+        assert!(!adapter_choice(Some("rusty")));
+        assert!(adapter_choice(Some("rust")));
+        assert!(adapter_choice(Some(" Rust ")));
+    }
 
     #[test]
     fn commands_are_refused_in_the_bridges_own_words() {

@@ -1,5 +1,3 @@
-// Reached only through the parity tests until the switch selects it.
-#![allow(dead_code)]
 //! Codex, driven from this process: `codex app-server` over JSON-RPC, with no
 //! Node bridge in between.
 //!

@@ -283,6 +283,19 @@ pub async fn start_locked(state: &AppState, session: &Session) -> Result<Arc<Cha
         ));
     }
     let spec = crate::launch::prepare(state, session).await?;
+    let init = ChatInit {
+        provider: session.provider.as_str().to_owned(),
+        program: spec.program.clone(),
+        args: spec.args.clone(),
+        cwd: spec.cwd.to_string_lossy().into_owned(),
+        resume_id: session.provider_session_id.clone(),
+    };
+    // Codex can run in this process instead of under the Node bridge; which
+    // one is a deployment's choice (chat_adapter::codex_in_process).
+    if crate::chat_adapter::codex_in_process(session.provider) {
+        let adapter = crate::codex_chat::CodexAdapter::new(&spec.env, &spec.env_remove);
+        return run_adapter(state, session, adapter, init).await;
+    }
     let mut command = crate::bridge::node_command(&[], &state.chat_bridge);
     command.current_dir(&spec.cwd).envs(&spec.env);
     for key in &spec.env_remove {
@@ -292,6 +305,17 @@ pub async fn start_locked(state: &AppState, session: &Session) -> Result<Arc<Cha
         ApiError::conflict("Native chat needs Node.js and the installed chat bridge")
     })?;
     let adapter = BridgeAdapter::new(child)?;
+    run_adapter(state, session, adapter, init).await
+}
+
+/// Record, supervise and initialize a conversation on `adapter`.
+async fn run_adapter<A: ClientAdapter>(
+    state: &AppState,
+    session: &Session,
+    adapter: A,
+    init: ChatInit,
+) -> Result<Arc<ChatRuntime>> {
+    let id = session.id;
     let (commands, receiver) = mpsc::channel(8);
     let runtime = Arc::new(ChatRuntime {
         commands,
@@ -315,13 +339,6 @@ pub async fn start_locked(state: &AppState, session: &Session) -> Result<Arc<Cha
         .lock()
         .expect("chat sessions")
         .insert(id, runtime.clone());
-    let init = ChatInit {
-        provider: session.provider.as_str().to_owned(),
-        program: spec.program.clone(),
-        args: spec.args.clone(),
-        cwd: spec.cwd.to_string_lossy().into_owned(),
-        resume_id: session.provider_session_id.clone(),
-    };
     tokio::spawn(supervise(
         state.clone(),
         id,
