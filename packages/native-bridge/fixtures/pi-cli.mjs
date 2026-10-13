@@ -36,10 +36,16 @@ for await(const line of createInterface({input:process.stdin})){
   // idle Pi. Both late, so an interrupt always lands in the preflight.
   else if(command.type==='prompt'&&command.message==='slowstart'){setTimeout(()=>{respond(command);running=true;setTimeout(()=>{send({type:'agent_start'});holding=true;},100);},300);}
   else if(command.type==='prompt'){
-    respond(command);running=true;send({type:'agent_start'});
-    if(command.message==='hold')holding=true;
-    else if(command.message==='confirm'){asked='ui-1';send({type:'extension_ui_request',id:asked,method:'confirm',title:'Delete build output?',message:'rm -rf dist'});}
-    else reply('Hello 🦊');
+    // Pi answers the prompt, then runs it: the run's events come after, not
+    // in the same write, or the bridge reads the whole run before its awaited
+    // answer and what it asks next depends on how the pipe was chunked.
+    respond(command);running=true;
+    setTimeout(()=>{
+      send({type:'agent_start'});
+      if(command.message==='hold')holding=true;
+      else if(command.message==='confirm'){asked='ui-1';send({type:'extension_ui_request',id:asked,method:'confirm',title:'Delete build output?',message:'rm -rf dist'});}
+      else reply('Hello 🦊');
+    },20);
   }
   else if(command.type==='extension_ui_response'&&command.id===asked){asked=undefined;reply(command.confirmed?'Deleted':'Kept');}
   else if(command.type==='abort'){respond(command);if(holding){holding=false;send({type:'message_end',message:{role:'assistant',content:[],stopReason:'aborted'}});send({type:'agent_settled'});running=false;}}
