@@ -1872,9 +1872,9 @@ impl Conversation {
                     || ids.len() != questions.len()
                     || questions.iter().any(|q| {
                         let options = q.get("options").filter(|o| !o.is_null());
-                        !q.get("id")
+                        q.get("id")
                             .and_then(Value::as_str)
-                            .is_some_and(|id| id.encode_utf16().count() <= 128)
+                            .is_none_or(|id| id.encode_utf16().count() > 128)
                             || !q.get("question").is_some_and(Value::is_string)
                             || options.is_some_and(|options| {
                                 !options.as_array().is_some_and(|options| {
