@@ -1,4 +1,4 @@
-import type { ChatItem, ToolItem } from './chat-model';
+import { SUBAGENT_TOOLS, type ChatItem, type ToolItem } from './chat-model';
 /** A stretch of tool calls the agent made one after another, shown as one card. */
 export interface ToolRun { type: 'tool_run'; id: string; tools: ToolItem[] }
 export type DisplayItem = Exclude<ChatItem, { type: 'tool' }> | ToolRun;
@@ -47,13 +47,28 @@ export function descendants(tool: ToolItem, depth = 1): Array<{ tool: ToolItem; 
   return (tool.children ?? []).flatMap(child => [{ tool: child, depth }, ...descendants(child, depth + 1)]);
 }
 
-/** The tools that start a subagent. Claude Code renamed Task to Agent. */
-export const SUBAGENT_TOOLS = new Set(['Agent', 'Task']);
-
 /** Subagents still at work anywhere in the conversation, outermost first. */
 export function runningSubagents(items: readonly ChatItem[]): ToolItem[] {
   const found: ToolItem[] = [];
   const visit = (tool: ToolItem) => { if (tool.status === 'running' && SUBAGENT_TOOLS.has(tool.name)) found.push(tool); tool.children?.forEach(visit); };
+  for (const item of items) if (item.type === 'tool') visit(item);
+  return found;
+}
+
+/** Running subagents not already inside another running one: each is a row of
+ * its own, and what it started shows in its preview. A parent that finished
+ * while its child runs on leaves the child a row of its own. */
+export function subagentRoots(items: readonly ChatItem[]): ToolItem[] {
+  const found: ToolItem[] = [];
+  const visit = (tool: ToolItem) => { if (tool.status === 'running' && SUBAGENT_TOOLS.has(tool.name)) found.push(tool); else tool.children?.forEach(visit); };
+  for (const item of items) if (item.type === 'tool') visit(item);
+  return found;
+}
+
+/** Every tool card by id, nested ones included. */
+export function toolsById(items: readonly ChatItem[]): Map<string, ToolItem> {
+  const found = new Map<string, ToolItem>();
+  const visit = (tool: ToolItem) => { found.set(tool.id, tool); tool.children?.forEach(visit); };
   for (const item of items) if (item.type === 'tool') visit(item);
   return found;
 }

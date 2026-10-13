@@ -34,7 +34,19 @@ export type ChatItem =
   | { type: 'error'; id: string; text: string };
 
 /** A tool call; `children` are the calls a subagent made inside it, nested as deep as they went. */
-export interface ToolItem { type: 'tool'; id: string; name: string; status: 'running' | 'completed' | 'failed'; text: string; activity?: string; parent?: string; stats?: ToolStats; at?: number; children?: ToolItem[] }
+export interface ToolItem { type: 'tool'; id: string; name: string; status: 'running' | 'completed' | 'failed'; text: string; activity?: string; parent?: string; stats?: ToolStats; at?: number; label?: string; children?: ToolItem[] }
+
+/** The tools that start a subagent. Claude Code renamed Task to Agent. */
+export const SUBAGENT_TOOLS = new Set(['Agent', 'Task']);
+/** What a subagent was asked to do, from the description in its call's input.
+ * The input is replaced by the result later, so the first reading is kept. */
+function subagentLabel(input: string | undefined) {
+  if (!input?.startsWith('{')) return;
+  try {
+    const description = (JSON.parse(input) as { description?: unknown }).description;
+    return typeof description === 'string' && description.trim() ? description.trim().slice(0, 120) : undefined;
+  } catch { return; }
+}
 
 /** Newest-first truncation: the latest subagent step matters more than its first. */
 const MAX_ACTIVITY = 4000;
@@ -65,7 +77,8 @@ export function conversationView(events: readonly ChatEvent[], running?: boolean
       const activity = event.activity === undefined ? before?.activity
         : clipTail(before?.activity ? `${before.activity}\n${event.activity}` : event.activity, MAX_ACTIVITY);
       const parent = event.parent ?? before?.parent, stats = event.stats ?? before?.stats, at = event.at ?? before?.at;
-      const next: ToolItem = { ...event, text: event.text ?? before?.text ?? '', ...(activity === undefined ? {} : { activity }), ...(parent === undefined ? {} : { parent }), ...(stats === undefined ? {} : { stats }), ...(at === undefined ? {} : { at }) };
+      const label = before?.label ?? (SUBAGENT_TOOLS.has(event.name) ? subagentLabel(event.text) : undefined);
+      const next: ToolItem = { ...event, text: event.text ?? before?.text ?? '', ...(activity === undefined ? {} : { activity }), ...(parent === undefined ? {} : { parent }), ...(stats === undefined ? {} : { stats }), ...(at === undefined ? {} : { at }), ...(label === undefined ? {} : { label }) };
       // A parent trimmed out of history leaves its calls at the top rather than nowhere.
       if (parent !== undefined && index === undefined && parent !== event.id && (indexes.has('tool:' + parent) || nested.has(parent))) {
         if (!nested.has(event.id)) childrenOf.set(parent, [...(childrenOf.get(parent) ?? []), event.id]);

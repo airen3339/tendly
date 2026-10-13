@@ -7,7 +7,7 @@ import { AGENT_CLIENTS, agentClient } from './clients';
 import { sessionConnections } from './session-connection';
 import { createSessionStream, type SessionStreamState } from './session-stream';
 import { onPageReturn } from './page-return';
-import { acknowledgeDraft, appendChatEvent, approvalPayloadAnswers, canClearContext, chatDrafts, createChatDraftStore, conversationView, isChatEvent, parseConversationSnapshot, pendingMessageRetry, pruneChatEvents, sessionConfigurationPayload, type ChatDraft, type ChatEvent, type ChatItem, type ConversationSnapshot, type NativeModel, type ToolItem, type ToolStats } from './chat-model';
+import { acknowledgeDraft, appendChatEvent, approvalPayloadAnswers, canClearContext, chatDrafts, createChatDraftStore, conversationView, isChatEvent, parseConversationSnapshot, pendingMessageRetry, pruneChatEvents, sessionConfigurationPayload, type ChatDraft, type ChatEvent, type ChatItem, type ConversationSnapshot, type NativeModel, type ToolItem, type ToolStats, SUBAGENT_TOOLS } from './chat-model';
 import ProviderIcon from './ProviderIcon.vue';
 import Icon from './Icon.vue';
 import ContextMenu from './ContextMenu.vue';
@@ -26,7 +26,7 @@ import { messageQueue } from './message-queue';
 import { attachedImagePaths } from './chat-model';
 import { filterModels, mergeModels, resolveModel, offeredModels } from './model-choices';
 import { openLightbox } from './image-lightbox';
-import { compactCount, descendants, lastLine, runningSubagents, stalledFor, toolRuns, toolRunNames, toolRunStatus, type ToolRun } from './tool-runs';
+import { compactCount, descendants, lastLine, runningSubagents, stalledFor, subagentRoots, toolRuns, toolRunNames, toolRunStatus, toolsById, type ToolRun } from './tool-runs';
 import { mentionQuery, applyMention } from './file-mentions';
 import { createFileSearch } from './file-search';
 import type { SearchHit } from './file-search';
@@ -65,7 +65,9 @@ const previewDrafts = createChatDraftStore();
 const draft = computed(() => reactive((isPreview.value ? previewDrafts : chatDrafts).get(props.session.id)));
 const view = computed(() => conversationView(events.value, running.value));
 /** Tool calls made back to back read as one card; see tool-runs.ts. */
-const displayItems = computed(() => toolRuns(view.value.items));
+// A running subagent lives in the dock above the composer, not in the history;
+// it takes its place there once it is done.
+const displayItems = computed(() => toolRuns(running.value ? view.value.items.filter(item => !(item.type === 'tool' && item.status === 'running' && SUBAGENT_TOOLS.has(item.name))) : view.value.items));
 /** Images load from this session's workspace, through the server, and nowhere else. */
 const workspaceImage = (path: string) => assetUrl(props.session.workspace_id, path);
 const hostImage = (path: string) => `/api/host/raw?${new URLSearchParams({ path })}`;
@@ -118,8 +120,10 @@ onBeforeUnmount(() => mentionSearch.cancel());
  * Subagents.
  *
  * They run in the background, so most of their work lands after the turn that
- * started them has ended and nothing else on screen says they are still going.
- * The strip above the composer does, and takes you to each in turn. A card the
+ * started them has ended. While one runs it sits in a dock above the composer
+ * rather than in the history: what it is doing now, what it has cost, and a
+ * preview that opens to its log and its own calls. A finished one stays in the
+ * dock, marked, until dismissed, and is in the history from then on. A card the
  * client has gone quiet on for a while says so, since a stuck subagent and a
  * slow one look the same otherwise.
  */
@@ -132,16 +136,29 @@ watch(() => subagents.value.length > 0, active => {
   if (active) { now.value = Date.now(); clock = setInterval(() => { now.value = Date.now(); }, 30_000); }
 }, { immediate: true });
 onBeforeUnmount(() => clearInterval(clock));
-let subagentCursor = 0;
-function revealSubagent() {
-  const list = subagents.value; if (!list.length) return;
-  const target = list[subagentCursor++ % list.length];
-  const card = viewport.value?.querySelector<HTMLElement>(`[data-tool-id="${CSS.escape(target.id)}"]`);
-  if (!card) return;
-  // Folded runs and parent cards open on the way, or there is nothing to see.
-  for (let node: HTMLElement | null = card; node && node !== viewport.value; node = node.parentElement) if (node instanceof HTMLDetailsElement) node.open = true;
-  card.scrollIntoView({ block: 'center', behavior: 'smooth' });
-}
+/** Rows in the order their subagents started; one joins when it is first seen running. */
+const dockIds = ref<string[]>([]), dockOpen = ref(true), expandedAgent = ref<string | null>(null), dock = ref<HTMLElement>();
+watch(() => props.session.id, () => { dockIds.value = []; expandedAgent.value = null; });
+watch(() => subagentRoots(view.value.items).map(tool => tool.id), ids => {
+  const fresh = ids.filter(id => !dockIds.value.includes(id));
+  if (fresh.length) dockIds.value = [...dockIds.value, ...fresh];
+}, { immediate: true });
+const dockAgents = computed(() => {
+  if (!running.value) return [];
+  const tools = toolsById(view.value.items);
+  return dockIds.value.flatMap(id => tools.get(id) ?? []);
+});
+const dockRunning = computed(() => dockAgents.value.filter(agent => agent.status === 'running').length);
+function dismissAgent(id: string) { dockIds.value = dockIds.value.filter(entry => entry !== id); if (expandedAgent.value === id) expandedAgent.value = null; }
+function clearFinished() { for (const agent of dockAgents.value) if (agent.status !== 'running') dismissAgent(agent.id); }
+// The open log follows the newest line, unless it was scrolled back to read.
+let followLog = true;
+function logScrolled(event: Event) { const el = event.target as HTMLElement; followLog = el.scrollHeight - el.scrollTop - el.clientHeight < 24; }
+watch(expandedAgent, () => { followLog = true; });
+watch(() => dockAgents.value.find(agent => agent.id === expandedAgent.value)?.activity?.length, () => {
+  if (!followLog) return;
+  void nextTick(() => { const log = dock.value?.querySelector<HTMLElement>('.subagent-log'); if (log) log.scrollTop = log.scrollHeight; });
+}, { flush: 'post' });
 function duration(ms: number) {
   const seconds = Math.round(ms / 1000);
   return seconds < 60 ? t('{seconds}s', { seconds }) : t('{minutes}m {seconds}s', { minutes: Math.floor(seconds / 60), seconds: seconds % 60 });
@@ -1033,7 +1050,7 @@ function keydown(event: KeyboardEvent) {
       <div v-if="!view.items.length" class="chat-welcome"><span class="chat-welcome-mark"><ProviderIcon :provider="session.provider" :size="32" /></span><h3>{{ t('What shall we build?') }}</h3><p>{{ t('A real conversation with your native agent, with room for tools, changes and your next idea.') }}</p><span class="chat-context-chip" :title="activeProfile?(activeProfile.native_config?t('Uses the sign-in and settings in {path}',{path:activeProfile.native_config.config_dir}):undefined):t('A fresh, empty client home: no host sign-in or settings, so it may ask you to log in.')"><ProviderIcon :provider="session.provider" :size="12"/>{{ endpointName }}</span><Transition name="chat-boot" :duration="240"><p v-if="booting" class="chat-boot" role="status"><span class="chat-boot-bar"><i/></span>{{ t('Starting {provider}… models and commands arrive with it.',{provider:providerLabel(session.provider)}) }}</p></Transition><div v-if="startersAvailable" class="chat-starters"><button v-for="(starter,index) in STARTERS" :key="starter.title" type="button" :style="{'--starter-delay':index*60+'ms'}" @click="useStarter(starter.prompt)"><span class="chat-starter-icon" :data-tone="starter.icon"><Icon :name="starter.icon" :size="16"/></span><span><strong>{{ t(starter.title) }}</strong><small>{{ t(starter.note) }}</small></span></button></div><p v-if="chatNote" class="chat-trust-note">{{ t(chatNote) }}</p></div>
       <template v-for="(item,index) in displayItems" :key="item.type+':'+index+':'+item.id">
         <article v-if="item.type==='message'" :class="['chat-message',item.role]"><div class="chat-message-label"><ProviderIcon v-if="item.role==='assistant'" :provider="session.provider" :size="15" /><span>{{ item.role==='user'?t('You'):providerLabel(session.provider) }}</span><em v-if="item.steered" class="chat-steered" :title="t('Written while the agent worked, and read inside that turn')">{{ t('Steer') }}</em></div><div v-if="item.role==='user'&&attachedImagePaths(item.text).length" class="chat-attached-images"><img v-for="path in attachedImagePaths(item.text)" :key="path" :src="workspaceImage(path)" :alt="path" :title="path" loading="lazy" @click="openLightbox(workspaceImage(path), path)" /></div><MarkdownContent :text="item.text" :image-url="workspaceImage" :host-image-url="hostImage" :open-file="openReference" /><div class="chat-message-actions"><CopyButton :text="item.text" label="Copy message" compact /></div></article>
-        <component :is="item.type==='tool_run'&&item.tools.length>1?'details':'div'" v-else-if="item.type==='tool_run'" :class="item.tools.length>1?['chat-tool-run',toolRunStatus(item)]:'chat-tool-solo'"><summary v-if="item.tools.length>1"><span :class="['tool-indicator',toolRunStatus(item)]">{{ toolRunStatus(item)==='completed'?'✓':toolRunStatus(item)==='failed'?'!':'↻' }}</span><strong>{{ t('{count} tool calls',{count:item.tools.length}) }}</strong><small>{{ toolRunStatus(item)==='running' ? runningLine(item) : toolRunNames(item) }}</small><Icon class="chat-tool-chevron" name="chevron" :size="14" /></summary><details v-for="tool in item.tools" :key="tool.id" class="chat-tool" :data-tool-id="tool.id"><summary><span :class="['tool-indicator',tool.status]">{{ tool.status==='completed'?'✓':tool.status==='failed'?'!':'↻' }}</span><strong>{{ tool.name }}</strong><small>{{ tool.activity && tool.status==='running' ? lastLine(tool.activity) : t(tool.status==='running'?(running?'Working…':'Session ended'):tool.status==='failed'?'Failed':'Completed') }}</small><span v-if="tool.stats" class="chat-tool-stats">{{ statsLine(tool.stats) }}</span><em v-if="quietLine(tool)" class="chat-tool-stalled">{{ quietLine(tool) }}</em><Icon class="chat-tool-chevron" name="chevron" :size="14" /></summary><pre v-if="tool.activity" class="tool-activity">{{ tool.activity }}</pre><div v-if="tool.children?.length" class="chat-tool-children"><details v-for="entry in descendants(tool)" :key="entry.tool.id" class="chat-tool-nested" :style="{'--depth':entry.depth}" :data-tool-id="entry.tool.id"><summary><span :class="['tool-indicator',entry.tool.status]">{{ entry.tool.status==='completed'?'✓':entry.tool.status==='failed'?'!':'↻' }}</span><strong>{{ entry.tool.name }}</strong><small>{{ entry.tool.activity && entry.tool.status==='running' ? lastLine(entry.tool.activity) : t(entry.tool.status==='running'?(running?'Working…':'Session ended'):entry.tool.status==='failed'?'Failed':'Completed') }}</small><span v-if="entry.tool.stats" class="chat-tool-stats">{{ statsLine(entry.tool.stats) }}</span><em v-if="quietLine(entry.tool)" class="chat-tool-stalled">{{ quietLine(entry.tool) }}</em></summary><pre v-if="entry.tool.activity" class="tool-activity">{{ entry.tool.activity }}</pre><pre v-if="entry.tool.text">{{ entry.tool.text }}</pre></details></div><pre v-if="tool.text">{{ tool.text }}</pre><p v-else-if="!tool.activity&&!tool.children?.length">{{ t('The client did not provide tool output.') }}</p></details></component>
+        <component :is="item.type==='tool_run'&&item.tools.length>1?'details':'div'" v-else-if="item.type==='tool_run'" :class="item.tools.length>1?['chat-tool-run',toolRunStatus(item)]:'chat-tool-solo'"><summary v-if="item.tools.length>1"><span :class="['tool-indicator',toolRunStatus(item)]">{{ toolRunStatus(item)==='completed'?'✓':toolRunStatus(item)==='failed'?'!':'↻' }}</span><strong>{{ t('{count} tool calls',{count:item.tools.length}) }}</strong><small>{{ toolRunStatus(item)==='running' ? runningLine(item) : toolRunNames(item) }}</small><Icon class="chat-tool-chevron" name="chevron" :size="14" /></summary><details v-for="tool in item.tools" :key="tool.id" class="chat-tool" :data-tool-id="tool.id"><summary><span :class="['tool-indicator',tool.status]">{{ tool.status==='completed'?'✓':tool.status==='failed'?'!':'↻' }}</span><strong>{{ tool.name }}<template v-if="tool.label"> · {{ tool.label }}</template></strong><small>{{ tool.activity && tool.status==='running' ? lastLine(tool.activity) : t(tool.status==='running'?(running?'Working…':'Session ended'):tool.status==='failed'?'Failed':'Completed') }}</small><span v-if="tool.stats" class="chat-tool-stats">{{ statsLine(tool.stats) }}</span><em v-if="quietLine(tool)" class="chat-tool-stalled">{{ quietLine(tool) }}</em><Icon class="chat-tool-chevron" name="chevron" :size="14" /></summary><pre v-if="tool.activity" class="tool-activity">{{ tool.activity }}</pre><div v-if="tool.children?.length" class="chat-tool-children"><details v-for="entry in descendants(tool)" :key="entry.tool.id" class="chat-tool-nested" :style="{'--depth':entry.depth}" :data-tool-id="entry.tool.id"><summary><span :class="['tool-indicator',entry.tool.status]">{{ entry.tool.status==='completed'?'✓':entry.tool.status==='failed'?'!':'↻' }}</span><strong>{{ entry.tool.name }}<template v-if="entry.tool.label"> · {{ entry.tool.label }}</template></strong><small>{{ entry.tool.activity && entry.tool.status==='running' ? lastLine(entry.tool.activity) : t(entry.tool.status==='running'?(running?'Working…':'Session ended'):entry.tool.status==='failed'?'Failed':'Completed') }}</small><span v-if="entry.tool.stats" class="chat-tool-stats">{{ statsLine(entry.tool.stats) }}</span><em v-if="quietLine(entry.tool)" class="chat-tool-stalled">{{ quietLine(entry.tool) }}</em></summary><pre v-if="entry.tool.activity" class="tool-activity">{{ entry.tool.activity }}</pre><pre v-if="entry.tool.text">{{ entry.tool.text }}</pre></details></div><pre v-if="tool.text">{{ tool.text }}</pre><p v-else-if="!tool.activity&&!tool.children?.length">{{ t('The client did not provide tool output.') }}</p></details></component>
         <p v-else-if="item.type==='approval'" :class="['chat-approval-record',{pending:!item.resolved}]"><Icon :name="item.resolved?'check':'shield'" :size="13"/><span>{{ item.title }}</span><small>{{ t(item.resolved?'Resolved':'Waiting for you below') }}</small></p>
         <div v-else-if="item.type==='configuration'" class="chat-boundary"><span>{{ t('New native context') }} · {{ item.profile_name }}</span><p>{{ t(item.text) }}</p></div>
         <p v-else-if="item.type==='error'" class="chat-alert" role="alert">{{ item.text }}</p>
@@ -1042,7 +1059,7 @@ function keydown(event: KeyboardEvent) {
       <p v-if="draft.pending" class="chat-delivery" role="status">{{ t(draft.notice??(draft.pending.state==='sending'?'Sending your message…':'Waiting for delivery confirmation.')) }}<button v-if="draft.pending.state==='unknown'" class="chat-link" @click="load()">{{ t('Refresh conversation') }}</button><button v-if="draft.pending.state==='unknown'&&!isPreview" class="chat-link" :disabled="loading||actionBusy||streamState!=='connected'" @click="retryDelivery">{{ t('Retry the same message request') }}</button></p>
       <div v-if="supported&&!loading&&mode!=='structured'" class="chat-native-note"><p>{{ t(running?'This session is running in the native client. End it there before enabling chat; it will not be taken over automatically.':'Enable chat explicitly to continue this native session in a conversation view.') }}</p><button class="chat-primary" :disabled="isPreview||actionBusy||running" @click="explicitOpen">{{ t('Enable conversation view') }}</button><button v-if="legacyAvailable" class="chat-link" @click="emit('legacy')">{{ t('Open native client view') }}</button></div>
     </div>
-    <button v-if="subagents.length" type="button" class="chat-subagents" :title="t('Show where it is')" @click="revealSubagent"><span class="chat-subagents-dot" />{{ subagents.length===1 ? t('1 subagent running') : t('{count} subagents running',{count:subagents.length}) }}<small v-if="subagents[0]!.activity">{{ lastLine(subagents[0]!.activity) }}</small></button>
+    <section v-if="dockAgents.length" ref="dock" :class="['subagent-dock',{collapsed:!dockOpen}]" :aria-label="t('Subagents')"><header><button type="button" class="subagent-dock-head" :aria-expanded="dockOpen" @click="dockOpen=!dockOpen"><span :class="['subagent-dock-dot',{idle:!dockRunning}]" /><strong>{{ dockRunning ? (dockRunning===1 ? t('1 subagent running') : t('{count} subagents running',{count:dockRunning})) : t('Subagents finished') }}</strong><small v-if="!dockOpen&&dockAgents[0]!.activity">{{ lastLine(dockAgents[0]!.activity!) }}</small><Icon class="subagent-dock-chevron" name="chevron" :size="14" /></button><button v-if="dockAgents.some(agent=>agent.status!=='running')" type="button" class="subagent-dock-clear" @click="clearFinished">{{ t('Clear finished') }}</button></header><ul v-if="dockOpen"><li v-for="agent in dockAgents" :key="agent.id" :class="['subagent-item',agent.status,{open:expandedAgent===agent.id}]"><div class="subagent-row"><button type="button" class="subagent-toggle" :aria-expanded="expandedAgent===agent.id" @click="expandedAgent=expandedAgent===agent.id?null:agent.id"><span :class="['tool-indicator',agent.status]">{{ agent.status==='completed'?'✓':agent.status==='failed'?'!':'↻' }}</span><strong>{{ agent.label || agent.name }}</strong><small>{{ agent.activity ? lastLine(agent.activity) : t(agent.status==='running'?'Working…':agent.status==='failed'?'Failed':'Completed') }}</small><span v-if="agent.stats" class="chat-tool-stats">{{ statsLine(agent.stats) }}</span><em v-if="quietLine(agent)" class="chat-tool-stalled">{{ quietLine(agent) }}</em><Icon class="subagent-chevron" name="chevron" :size="14" /></button><button v-if="agent.status!=='running'" type="button" class="subagent-dismiss" :aria-label="t('Dismiss')" :title="t('Dismiss')" @click="dismissAgent(agent.id)">×</button></div><div v-if="expandedAgent===agent.id" class="subagent-preview"><pre v-if="agent.activity" class="tool-activity subagent-log" @scroll="logScrolled">{{ agent.activity }}</pre><div v-if="agent.children?.length" class="chat-tool-children"><details v-for="entry in descendants(agent)" :key="entry.tool.id" class="chat-tool-nested" :style="{'--depth':entry.depth}"><summary><span :class="['tool-indicator',entry.tool.status]">{{ entry.tool.status==='completed'?'✓':entry.tool.status==='failed'?'!':'↻' }}</span><strong>{{ entry.tool.name }}<template v-if="entry.tool.label"> · {{ entry.tool.label }}</template></strong><small>{{ entry.tool.activity && entry.tool.status==='running' ? lastLine(entry.tool.activity) : t(entry.tool.status==='running'?'Working…':entry.tool.status==='failed'?'Failed':'Completed') }}</small><span v-if="entry.tool.stats" class="chat-tool-stats">{{ statsLine(entry.tool.stats) }}</span></summary><pre v-if="entry.tool.activity" class="tool-activity">{{ entry.tool.activity }}</pre><pre v-if="entry.tool.text">{{ entry.tool.text }}</pre></details></div><p v-if="!agent.activity&&!agent.children?.length" class="subagent-empty">{{ t('Nothing reported yet.') }}</p></div></li></ul></section>
     <button v-if="!followBottom" class="chat-latest" @click="scrollToLatest(true)">↓ {{ t('Latest message') }}</button>
     <BottomSheet v-if="mobile && optionsOpen" :title="t('Session settings')" @opened="chipsInSheet=true" @close="optionsClosed"><div v-if="error" class="chat-alert chat-options-alert" role="alert">{{ error }}</div><div v-else-if="notice" class="chat-notice chat-options-alert" role="status">{{ t(notice) }}</div><div :id="optionsTarget" class="chat-options-body" /></BottomSheet>
     <section v-if="dockedApproval" class="chat-approval-dock" :aria-label="t('Waiting for you')">
@@ -1171,12 +1188,35 @@ function keydown(event: KeyboardEvent) {
 .chat-tool-nested pre{padding-left:calc(13px + var(--depth,1) * 16px)}
 .chat-tool-stats{font:var(--text-xs) var(--mono);color:var(--muted);white-space:nowrap}
 .chat-tool-stalled{font-style:normal;font-size:var(--text-xs);color:var(--warn-ink);background:var(--warn-soft);border:1px solid var(--warn-line);border-radius:var(--radius-sm);padding:1px 6px;white-space:nowrap}
-.chat-subagents{flex-shrink:0;align-self:center;display:flex;align-items:center;gap:8px;max-width:min(560px,calc(100% - 32px));margin:0 16px 8px;min-height:32px;padding:5px 13px;border:1px solid var(--line);border-radius:30px;background:var(--surface);color:var(--ink-soft);font-size:var(--text-xs);box-shadow:var(--shadow-sm);cursor:pointer}
-.chat-subagents small{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}
-.chat-subagents-dot{flex-shrink:0;width:7px;height:7px;border-radius:50%;background:var(--teal);animation:chat-breathe 2.6s ease-in-out infinite}
+.subagent-dock{flex-shrink:0;display:flex;flex-direction:column;max-height:min(46vh,420px);margin:0 16px 8px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow-md);overflow:hidden}
+.subagent-dock>header{display:flex;align-items:center;gap:6px;padding-right:8px}
+.subagent-dock-head{flex:1;min-width:0;display:flex;align-items:center;gap:8px;min-height:36px;padding:6px 12px;border:0;background:none;font:inherit;font-size:var(--text-xs);color:var(--ink-soft);cursor:pointer;text-align:left}
+.subagent-dock-head strong{font-weight:600;color:var(--ink);white-space:nowrap}
+.subagent-dock-head small{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}
+.subagent-dock-chevron{margin-left:auto;flex-shrink:0;transform:rotate(270deg);color:var(--muted)}.subagent-dock.collapsed .subagent-dock-chevron{transform:rotate(90deg)}
+.subagent-dock-dot{flex-shrink:0;width:7px;height:7px;border-radius:50%;background:var(--teal);animation:chat-breathe 2.6s ease-in-out infinite}.subagent-dock-dot.idle{background:var(--muted);animation:none}
+.subagent-dock-clear{flex-shrink:0;border:0;background:none;padding:4px 6px;font:inherit;font-size:var(--text-xs);color:var(--teal);cursor:pointer}
+.subagent-dock>ul{list-style:none;margin:0;padding:0;overflow-y:auto;overscroll-behavior:contain;border-top:1px solid var(--border)}
+.subagent-item+.subagent-item{border-top:1px solid var(--border)}
+.subagent-row{display:flex;align-items:center}
+.subagent-toggle{flex:1;min-width:0;display:flex;align-items:center;gap:8px;min-height:34px;padding:5px 12px;border:0;background:none;font:inherit;font-size:var(--text-xs);color:var(--ink-soft);cursor:pointer;text-align:left}
+.subagent-toggle:hover{background:var(--fill)}
+.subagent-toggle strong{flex:0 1 auto;max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;color:var(--ink)}
+.subagent-toggle small{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:var(--text-xs)}
+.subagent-chevron{flex-shrink:0;transform:rotate(90deg);color:var(--muted)}.subagent-item.open .subagent-chevron{transform:rotate(270deg)}
+.subagent-dismiss{flex-shrink:0;width:28px;height:28px;margin-right:6px;border:0;border-radius:var(--radius-sm);background:none;color:var(--muted);font-size:var(--text-lg);cursor:pointer}.subagent-dismiss:hover{background:var(--fill);color:var(--ink)}
+.subagent-item.completed .subagent-toggle strong,.subagent-item.failed .subagent-toggle strong{color:var(--ink-soft)}
+.subagent-preview{border-top:1px solid var(--border);background:var(--sunken)}
+.subagent-preview pre{margin:0;padding:10px 13px;white-space:pre-wrap;overflow-wrap:anywhere;font:var(--text-xs)/1.7 var(--mono);max-height:220px;overflow:auto}
+.subagent-preview .chat-tool-nested pre{max-height:180px;border-top:1px solid var(--border)}
+.subagent-preview .chat-tool-nested small{flex-shrink:1;min-width:0;max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--text-xs);color:var(--muted)}
+.subagent-empty{margin:0;padding:10px 13px;font-size:var(--text-xs);color:var(--muted)}
+.chat-pane:not(.is-phone) .subagent-dock{margin-inline:max(16px,calc((100% - 860px) / 2))}
+.chat-pane.is-phone .subagent-dock{margin:0 8px 6px}
+@container(max-width:480px){.subagent-dock{margin:0 8px 6px}.subagent-toggle .chat-tool-stats{display:none}.subagent-toggle strong{max-width:55%}}
 .chat-menu-state{margin-left:auto;color:var(--muted);font-size:var(--text-xs)}
 @container(max-width:480px){.chat-tool-stats{display:none}}
-@media(prefers-reduced-motion:reduce){.chat-subagents-dot{animation:none}}
+@media(prefers-reduced-motion:reduce){.subagent-dock-dot{animation:none}}
 .chat-tool-chevron{transform:rotate(90deg)}.chat-tool[open] .chat-tool-chevron{transform:rotate(270deg)}
 .chat-end-confirm{flex-shrink:0;background:var(--danger-soft);color:var(--danger-ink);border-bottom:1px solid var(--danger-line);padding:11px 16px;font-size:var(--text-sm);line-height:1.7}.chat-end-confirm p{margin:0 0 8px}.chat-end-confirm>div{display:flex;gap:8px;flex-wrap:wrap}.chat-end-confirm button{min-height:44px;padding:8px 13px;border:1px solid var(--danger-line);border-radius:var(--radius-md);background:var(--surface);color:var(--danger)}.chat-end-confirm button:first-child{background:var(--danger);color:var(--on-accent);border-color:var(--danger)}.chat-menu .chat-end-button{color:var(--danger)}
 

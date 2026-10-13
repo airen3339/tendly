@@ -475,3 +475,14 @@ test('nested, counted and timed tool events are well-formed only with sane value
   assert.ok(!isChatEvent({ type: 'settings', subagent_summaries: 'on' }));
   assert.equal(conversationView([{ type: 'settings', subagent_summaries: true }]).subagentSummaries, true);
 });
+
+test('a subagent keeps the description it was started with after its input is replaced', () => {
+  const view = conversationView([
+    { type: 'tool', id: 'a', name: 'Agent', status: 'running', text: '{"description":"Scan the bridge","prompt":"…"}' },
+    { type: 'tool', id: 'a', name: 'Agent', status: 'completed', text: 'Found three.' },
+    { type: 'tool', id: 'b', name: 'Bash', status: 'running', text: '{"description":"not a subagent"}' },
+  ]);
+  assert.equal(view.items[0].label, 'Scan the bridge');
+  assert.equal(view.items[0].text, 'Found three.');
+  assert.equal(view.items[1].label, undefined);
+});

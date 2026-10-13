@@ -32,3 +32,13 @@ test('running subagents are found at any depth, and only a quiet one is stalled'
   assert.equal(stalledFor(outer, STALL_MS * 10), undefined, 'a card that never reported progress is never called stalled');
   assert.deepEqual([12, 3400, 12_000, 1_250_000].map(compactCount), ['12', '3.4k', '12k', '1.3M']);
 });
+
+test('each running subagent not inside another running one gets a dock row', async () => {
+  const { subagentRoots, toolsById } = await import('./tool-runs.ts');
+  const agent = (id, status, children) => ({ type: 'tool', id, name: 'Agent', status, text: '', ...(children ? { children } : {}) });
+  const deep = agent('deep', 'running');
+  // A parent that finished while its child runs on leaves the child a row of its own.
+  const items = [agent('a', 'running', [agent('a1', 'running')]), agent('b', 'completed', [deep]), tool('c', 'Bash', 'running')];
+  assert.deepEqual(subagentRoots(items).map(t => t.id), ['a', 'deep']);
+  assert.equal(toolsById(items).get('deep'), deep);
+});
