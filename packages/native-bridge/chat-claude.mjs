@@ -93,6 +93,12 @@ const controlRequest=(id,method,params)=>({type:'control_request',request_id:id,
 export class ClaudeChat extends ChatBase {
   /** Steered message ids Claude Code has not read back yet. @type {Set<string> | undefined} */
   unconsumed;
+  /** Background task id to the tool call that started it. @type {Map<string, string> | undefined} */
+  tasks;
+  /** Tool calls whose task runs on after their placeholder result. @type {Set<string> | undefined} */
+  background;
+  /** The last progress summary logged per tool call. @type {Map<string, string> | undefined} */
+  summaryOf;
   async initialize() {
     this.launch=claudeLaunch(this.job);this.tools=new Map();this.summaries=false;
     this.port=new NativeProcess(this.job.program,this.launch.args,this.job.cwd,message=>this.notification(message),message=>this.fatal(message),()=>this.fatal('Claude Code exited.'),{...this.options,frame:controlRequest});
