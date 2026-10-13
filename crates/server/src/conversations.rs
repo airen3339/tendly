@@ -1,9 +1,9 @@
 //! Structured native-client transport. The CLI owns the Agent loop and tool
 //! execution; this module only supervises JSONL, persistence and UI decisions.
+use crate::chat_adapter::{BridgeAdapter, ChatCommand, ChatInit, ClientAdapter, dispatch};
 use crate::{ApiError, AppState, Result, db, providers, session_record};
 use agentdock_domain::{InteractionMode, ProviderKind, Session, SessionId, SessionStatus};
 use agentdock_persistence::MessageSubmission;
-use agentdock_runtime::process::OwnedGroup;
 use axum::{
     Json, Router,
     extract::{
@@ -25,10 +25,7 @@ use std::{
     },
     time::Duration,
 };
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    sync::{Notify, broadcast, mpsc},
-};
+use tokio::sync::{Notify, broadcast, mpsc};
 
 #[derive(Clone, Default)]
 pub struct ChatManager {
@@ -290,17 +287,10 @@ pub async fn start_locked(state: &AppState, session: &Session) -> Result<Arc<Cha
     for key in &spec.env_remove {
         command.env_remove(key);
     }
-    let mut child = command.spawn().map_err(|_| {
+    let child = command.spawn().map_err(|_| {
         ApiError::conflict("Native chat needs Node.js and the installed chat bridge")
     })?;
-    let stdin = child
-        .stdin
-        .take()
-        .ok_or_else(|| ApiError::conflict("Cannot open native chat input"))?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| ApiError::conflict("Cannot open native chat output"))?;
+    let adapter = BridgeAdapter::new(child)?;
     let (commands, receiver) = mpsc::channel(8);
     let runtime = Arc::new(ChatRuntime {
         commands,
@@ -312,7 +302,7 @@ pub async fn start_locked(state: &AppState, session: &Session) -> Result<Arc<Cha
         ready: AtomicBool::new(false),
         busy: AtomicBool::new(false),
         approvals: Mutex::new(HashMap::new()),
-        pid: child.id(),
+        pid: adapter.pid(),
     });
     db(state, move |s| {
         s.set_session_status(id, SessionStatus::Starting)
@@ -324,17 +314,18 @@ pub async fn start_locked(state: &AppState, session: &Session) -> Result<Arc<Cha
         .lock()
         .expect("chat sessions")
         .insert(id, runtime.clone());
-    let mut init = json!({"type":"init","provider":session.provider,"program":spec.program,"args":spec.args,"cwd":spec.cwd});
-    if let Some(native_id) = &session.provider_session_id {
-        init["resume_id"] = json!(native_id);
-    }
+    let init = ChatInit {
+        provider: session.provider.as_str().to_owned(),
+        program: spec.program.clone(),
+        args: spec.args.clone(),
+        cwd: spec.cwd.to_string_lossy().into_owned(),
+        resume_id: session.provider_session_id.clone(),
+    };
     tokio::spawn(supervise(
         state.clone(),
         id,
         runtime.clone(),
-        child,
-        stdin,
-        stdout,
+        adapter,
         receiver,
         init,
     ));
@@ -975,79 +966,44 @@ async fn stream(state: AppState, id: SessionId, socket: WebSocket) {
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn supervise(
+async fn supervise<A: ClientAdapter>(
     state: AppState,
     id: SessionId,
     runtime: Arc<ChatRuntime>,
-    mut child: tokio::process::Child,
-    mut stdin: tokio::process::ChildStdin,
-    mut stdout: tokio::process::ChildStdout,
+    mut adapter: A,
     mut commands: mpsc::Receiver<Value>,
-    init: Value,
+    init: ChatInit,
 ) {
-    let mut group = OwnedGroup::new(child.id());
-    let mut buffer = Vec::new();
-    let mut bytes = [0u8; 8192];
     let mut failure = None;
     let mut native_exit = false;
-    if !matches!(
-        tokio::time::timeout(
-            Duration::from_secs(3),
-            stdin.write_all(format!("{init}\n").as_bytes())
-        )
-        .await,
-        Ok(Ok(()))
-    ) {
-        failure = Some("Native chat input closed during initialization");
+    if let Err(message) = adapter.start(&init).await {
+        failure = Some(message);
     }
     while failure.is_none() && !native_exit {
         tokio::select! {
             _=runtime.stop.notified()=>break,
             command=commands.recv()=> {
                 let Some(command)=command else{break;};
-                if !matches!(tokio::time::timeout(Duration::from_secs(3),stdin.write_all(format!("{command}\n").as_bytes())).await,Ok(Ok(()))){failure=Some("Native chat input is unavailable");}
-            }
-            result=stdout.read(&mut bytes)=> {
-                let count=match result {Ok(0)=>break,Ok(n)=>n,Err(_)=>{failure=Some("Native chat output closed unexpectedly");continue;}};
-                buffer.extend_from_slice(&bytes[..count]);
-                while let Some(end)=buffer.iter().position(|b|*b==b'\n') {
-                    if end>256*1024 {failure=Some("Native chat event exceeded the size limit");break;}
-                    let line:Vec<_>=buffer.drain(..=end).collect();
-                    let event=match serde_json::from_slice::<Value>(&line).ok().and_then(normalize_event){Some(event)=>event,None=>{failure=Some("Native chat returned an unsupported event; update the installed bridge/client");break;}};
-                    if event["type"]=="exit" {native_exit=true;break;}
-                    if handle_event(&state,id,&runtime,event).await.is_err(){failure=Some("Could not persist native conversation; stopping to avoid losing output");break;}
+                match ChatCommand::parse(&command) {
+                    Ok(ChatCommand::Shutdown)=>break,
+                    Ok(command)=>if let Err(message)=dispatch(&mut adapter,command).await{failure=Some(message);},
+                    // The bridge answered a command it could not take with an
+                    // error event and carried on; so does this.
+                    Err(message)=>if handle_event(&state,id,&runtime,json!({"type":"error","message":message})).await.is_err(){failure=Some("Could not persist native conversation; stopping to avoid losing output");},
                 }
-                if buffer.len()>256*1024 {failure=Some("Native chat event exceeded the size limit");}
+            }
+            event=adapter.next_event()=> {
+                let event=match event {None=>break,Some(Err(message))=>{failure=Some(message);continue;},Some(Ok(event))=>event};
+                let Some(event)=normalize_event(event) else {failure=Some("Native chat returned an unsupported event; update the installed bridge/client");continue;};
+                if event["type"]=="exit" {native_exit=true;continue;}
+                if handle_event(&state,id,&runtime,event).await.is_err(){failure=Some("Could not persist native conversation; stopping to avoid losing output");}
             }
         }
     }
     if let Some(message) = failure {
         let _ = persist(&state, id, json!({"type":"error","message":message})).await;
     }
-    let _ = tokio::time::timeout(
-        Duration::from_millis(250),
-        stdin.write_all(b"{\"type\":\"shutdown\"}\n"),
-    )
-    .await;
-    // A dedicated, positively identified process group contains only this bridge
-    // and its native CLI descendants. Never signal the host or unrelated Agents.
-    // Windows has no polite request, so there the bridge gets the time it had to
-    // shut down on its own after the message above before its tree is stopped.
-    #[cfg(windows)]
-    let _ = tokio::time::timeout(Duration::from_millis(1600), child.wait()).await;
-    group.terminate();
-    // Keep the leader unreaped until its owned group has been cleaned up.
-    // Waiting for only the Node PID can leave TERM-ignoring descendants.
-    #[cfg(unix)]
-    tokio::time::sleep(Duration::from_millis(1600)).await;
-    group.finish();
-    if tokio::time::timeout(Duration::from_secs(2), child.wait())
-        .await
-        .is_err()
-    {
-        let _ = child.start_kill();
-        let _ = tokio::time::timeout(Duration::from_secs(1), child.wait()).await;
-    }
+    adapter.shutdown().await;
     runtime.running.store(false, Ordering::Release);
     runtime.ready.store(false, Ordering::Release);
     runtime.busy.store(false, Ordering::Release);

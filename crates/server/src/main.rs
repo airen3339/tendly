@@ -9,6 +9,7 @@ mod agent_sessions;
 mod api_tests;
 mod bridge;
 mod canvas;
+mod chat_adapter;
 mod checkouts;
 mod clients;
 mod conversations;
