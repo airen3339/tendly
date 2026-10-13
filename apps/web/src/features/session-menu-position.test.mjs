@@ -21,3 +21,11 @@ test('bottom split menus open upwards and tall panels remain scrollable', () => 
   assert.equal(tall.maxHeight, 299);
   assert.equal(tall.left, 8);
 });
+
+test('a style is rewritten only when it says something new', async () => {
+  const { sameStyle } = await import('./session-menu-position.ts');
+  assert.ok(sameStyle({ left: '1px', top: '2px' }, { top: '2px', left: '1px' }));
+  assert.ok(!sameStyle({ left: '1px' }, { left: '2px' }));
+  assert.ok(!sameStyle({ left: '1px' }, { left: '1px', top: '0px' }));
+  assert.ok(sameStyle({}, {}));
+});
