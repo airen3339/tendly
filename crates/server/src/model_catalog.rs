@@ -21,7 +21,7 @@ pub struct ModelEntry {
     #[serde(rename = "isDefault", skip_serializing_if = "std::ops::Not::not")]
     pub is_default: bool,
 }
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ModelCatalog {
     pub models: Vec<ModelEntry>,
     pub source_url: String,
@@ -137,6 +137,38 @@ pub(crate) fn parse_models(value: Value, source_url: String) -> Result<ModelCata
                 .unwrap_or(false),
     })
 }
+/// How long a profile's model list is reused. Every session view asks for it
+/// when it opens, and for an official account the answer comes from starting
+/// the client itself -- seconds of work, repeated on every tab switch, for a
+/// list that changes when the CLI is upgraded or the profile is edited.
+const CATALOG_REUSE: Duration = Duration::from_secs(300);
+
+/// `discover`, reusing a recent answer for the same profile. The key is the
+/// whole profile, so editing it asks again at once.
+pub async fn discover_cached(
+    state: &crate::AppState,
+    profile: &EndpointProfile,
+) -> Result<ModelCatalog, ApiError> {
+    use std::{
+        collections::HashMap,
+        sync::{Mutex, OnceLock},
+        time::Instant,
+    };
+    static RECENT: OnceLock<Mutex<HashMap<String, (Instant, ModelCatalog)>>> = OnceLock::new();
+    let recent = RECENT.get_or_init(Default::default);
+    let key = serde_json::to_string(profile).unwrap_or_default();
+    if let Some((at, catalog)) = recent.lock().expect("model catalog cache").get(&key)
+        && at.elapsed() < CATALOG_REUSE
+    {
+        return Ok(catalog.clone());
+    }
+    let catalog = discover(state, profile).await?;
+    let mut recent = recent.lock().expect("model catalog cache");
+    recent.retain(|_, (at, _)| at.elapsed() < CATALOG_REUSE);
+    recent.insert(key, (Instant::now(), catalog.clone()));
+    Ok(catalog)
+}
+
 pub async fn discover(
     state: &crate::AppState,
     profile: &EndpointProfile,

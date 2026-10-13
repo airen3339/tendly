@@ -7,7 +7,7 @@ use agentdock_persistence::MessageSubmission;
 use axum::{
     Json, Router,
     extract::{
-        Path, State, WebSocketUpgrade,
+        Path, Query, State, WebSocketUpgrade,
         ws::{Message, WebSocket},
     },
     http::StatusCode,
@@ -668,6 +668,45 @@ fn model_command(model: Option<&str>, effort: Option<&str>) -> Value {
 }
 
 #[cfg(test)]
+mod greeting_tests {
+    use super::greeting;
+    use serde_json::json;
+
+    fn stored() -> serde_json::Value {
+        json!({"type":"snapshot","mode":"structured","running":true,"truncated":false,
+            "events":[{"seq":3},{"seq":4},{"seq":5}]})
+    }
+
+    #[test]
+    fn a_fresh_view_gets_the_whole_conversation() {
+        let (greeting, last) = greeting(stored(), None);
+        assert_eq!(greeting["events"].as_array().unwrap().len(), 3);
+        assert!(greeting.get("after").is_none());
+        assert_eq!(last, 5);
+    }
+
+    #[test]
+    fn a_view_that_holds_events_gets_only_what_follows() {
+        let (greeting, last) = greeting(stored(), Some(4));
+        assert_eq!(greeting["events"], json!([{"seq":5}]));
+        assert_eq!(greeting["after"], 4);
+        assert_eq!(greeting["running"], true);
+        assert_eq!(last, 5);
+        let (current, _) = super::greeting(stored(), Some(5));
+        assert_eq!(current["events"], json!([]));
+        assert_eq!(current["after"], 5);
+    }
+
+    #[test]
+    fn a_view_past_the_end_gets_everything() {
+        let (greeting, last) = greeting(stored(), Some(9));
+        assert_eq!(greeting["events"].as_array().unwrap().len(), 3);
+        assert!(greeting.get("after").is_none());
+        assert_eq!(last, 5);
+    }
+}
+
+#[cfg(test)]
 mod event_whitelist_tests {
     use super::normalize_event;
     use serde_json::json;
@@ -933,30 +972,50 @@ pub async fn publish_snapshot(state: &AppState, id: SessionId) {
     }
 }
 
+/// Where a view that already holds part of the conversation resumes.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Resume {
+    /// The last event the view holds; the greeting carries only what follows.
+    after: Option<u64>,
+}
 async fn socket(
     State(state): State<AppState>,
     Path(id): Path<SessionId>,
+    Query(resume): Query<Resume>,
     upgrade: WebSocketUpgrade,
 ) -> Result<Response> {
     session_record(&state, id).await?;
     Ok(upgrade
         .max_message_size(1024)
-        .on_upgrade(move |socket| stream(state, id, socket)))
+        .on_upgrade(move |socket| stream(state, id, socket, resume.after)))
 }
-async fn stream(state: AppState, id: SessionId, socket: WebSocket) {
-    let mut events = state.chats.channel(id).subscribe();
-    let (mut sender, mut receiver) = socket.split();
-    let mut last_seq = 0;
-    let Ok(initial) = snapshot(&state, id).await else {
-        return;
-    };
-    if let Some(seq) = initial["events"]
+/// The greeting a socket opens with: the whole conversation, or -- for a view
+/// that says which event it holds last -- only the events after it, marked
+/// with `after` so the view adds them instead of replacing what it has.
+/// Sequences never reset, so a view's last event is always a valid place to
+/// resume from; one claiming an event past the end gets everything.
+fn greeting(mut snapshot: Value, after: Option<u64>) -> (Value, u64) {
+    let last_seq = snapshot["events"]
         .as_array()
         .and_then(|v| v.last())
         .and_then(|v| v["seq"].as_u64())
+        .unwrap_or(0);
+    if let Some(after) = after.filter(|after| *after <= last_seq)
+        && let Some(events) = snapshot["events"].as_array_mut()
     {
-        last_seq = seq;
+        events.retain(|event| event["seq"].as_u64().is_some_and(|seq| seq > after));
+        snapshot["after"] = json!(after);
     }
+    (snapshot, last_seq)
+}
+async fn stream(state: AppState, id: SessionId, socket: WebSocket, after: Option<u64>) {
+    let mut events = state.chats.channel(id).subscribe();
+    let (mut sender, mut receiver) = socket.split();
+    let Ok(initial) = snapshot(&state, id).await else {
+        return;
+    };
+    let (initial, mut last_seq) = greeting(initial, after);
     if crate::send_frame(&mut sender, Message::Text(initial.to_string().into()))
         .await
         .is_err()

@@ -539,3 +539,18 @@ test('a turn\'s cost sits under that turn\'s last reply, and never moves the con
   assert.ok(isChatEvent({ type: 'usage', turn: spent }));
   assert.ok(!isChatEvent({ type: 'usage', turn: { cost: 1 } }));
 });
+
+test('a resumed greeting says where it resumes, and a view resumes from its last event', async () => {
+  const { lastChatSeq } = await import('./chat-model.ts');
+  const resumed = parseConversationSnapshot({ running: true, events: [{ type: 'ready', seq: 8 }], after: 7 });
+  assert.equal(resumed.after, 7);
+  assert.ok(!('after' in parseConversationSnapshot({ running: true, events: [] })));
+  for (const after of [-1, 1.5, '7', null]) assert.throws(() => parseConversationSnapshot({ running: true, events: [], after }), /Invalid conversation response/);
+  assert.equal(lastChatSeq([]), undefined);
+  assert.equal(lastChatSeq([{ type: 'ready' }]), undefined);
+  assert.equal(lastChatSeq([{ type: 'ready', seq: 3 }, { type: 'turn', id: 't', status: 'running', seq: 9 }, { type: 'ready' }]), 9);
+  // Adding a resumed greeting keeps what the view held and skips anything it already had.
+  const held = [{ type: 'ready', seq: 6 }, { type: 'ready', seq: 7 }];
+  const merged = [{ type: 'ready', seq: 7 }, { type: 'ready', seq: 8 }].reduce(appendChatEvent, held);
+  assert.deepEqual(merged.map(event => event.seq), [6, 7, 8]);
+});

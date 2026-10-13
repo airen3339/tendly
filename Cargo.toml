@@ -25,7 +25,7 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 tokio = { version = "1", features = ["full"] }
-tower-http = { version = "0.6", features = ["fs"] }
+tower-http = { version = "0.6", features = ["fs", "compression-gzip"] }
 rust-embed = { version = "8", features = ["interpolate-folder-path", "include-exclude"] }
 mime_guess = "2"
 sha2 = "0.10"

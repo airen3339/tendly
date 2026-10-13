@@ -23,7 +23,7 @@ import { applyCommand, matchCommands, moveHighlight, slashQuery, unsupportedComm
 import { MarkdownContent } from './MarkdownContent';
 import { handoffArrivals, handoffTranscript } from './handoff';
 import { messageQueue, queuedContent, type QueuedMessage } from './message-queue';
-import { attachedImagePaths } from './chat-model';
+import { attachedImagePaths, lastChatSeq } from './chat-model';
 import { filterModels, mergeModels, resolveModel, offeredModels } from './model-choices';
 import { openLightbox } from './image-lightbox';
 import { compactCount, descendants, dockRoots, inDock, isLive, lastLine, runningSubagents, stalledFor, toolRuns, toolRunNames, toolRunStatus, toolsById, type ToolRun } from './tool-runs';
@@ -609,7 +609,8 @@ function atBottom() { const el = viewport.value; followBottom.value = !el || el.
 async function scrollToLatest(force = false) { await nextTick(); const el = viewport.value; if (el && (force || followBottom.value) && (force || !window.getSelection()?.toString())) { el.scrollTop = el.scrollHeight; followBottom.value = true; } }
 function updateSnapshot(raw: unknown) {
   const snapshot = parseConversationSnapshot(raw);
-  const bounded = pruneChatEvents(snapshot.events);
+  // A resumed greeting carries only what follows the view's last event.
+  const bounded = pruneChatEvents(snapshot.after === undefined ? snapshot.events : snapshot.events.reduce(appendChatEvent, events.value));
   mode.value = snapshot.mode; running.value = snapshot.running; truncated.value = !!snapshot.truncated || bounded.truncated; events.value = bounded.events;
   acknowledgeDraft(draft.value, snapshot.events);
   if (!snapshot.running) clearAnswers();
@@ -622,7 +623,8 @@ function attach(id: string, own: number) {
   stream = createSessionStream({
     createSocket: url => new WebSocket(url),
     // A dropped view re-attaches on its own; the server greets every socket
-    // with a full snapshot, so nothing missed meanwhile is lost.
+    // with everything after the last event the view holds, so nothing missed
+    // meanwhile is lost and nothing it already has is sent again.
     reconnect: true,
     hidden: () => document.hidden,
     onState: (state, detail) => { if (current()) { streamState.value = state; streamNotice.value = detail; } },
@@ -646,7 +648,7 @@ function attach(id: string, own: number) {
     },
   });
   const url = new URL('/api/sessions/' + encodeURIComponent(id) + '/chat/ws', window.location.href); url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-  stream.connect(url.href);
+  stream.connect(() => { const after = lastChatSeq(events.value); if (after === undefined) url.searchParams.delete('after'); else url.searchParams.set('after', String(after)); return url.href; });
 }
 async function load(consumeOpenIntent = false) {
   const id = props.session.id, own = ++generation;

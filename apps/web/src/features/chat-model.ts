@@ -29,7 +29,8 @@ export type ChatEvent = ({ seq?: number } & (
   | { type: 'exit' }
   | { type: 'cleared' }
 ));
-export interface ConversationSnapshot { mode?: 'structured' | 'pty'; running: boolean; events: ChatEvent[]; truncated?: boolean }
+/** `after` marks a resumed greeting: `events` holds only what follows that sequence and adds to the view. */
+export interface ConversationSnapshot { mode?: 'structured' | 'pty'; running: boolean; events: ChatEvent[]; truncated?: boolean; after?: number }
 export type ChatItem =
   | { type: 'message'; id: string; role: 'user' | 'assistant'; text: string; steered?: boolean; usage?: TurnUsage }
   | ToolItem
@@ -221,7 +222,14 @@ export function parseConversationSnapshot(value: unknown): ConversationSnapshot 
   if (!value || typeof value !== 'object') throw Error('Invalid conversation response.');
   const v = value as Record<string, unknown>;
   if (typeof v.running !== 'boolean' || !Array.isArray(v.events) || !v.events.every(isChatEvent) || (v.mode !== undefined && v.mode !== 'structured' && v.mode !== 'pty')) throw Error('Invalid conversation response.');
-  return { mode: v.mode as ConversationSnapshot['mode'], running: v.running, events: v.events, truncated: v.truncated === true };
+  if (v.after !== undefined && !(typeof v.after === 'number' && Number.isSafeInteger(v.after) && v.after >= 0)) throw Error('Invalid conversation response.');
+  return { mode: v.mode as ConversationSnapshot['mode'], running: v.running, events: v.events, truncated: v.truncated === true, ...(v.after !== undefined ? { after: v.after as number } : {}) };
+}
+/** The last sequence a view holds, where a socket resumes; none for a view that holds nothing yet. */
+export function lastChatSeq(events: readonly ChatEvent[]): number | undefined {
+  let last: number | undefined;
+  for (const event of events) if (event.seq !== undefined && (last === undefined || event.seq > last)) last = event.seq;
+  return last;
 }
 
 export function approvalPayloadAnswers(questions: readonly ApprovalQuestion[], selections: Record<string, string[]> = {}, others: Record<string, string> = {}): Record<string, string[]> {

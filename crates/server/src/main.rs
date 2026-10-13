@@ -68,7 +68,10 @@ use serde_json::{Value, json};
 use std::{collections::HashSet, env, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 #[cfg(test)]
 use tokio::net::TcpListener;
-use tower_http::services::{ServeDir, ServeFile};
+use tower_http::{
+    compression::CompressionLayer,
+    services::{ServeDir, ServeFile},
+};
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -840,11 +843,43 @@ fn router(state: AppState) -> Router {
             axum::routing::any(|uri: axum::http::Uri| async move { embedded::serve_web(&uri) })
         })
         .layer(DefaultBodyLimit::max(3 * 1024 * 1024))
+        .layer(CompressionLayer::new().compress_when(compressible))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             security::guard,
         ))
         .with_state(state)
+}
+
+/// Text worth compressing: conversation snapshots and other JSON, and the
+/// web bundle. Media, downloads and partial responses go as they are -- they
+/// are already compressed or are read by byte range -- and so does anything
+/// small enough that compressing it costs more than it saves.
+fn compressible(
+    status: axum::http::StatusCode,
+    _: axum::http::Version,
+    headers: &axum::http::HeaderMap,
+    _: &axum::http::Extensions,
+) -> bool {
+    if status == axum::http::StatusCode::PARTIAL_CONTENT {
+        return false;
+    }
+    let small = headers
+        .get(axum::http::header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<u64>().ok())
+        .is_some_and(|length| length < 1024);
+    let kind = headers
+        .get(axum::http::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+    !small
+        && (kind.starts_with("application/json")
+            || kind.starts_with("text/html")
+            || kind.starts_with("text/css")
+            || kind.starts_with("text/javascript")
+            || kind.starts_with("application/javascript")
+            || kind.starts_with("image/svg+xml"))
 }
 
 async fn db<T: Send + 'static>(
@@ -1020,7 +1055,9 @@ async fn discover_profile_models(
     let profile = db(&state, move |s| s.get_endpoint_profile(id))
         .await?
         .ok_or_else(|| ApiError::missing("Profile"))?;
-    model_catalog::discover(&state, &profile).await.map(Json)
+    model_catalog::discover_cached(&state, &profile)
+        .await
+        .map(Json)
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
