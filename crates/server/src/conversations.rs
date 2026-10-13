@@ -686,11 +686,28 @@ mod event_whitelist_tests {
         .expect("a nested card with counts must be accepted");
         assert_eq!(event["parent"], "agent-1");
         assert_eq!(event["stats"]["tools"], 12);
+        let background = normalize_event(json!({
+            "type": "tool", "id": "bash-1", "name": "Bash", "status": "running", "background": true
+        }))
+        .expect("a background command is a tool card");
+        assert_eq!(background["background"], true);
+        let sized = normalize_event(json!({
+            "type": "tool", "id": "read-1", "name": "Read", "status": "completed", "result_tokens": 12000
+        }))
+        .expect("a call's result size is kept");
+        assert_eq!(sized["result_tokens"], 12000);
+        let spent = normalize_event(json!({
+            "type": "usage", "turn": {"input": 82200, "output": 900, "cached": 81000}
+        }))
+        .expect("a turn's cost is a usage event");
+        assert_eq!(spent["turn"]["cached"], 81000);
+        assert!(normalize_event(json!({"type":"usage","turn":{"cost":1}})).is_none());
         for bad in [
             json!({"type":"tool","id":"t","name":"R","status":"running","parent":""}),
             json!({"type":"tool","id":"t","name":"R","status":"running","stats":{"cost":1}}),
             json!({"type":"tool","id":"t","name":"R","status":"running","stats":{"tokens":-1}}),
             json!({"type":"tool","id":"t","name":"R","status":"running","at":"now"}),
+            json!({"type":"tool","id":"t","name":"R","status":"running","background":"yes"}),
         ] {
             assert!(normalize_event(bad.clone()).is_none(), "{bad}");
         }
@@ -1097,7 +1114,17 @@ fn normalize_event(mut value: Value) -> Option<Value> {
         "cleared" => &["type"],
         "message" => &["type", "id", "role", "text", "delta"],
         "tool" => &[
-            "type", "id", "name", "status", "text", "activity", "parent", "stats", "at",
+            "type",
+            "id",
+            "name",
+            "status",
+            "text",
+            "activity",
+            "parent",
+            "stats",
+            "at",
+            "background",
+            "result_tokens",
         ],
         "approval" => &[
             "type",
@@ -1116,6 +1143,7 @@ fn normalize_event(mut value: Value) -> Option<Value> {
             "output_tokens",
             "context_tokens",
             "context_window",
+            "turn",
         ],
         "error" => &["type", "message"],
         "exit" => &["type"],
@@ -1211,6 +1239,8 @@ fn normalize_event(mut value: Value) -> Option<Value> {
                     value.as_str().is_some_and(|s| !s.is_empty() && s.len() <= 256)
                 })
                 && object.get("at").is_none_or(Value::is_u64)
+                && object.get("background").is_none_or(Value::is_boolean)
+                && object.get("result_tokens").is_none_or(Value::is_u64)
                 && object.get("stats").is_none_or(|value| {
                     value.as_object().is_some_and(|stats| {
                         stats.iter().all(|(key, value)| {
@@ -1293,6 +1323,15 @@ fn normalize_event(mut value: Value) -> Option<Value> {
                 && object
                     .get("context_window")
                     .is_none_or(|v| v.as_u64().is_some_and(|n| n > 0))
+                // What a turn cost, read and written, as the client summed it.
+                && object.get("turn").is_none_or(|value| {
+                    value.as_object().is_some_and(|turn| {
+                        turn.iter().all(|(key, value)| {
+                            matches!(key.as_str(), "input" | "output" | "cached")
+                                && value.is_u64()
+                        })
+                    })
+                })
         }
         "error" => text("message"),
         "exit" | "cleared" => true,

@@ -4,11 +4,13 @@ import { compactTokens, contextMeter, type ContextUsage } from './context-meter'
 import { useI18n } from '../i18n';
 
 /** A ring showing how much of the model's context window is in use. */
-const props = withDefaults(defineProps<{ usage?: ContextUsage; size?: number }>(), { size: 22 });
+const props = withDefaults(defineProps<{ usage?: ContextUsage; size?: number }>(), { size: 14 });
 const { t } = useI18n();
 const meter = computed(() => contextMeter(props.usage));
 const geometry = computed(() => {
-  const stroke = Math.max(2, Math.round(props.size / 9));
+  // Sized to the text beside it, and thick enough at that size to read as a
+  // meter: at 22px with a 2px line it looked like a loading spinner.
+  const stroke = Math.max(2, props.size / 6);
   const radius = (props.size - stroke) / 2;
   const circumference = 2 * Math.PI * radius;
   return { stroke, radius, circumference, center: props.size / 2 };
@@ -39,15 +41,16 @@ const label = computed(() => meter.value
 </template>
 
 <style scoped>
-.context-ring{display:inline-flex;align-items:center;gap:5px;color:var(--ink-soft);font-size:var(--text-xs);line-height:1;white-space:nowrap}
+.context-ring{display:inline-flex;align-items:center;gap:4px;color:var(--muted);font-size:var(--text-xs);line-height:1;white-space:nowrap}
 .context-ring svg{display:block;flex-shrink:0}
-.context-ring-scale{opacity:.72;font-variant-numeric:tabular-nums}
-.context-ring-track{stroke:var(--fill-hover)}
+.context-ring-scale{color:var(--faint);font-variant-numeric:tabular-nums}
+.context-ring-scale::before{content:'·';margin-right:4px}
+.context-ring-track{stroke:var(--line)}
 .context-ring-value{stroke:var(--teal);transition:stroke-dashoffset .3s ease}
 .context-ring.high .context-ring-value{stroke:var(--warn)}
 .context-ring.high .context-ring-text{color:var(--warn-ink)}
 .context-ring.full .context-ring-value{stroke:#D94B55}
 .context-ring.full .context-ring-text{color:var(--danger)}
-.context-ring-text{font-variant-numeric:tabular-nums}
+.context-ring-text{font-weight:600;color:var(--ink-soft);font-variant-numeric:tabular-nums}
 @media (prefers-reduced-motion: reduce){.context-ring-value{transition:none}}
 </style>

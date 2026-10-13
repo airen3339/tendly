@@ -50,6 +50,10 @@ export function descendants(tool: ToolItem, depth = 1): Array<{ tool: ToolItem; 
 /** Running, and started by the client that is still there to finish it. */
 export const isLive = (tool: ToolItem) => tool.status === 'running' && !tool.ended;
 
+/** Work that goes on beside the conversation: a subagent, or a command the
+ * client put in the background. It belongs in the dock, not the history. */
+export const inDock = (tool: ToolItem) => isLive(tool) && (SUBAGENT_TOOLS.has(tool.name) || !!tool.background);
+
 /** Subagents still at work anywhere in the conversation, outermost first. */
 export function runningSubagents(items: readonly ChatItem[]): ToolItem[] {
   const found: ToolItem[] = [];
@@ -58,12 +62,12 @@ export function runningSubagents(items: readonly ChatItem[]): ToolItem[] {
   return found;
 }
 
-/** Running subagents not already inside another running one: each is a row of
+/** Dock work not already inside another running piece of it: each is a row of
  * its own, and what it started shows in its preview. A parent that finished
  * while its child runs on leaves the child a row of its own. */
-export function subagentRoots(items: readonly ChatItem[]): ToolItem[] {
+export function dockRoots(items: readonly ChatItem[]): ToolItem[] {
   const found: ToolItem[] = [];
-  const visit = (tool: ToolItem) => { if (isLive(tool) && SUBAGENT_TOOLS.has(tool.name)) found.push(tool); else tool.children?.forEach(visit); };
+  const visit = (tool: ToolItem) => { if (inDock(tool)) found.push(tool); else tool.children?.forEach(visit); };
   for (const item of items) if (item.type === 'tool') visit(item);
   return found;
 }
@@ -78,10 +82,11 @@ export function toolsById(items: readonly ChatItem[]): Map<string, ToolItem> {
 
 /** Long enough that a subagent thinking through a hard step is not called stuck. */
 export const STALL_MS = 5 * 60_000;
-/** A running card the client has said nothing about for a while. Only cards
- * that report progress at all carry `at`; the rest are never called stalled. */
+/** A running subagent the client has said nothing about for a while. Only a
+ * subagent reports progress as it goes; a command is quiet until it ends, so a
+ * long build is never called stalled. */
 export function stalledFor(tool: ToolItem, now: number): number | undefined {
-  if (!isLive(tool) || tool.at === undefined) return;
+  if (!isLive(tool) || !SUBAGENT_TOOLS.has(tool.name) || tool.at === undefined) return;
   const quiet = now - tool.at;
   return quiet >= STALL_MS ? quiet : undefined;
 }

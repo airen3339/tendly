@@ -34,16 +34,22 @@ test('running subagents are found at any depth, and only a quiet one is stalled'
 });
 
 test('each running subagent not inside another running one gets a dock row', async () => {
-  const { subagentRoots, toolsById } = await import('./tool-runs.ts');
+  const { dockRoots, toolsById } = await import('./tool-runs.ts');
   const agent = (id, status, children) => ({ type: 'tool', id, name: 'Agent', status, text: '', ...(children ? { children } : {}) });
   const deep = agent('deep', 'running');
   // A parent that finished while its child runs on leaves the child a row of its own.
   const items = [agent('a', 'running', [agent('a1', 'running')]), agent('b', 'completed', [deep]), tool('c', 'Bash', 'running')];
-  assert.deepEqual(subagentRoots(items).map(t => t.id), ['a', 'deep']);
+  assert.deepEqual(dockRoots(items).map(t => t.id), ['a', 'deep']);
+  // A command the client put in the background is dock work too; a foreground one is not.
+  const watch = { ...tool('w', 'Bash', 'running'), background: true };
+  assert.deepEqual(dockRoots([watch, tool('f', 'Bash', 'running')]).map(t => t.id), ['w']);
+  // And it is never called stalled: a command is quiet until it ends.
+  const { stalledFor: quiet } = await import('./tool-runs.ts');
+  assert.equal(quiet({ ...watch, at: 0 }, 60 * 60_000), undefined);
   assert.equal(toolsById(items).get('deep'), deep);
   // Ended with its client: neither a row nor a running subagent any more.
   const ended = { ...agent('e', 'running'), ended: true };
-  assert.deepEqual(subagentRoots([ended]), []);
+  assert.deepEqual(dockRoots([ended]), []);
   const { runningSubagents, stalledFor } = await import('./tool-runs.ts');
   assert.deepEqual(runningSubagents([ended]), []);
   assert.equal(stalledFor({ ...ended, at: 0 }, 10 * 60_000), undefined);

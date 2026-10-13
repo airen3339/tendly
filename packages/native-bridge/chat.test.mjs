@@ -305,7 +305,9 @@ test('context size comes from the live context, not the turn-cumulative totals',
     usage: { input_tokens: 1200, cache_read_input_tokens: 81000, output_tokens: 900 },
     modelUsage: { 'claude-x': { contextWindow: 200000 } },
   });
-  const last = usageEvents().at(-1);
+  // The cumulative total is what the turn cost, reported on its own.
+  assert.deepEqual(usageEvents().at(-1).turn, { input: 82200, output: 900, cached: 81000 });
+  const last = usageEvents().filter(event => !event.turn).at(-1);
   assert.equal(last.context_tokens, undefined, 'the cumulative total must not overwrite the live context');
   assert.equal(last.context_window, 200000, 'the window is still taken from the result');
 });
@@ -432,6 +434,35 @@ test('a subagent\'s log names what each call was for, from the call\'s own input
   chat.emit=event=>events.push(event);chat.tools=new Map([['agent-1','Agent']]);
   chat.notification({type:'assistant',parent_tool_use_id:'agent-1',message:{content:[{type:'tool_use',id:'b1',name:'Bash',input:{command:'python3 check_length.py',description:'Check chapter lengths'}}]}});
   assert.match(events.find(event=>event.activity).activity,/^→ Bash · Check chapter lengths$/);
+});
+
+test('a background command is marked as one, and a command never logs itself',()=>{
+  const events=[];
+  const chat=Object.create(ClaudeChat.prototype);
+  chat.emit=event=>events.push(event);chat.tools=new Map([['bash-1','Bash'],['bash-2','Bash']]);chat.active={id:'m1',interrupted:false};
+  // Claude Code reports every command as a task, foreground ones too, with the command as its description.
+  chat.notification({type:'system',subtype:'task_started',task_id:'t1',tool_use_id:'bash-1',task_type:'local_bash',description:'npm test'});
+  chat.notification({type:'system',subtype:'task_started',task_id:'t2',tool_use_id:'bash-2',task_type:'local_bash',description:'npm run watch',is_backgrounded:true});
+  chat.notification({type:'user',message:{content:[{type:'tool_result',tool_use_id:'bash-2',content:'Command running in background with ID: x'}]}});
+  assert.ok(events.every(event=>event.activity===undefined),'the command is the card\'s input, not its log');
+  assert.equal(events.find(event=>event.id==='bash-1').background,undefined);
+  assert.ok(events.filter(event=>event.id==='bash-2').every(event=>event.background===true));
+  assert.equal(events.at(-1).status,'running');
+});
+
+test('a turn reports what it cost, and a call roughly what its result added',async()=>{
+  const { turnUsage, resultTokens }=await import('./chat-claude.mjs');
+  assert.deepEqual(turnUsage({input_tokens:100,cache_read_input_tokens:9000,cache_creation_input_tokens:900,output_tokens:450}),{input:10000,output:450,cached:9000});
+  assert.equal(turnUsage({}),undefined);
+  assert.equal(resultTokens('abcd'.repeat(250)),250);
+  assert.equal(resultTokens('中文结果'),4);
+  const events=[];
+  const chat=Object.create(ClaudeChat.prototype);
+  chat.emit=event=>events.push(event);chat.tools=new Map([['read-1','Read']]);chat.active={id:'m1',interrupted:false};
+  chat.notification({type:'user',message:{content:[{type:'tool_result',tool_use_id:'read-1',content:'x'.repeat(400000)}]}});
+  // Counted before the text is clipped for display.
+  assert.equal(events[0].result_tokens,100000);
+  assert.ok(events[0].text.length<400000);
 });
 
 test('a turn Claude starts by itself, after a background command finished, is shown rather than dropped',()=>{

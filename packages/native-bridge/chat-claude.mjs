@@ -106,6 +106,28 @@ export function callSummary(input){
   if(text('query'))return short(text('query'));
   if(url)return short(url.replace(/^https?:\/\//,''));
 }
+/**
+ * A turn's tokens from its result: everything read (the cached part counted
+ * apart, since it is the cheap part), and everything written.
+ */
+export function turnUsage(usage){
+  if(!usage||typeof usage!=='object')return;
+  const n=value=>Number.isSafeInteger(value)&&value>=0?value:0;
+  const cached=n(usage.cache_read_input_tokens),input=n(usage.input_tokens)+cached+n(usage.cache_creation_input_tokens),output=n(usage.output_tokens);
+  if(!input&&!output)return;
+  return {input,output,cached};
+}
+/**
+ * Roughly how many tokens a tool result puts into the context. The client
+ * does not count them per call; this is an estimate (about four characters a
+ * token for ASCII, one for other scripts), made before the text is clipped for
+ * display so a large result is not undercounted.
+ */
+export function resultTokens(text){
+  let ascii=0,other=0;
+  for(const char of text){if(char.charCodeAt(0)<128)ascii++;else other++;}
+  return Math.round(ascii/4+other);
+}
 /** Claude Code's stream-json control channel, rather than JSON-RPC. */
 const controlRequest=(id,method,params)=>({type:'control_request',request_id:id,request:{subtype:method,...params}});
 export class ClaudeChat extends ChatBase {
@@ -283,6 +305,9 @@ export class ClaudeChat extends ChatBase {
       this.usage(message.usage,undefined,windows.size===1?[...windows][0]:undefined);
       // An empty result is not an answer; a blank bubble only looks like a bug.
       if(!this.finalAssistant&&typeof message.result==='string'&&message.result.trim())this.emit({type:'message',id:this.assistantId??`assistant-${this.active.id}`,role:'assistant',text:clip(message.result),delta:false});
+      // What the turn cost, after its reply so the footer has a reply to sit
+      // under. The totals are the client's own, summed over the turn's calls.
+      const spent=turnUsage(message.usage);if(spent)this.emit({type:'usage',turn:spent});
       const failed=message.is_error||message.subtype!=='success';
       if(failed&&!this.active.interrupted){
         const diagnostic=JSON.stringify(message.errors??[]);
@@ -320,7 +345,8 @@ export class ClaudeChat extends ChatBase {
     // A backgrounded task answers at once with a placeholder; the card stays
     // running until its task_notification says how it actually ended.
     const status=result.is_error?'failed':this.background?.has(result.tool_use_id)?'running':'completed';
-    this.emit({type:'tool',id:result.tool_use_id,name:this.tools.get(result.tool_use_id)??'Native tool',status,text:clip(text),...(parent?{parent}:{})});
+    const tokens=resultTokens(text);
+    this.emit({type:'tool',id:result.tool_use_id,name:this.tools.get(result.tool_use_id)??'Native tool',status,text:clip(text),...(tokens?{result_tokens:tokens}:{}),...(this.background?.has(result.tool_use_id)?{background:true}:{}),...(parent?{parent}:{})});
   }
   // A background task (subagent or command) reports its own start and end, the
   // only signal of when it finished once its tool call has returned.
@@ -332,13 +358,17 @@ export class ClaudeChat extends ChatBase {
     // slow subagent from a stuck one; the counts are the client's own.
     const usage=message.usage,count=value=>Number.isSafeInteger(value)&&value>=0?value:undefined;
     const stats=usage&&typeof usage==='object'?Object.fromEntries(Object.entries({tokens:count(usage.total_tokens),tools:count(usage.tool_uses),ms:count(usage.duration_ms)}).filter(([,value])=>value!==undefined)):{};
-    const card=(status,line)=>this.emit({type:'tool',id,name:this.tools.get(id),status,at:Date.now(),...(Object.keys(stats).length?{stats}:{}),...(typeof line==='string'&&line.trim()?{activity:clip(line.trim(),4096)}:{})});
+    // `background` tells the interface the work goes on after its call returned.
+    const card=(status,line)=>this.emit({type:'tool',id,name:this.tools.get(id),status,at:Date.now(),...(this.background.has(id)?{background:true}:{}),...(Object.keys(stats).length?{stats}:{}),...(typeof line==='string'&&line.trim()?{activity:clip(line.trim(),4096)}:{})});
     if(message.subtype==='task_started'){
       if(typeof message.task_id==='string'){this.tasks.set(message.task_id,id);if(this.tasks.size>512)this.tasks.delete(this.tasks.keys().next().value);}
       if(message.is_backgrounded){this.background.add(id);if(this.background.size>512)this.background.delete(this.background.values().next().value);}
-      card('running',message.description);
+      // A command's description is the command itself, already the card's
+      // input: logged, it repeated every Bash call in full. A subagent's is
+      // what it was asked to do.
+      card('running',message.task_type==='local_bash'?undefined:message.description);
     }else if(message.subtype==='task_updated'){
-      if(message.patch?.is_backgrounded)this.background.add(id);
+      if(message.patch?.is_backgrounded){this.background.add(id);card('running');}
     }else if(message.subtype==='task_progress'){
       // A one-line status the client sends unasked for some tasks (a
       // backgrounded MCP call's own word on itself). It repeats until it

@@ -10,17 +10,20 @@ export interface NativeModel { id: string; name: string; description?: string; e
 /** What a native request reaches for, as the bridge describes it. */
 export interface ApprovalScope { access?: 'read' | 'write' | 'execute' | 'network'; outside?: string[]; command?: string }
 export interface ApprovalQuestion { id: string; header?: string; question: string; options: Array<{ label: string; description?: string }>; isSecret?: boolean; isOther?: boolean; multiSelect?: boolean }
+/** What a turn cost, as the client summed it: every token read (`cached` of
+ * them from the prompt cache) and every token written. */
+export interface TurnUsage { input?: number; output?: number; cached?: number }
 /** What the client counted for a background task: tokens, tool calls, run time. */
 export interface ToolStats { tokens?: number; tools?: number; ms?: number }
 export type ChatEvent = ({ seq?: number } & (
   | { type: 'ready'; native_session_id?: string; commands?: string[] }
   | { type: 'settings'; model?: string; effort?: string; models?: NativeModel[]; permission_mode?: string; permission_modes?: string[] }
   | { type: 'message'; id: string; role: 'user' | 'assistant'; text: string; delta?: boolean; steered?: boolean }
-  | { type: 'tool'; id: string; name: string; status: 'running' | 'completed' | 'failed'; text?: string; activity?: string; parent?: string; stats?: ToolStats; at?: number }
+  | { type: 'tool'; id: string; name: string; status: 'running' | 'completed' | 'failed'; text?: string; activity?: string; parent?: string; stats?: ToolStats; at?: number; background?: boolean; result_tokens?: number }
   | { type: 'approval'; id: string; title: string; text: string; choices: string[]; questions?: ApprovalQuestion[]; scope?: ApprovalScope }
   | { type: 'approval_resolved'; id: string }
   | { type: 'turn'; id?: string; status: 'running' | 'completed' | 'failed' | 'interrupted' }
-  | { type: 'usage'; input_tokens?: number; output_tokens?: number; context_tokens?: number; context_window?: number }
+  | { type: 'usage'; input_tokens?: number; output_tokens?: number; context_tokens?: number; context_window?: number; turn?: TurnUsage }
   | { type: 'configuration'; id: string; profile_name: string; text: string }
   | { type: 'error'; message: string }
   | { type: 'exit' }
@@ -28,14 +31,14 @@ export type ChatEvent = ({ seq?: number } & (
 ));
 export interface ConversationSnapshot { mode?: 'structured' | 'pty'; running: boolean; events: ChatEvent[]; truncated?: boolean }
 export type ChatItem =
-  | { type: 'message'; id: string; role: 'user' | 'assistant'; text: string; steered?: boolean }
+  | { type: 'message'; id: string; role: 'user' | 'assistant'; text: string; steered?: boolean; usage?: TurnUsage }
   | ToolItem
   | { type: 'approval'; id: string; title: string; text: string; choices: string[]; questions: ApprovalQuestion[]; scope?: ApprovalScope; resolved: boolean }
   | { type: 'configuration'; id: string; profile_name: string; text: string }
   | { type: 'error'; id: string; text: string };
 
 /** A tool call; `children` are the calls a subagent made inside it, nested as deep as they went. */
-export interface ToolItem { type: 'tool'; id: string; name: string; status: 'running' | 'completed' | 'failed'; text: string; activity?: string; parent?: string; stats?: ToolStats; at?: number; label?: string; ended?: boolean; children?: ToolItem[] }
+export interface ToolItem { type: 'tool'; id: string; name: string; status: 'running' | 'completed' | 'failed'; text: string; activity?: string; parent?: string; stats?: ToolStats; at?: number; label?: string; ended?: boolean; background?: boolean; result_tokens?: number; children?: ToolItem[] }
 
 /** The tools that start a subagent. Claude Code renamed Task to Agent. */
 export const SUBAGENT_TOOLS = new Set(['Agent', 'Task']);
@@ -81,13 +84,16 @@ export function conversationView(events: readonly ChatEvent[], running?: boolean
   // under their parent once every event has been read.
   const nested = new Map<string, ToolItem>(), childrenOf = new Map<string, string[]>();
   let turn: 'idle' | 'running' | 'completed' | 'failed' | 'interrupted' = 'idle';
+  /** Where the current turn's items begin, so its cost finds its own reply. */
+  let turnStart = 0;
   let ready = false, exited = false, commands: string[] = [], announced = false, models: NativeModel[] = [], model: string | undefined, effort: string | undefined, permissionMode: string | undefined, permissionModes: string[] = [], usage: { input_tokens?: number; output_tokens?: number; context_tokens?: number; context_window?: number } = {};
   for (const event of events) {
     if (event.seq !== undefined) { if (seen.has(event.seq)) continue; seen.add(event.seq); }
     if (event.type === 'message') {
       const key = 'message:' + event.id, index = indexes.get(key), previous = index === undefined ? undefined : items[index];
       const steered = event.steered === true || (previous?.type === 'message' && previous.steered === true);
-      const next: ChatItem = { type: 'message', id: event.id, role: event.role, text: event.delta && previous?.type === 'message' ? previous.text + event.text : event.text, ...(steered ? { steered: true } : {}) };
+      const kept = previous?.type === 'message' ? previous.usage : undefined;
+      const next: ChatItem = { type: 'message', id: event.id, role: event.role, text: event.delta && previous?.type === 'message' ? previous.text + event.text : event.text, ...(steered ? { steered: true } : {}), ...(kept ? { usage: kept } : {}) };
       if (index === undefined) { indexes.set(key, items.length); items.push(next); } else items[index] = next;
     } else if (event.type === 'tool') {
       const key = 'tool:' + event.id, index = indexes.get(key), previous = index === undefined ? nested.get(event.id) : items[index];
@@ -97,9 +103,9 @@ export function conversationView(events: readonly ChatEvent[], running?: boolean
       const before = previous?.type === 'tool' ? previous : undefined;
       const activity = event.activity === undefined ? before?.activity
         : clipTail(before?.activity ? `${before.activity}\n${event.activity}` : event.activity, MAX_ACTIVITY);
-      const parent = event.parent ?? before?.parent, stats = event.stats ?? before?.stats, at = event.at ?? before?.at;
+      const parent = event.parent ?? before?.parent, stats = event.stats ?? before?.stats, at = event.at ?? before?.at, background = event.background ?? before?.background, resultTokens = event.result_tokens ?? before?.result_tokens;
       const label = before?.label ?? (event.status === 'running' ? toolLabel(event.text) : undefined);
-      const next: ToolItem = { ...event, text: event.text ?? before?.text ?? '', ...(activity === undefined ? {} : { activity }), ...(parent === undefined ? {} : { parent }), ...(stats === undefined ? {} : { stats }), ...(at === undefined ? {} : { at }), ...(label === undefined ? {} : { label }) };
+      const next: ToolItem = { ...event, text: event.text ?? before?.text ?? '', ...(activity === undefined ? {} : { activity }), ...(parent === undefined ? {} : { parent }), ...(stats === undefined ? {} : { stats }), ...(at === undefined ? {} : { at }), ...(label === undefined ? {} : { label }), ...(background ? { background } : {}), ...(resultTokens === undefined ? {} : { result_tokens: resultTokens }) };
       // A parent trimmed out of history leaves its calls at the top rather than nowhere.
       if (parent !== undefined && index === undefined && parent !== event.id && (indexes.has('tool:' + parent) || nested.has(parent))) {
         if (!nested.has(event.id)) childrenOf.set(parent, [...(childrenOf.get(parent) ?? []), event.id]);
@@ -112,17 +118,21 @@ export function conversationView(events: readonly ChatEvent[], running?: boolean
     } else if (event.type === 'approval_resolved') {
       const index = indexes.get('approval:' + event.id), previous = index === undefined ? undefined : items[index];
       if (previous?.type === 'approval') previous.resolved = true;
-    } else if (event.type === 'turn') turn = event.status;
+    } else if (event.type === 'turn') { if (event.status === 'running') turnStart = items.length; turn = event.status; }
     else if (event.type === 'ready') { ready = true; exited = false; commands = event.commands ?? []; announced = true; }
     else if (event.type === 'settings') { if (event.models?.length) models = event.models; if (event.model) model = event.model; if (event.effort) effort = event.effort; if (event.permission_mode) permissionMode = event.permission_mode; if (event.permission_modes?.length) permissionModes = event.permission_modes; }
-    else if (event.type === 'usage') { const { seq: _seq, type: _type, ...values } = event; usage = { ...usage, ...values }; }
+    // A turn's cost sits under that turn's last reply; the rest is the live context.
+    else if (event.type === 'usage' && event.turn) {
+      for (let i = items.length - 1; i >= turnStart; i--) { const item = items[i]; if (item.type === 'message' && item.role === 'assistant') { items[i] = { ...item, usage: event.turn }; break; } }
+    }
+    else if (event.type === 'usage') { const { seq: _seq, type: _type, turn: _turn, ...values } = event; usage = { ...usage, ...values }; }
     // A new endpoint means a new native client: its command list is whatever it
     // announces next, never the previous client's.
     else if (event.type === 'configuration') { endRunning(); for (const item of items) if (item.type === 'approval') item.resolved = true; indexes.clear(); nested.clear(); childrenOf.clear(); items.push(event); ready = false; turn = 'idle'; commands = []; announced = false; models = []; model = undefined; effort = undefined; permissionMode = undefined; permissionModes = []; }
     // The client cleared its own context. Keeping the transcript would show a
     // conversation the client can no longer refer to, which is what made
     // /clear look like it had done nothing.
-    else if (event.type === 'cleared') { items.length = 0; indexes.clear(); nested.clear(); childrenOf.clear(); usage = {}; }
+    else if (event.type === 'cleared') { items.length = 0; turnStart = 0; indexes.clear(); nested.clear(); childrenOf.clear(); usage = {}; }
     else if (event.type === 'error') items.push({ type: 'error', id: 'error:' + (event.seq ?? items.length), text: event.message });
     else if (event.type === 'exit') { endRunning(); exited = true; ready = false; if (turn === 'running') turn = 'interrupted'; for (const item of items) if (item.type === 'approval') item.resolved = true; }
   }
@@ -148,7 +158,8 @@ export function pruneChatEvents(events: readonly ChatEvent[], maxHistoryEvents =
   for (const event of events) {
     // The model list and the current selection can arrive in separate settings
     // events, so the last of each is kept rather than only the last overall.
-    if (['ready', 'turn', 'exit', 'configuration', 'usage', 'settings', 'cleared'].includes(event.type)) {
+    // A turn's cost is history like its reply; only the live context is a control.
+    if (['ready', 'turn', 'exit', 'configuration', 'usage', 'settings', 'cleared'].includes(event.type) && !(event.type === 'usage' && event.turn)) {
       controls.set(event.type === 'settings' && event.models?.length ? 'settings:models' : event.type, event);
     }
     if (event.type === 'approval') approvals.set(event.id, event);
@@ -190,7 +201,7 @@ export function isChatEvent(value: unknown): value is ChatEvent {
     case 'exit': case 'cleared': return true;
     case 'message': return text('id') && text('text') && ['user', 'assistant'].includes(String(v.role)) && (v.delta === undefined || typeof v.delta === 'boolean');
     case 'tool': return text('id') && text('name') && ['running', 'completed', 'failed'].includes(String(v.status)) && (v.text === undefined || text('text')) && (v.activity === undefined || text('activity'))
-      && (v.parent === undefined || text('parent') && !!v.parent) && (v.at === undefined || typeof v.at === 'number' && Number.isFinite(v.at))
+      && (v.parent === undefined || text('parent') && !!v.parent) && (v.background === undefined || typeof v.background === 'boolean') && (v.result_tokens === undefined || typeof v.result_tokens === 'number' && v.result_tokens >= 0) && (v.at === undefined || typeof v.at === 'number' && Number.isFinite(v.at))
       && (v.stats === undefined || !!v.stats && typeof v.stats === 'object' && Object.entries(v.stats).every(([key, value]) => ['tokens', 'tools', 'ms'].includes(key) && typeof value === 'number' && value >= 0));
     case 'approval': return text('id') && text('title') && text('text') && Array.isArray(v.choices) && v.choices.every(choice => typeof choice === 'string') && (v.questions === undefined || Array.isArray(v.questions) && v.questions.every(question => {
       if (!question || typeof question !== 'object') return false;
@@ -199,7 +210,8 @@ export function isChatEvent(value: unknown): value is ChatEvent {
     }));
     case 'approval_resolved': return text('id');
     case 'turn': return ['running', 'completed', 'failed', 'interrupted'].includes(String(v.status));
-    case 'usage': return ['input_tokens', 'output_tokens', 'context_tokens', 'context_window'].every(key => v[key] === undefined || typeof v[key] === 'number' && Number.isFinite(v[key]) && Number(v[key]) >= 0);
+    case 'usage': return ['input_tokens', 'output_tokens', 'context_tokens', 'context_window'].every(key => v[key] === undefined || typeof v[key] === 'number' && Number.isFinite(v[key]) && Number(v[key]) >= 0)
+      && (v.turn === undefined || !!v.turn && typeof v.turn === 'object' && Object.entries(v.turn).every(([key, value]) => ['input', 'output', 'cached'].includes(key) && typeof value === 'number' && value >= 0));
     case 'error': return text('message');
     case 'configuration': return text('id') && text('profile_name') && text('text');
     default: return false;

@@ -510,3 +510,32 @@ test('a call still running when its client exits is ended, not running for ever'
   assert.equal(agent.children[0].ended, true);
   assert.equal(done.ended, undefined);
 });
+
+test('a turn\'s cost sits under that turn\'s last reply, and never moves the context meter', () => {
+  const spent = { input: 82200, output: 900, cached: 81000 };
+  const view = conversationView([
+    { type: 'message', id: 'u1', role: 'user', text: 'one' },
+    { type: 'turn', id: 'u1', status: 'running' },
+    { type: 'message', id: 'a1', role: 'assistant', text: 'first' },
+    { type: 'tool', id: 't', name: 'Read', status: 'completed', text: 'x', result_tokens: 12000 },
+    { type: 'message', id: 'a2', role: 'assistant', text: 'second' },
+    { type: 'usage', context_tokens: 40500, context_window: 200000 },
+    { type: 'usage', turn: spent },
+    { type: 'turn', id: 'u1', status: 'completed' },
+    // The next turn has no reply yet: its cost has nowhere of its own to go.
+    { type: 'message', id: 'u2', role: 'user', text: 'two' },
+    { type: 'turn', id: 'u2', status: 'running' },
+    { type: 'usage', turn: { input: 5, output: 5 } },
+  ]);
+  const byId = Object.fromEntries(view.items.map(item => [item.id, item]));
+  assert.deepEqual(byId.a2.usage, spent);
+  assert.equal(byId.a1.usage, undefined);
+  assert.equal(byId.u2.usage, undefined);
+  assert.equal(byId.t.result_tokens, 12000);
+  assert.deepEqual(view.usage, { context_tokens: 40500, context_window: 200000 });
+  // A turn's cost is history, not a control kept through every trim.
+  const { events } = pruneChatEvents([{ type: 'usage', context_tokens: 1 }, { type: 'usage', turn: spent }], 0);
+  assert.deepEqual(events, [{ type: 'usage', context_tokens: 1 }]);
+  assert.ok(isChatEvent({ type: 'usage', turn: spent }));
+  assert.ok(!isChatEvent({ type: 'usage', turn: { cost: 1 } }));
+});
