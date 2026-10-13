@@ -441,3 +441,37 @@ test('file references are found where agents write them, and ordinary words are 
   assert.deepEqual(markdownInline('docs at https://example.com/x. Done').find(p => p.type === 'link'), { type: 'link', text: 'https://example.com/x', href: 'https://example.com/x' });
   assert.ok(markdownInline('`set_model`').every(p => p.type === 'code'));
 });
+
+test('a subagent\'s calls hang under it, as deep as they went, and keep its counts', () => {
+  const tool = (id, extra = {}) => ({ type: 'tool', id, name: extra.name ?? 'Read', status: 'running', ...extra });
+  const view = conversationView([
+    tool('agent-1', { name: 'Agent', text: '{}' }),
+    tool('agent-2', { name: 'Agent', parent: 'agent-1' }),
+    tool('read-1', { parent: 'agent-2' }),
+    { type: 'message', id: 'm', role: 'assistant', text: 'Waiting on it.' },
+    tool('read-1', { status: 'completed', text: 'contents', parent: 'agent-2' }),
+    tool('agent-1', { name: 'Agent', stats: { tools: 3, tokens: 1200 }, at: 1 }),
+    // A later event without counts keeps the ones already known.
+    tool('agent-1', { name: 'Agent', status: 'completed', text: 'done' }),
+    // A parent trimmed from history: its call is shown at the top, not lost.
+    tool('orphan', { parent: 'gone' }),
+  ]);
+  assert.deepEqual(view.items.map(item => item.id), ['agent-1', 'm', 'orphan']);
+  const [agent] = view.items;
+  assert.deepEqual(agent.stats, { tools: 3, tokens: 1200 });
+  assert.equal(agent.text, 'done');
+  assert.equal(agent.children[0].id, 'agent-2');
+  assert.equal(agent.children[0].children[0].status, 'completed');
+  assert.equal(agent.children[0].children[0].text, 'contents');
+});
+
+test('nested, counted and timed tool events are well-formed only with sane values', () => {
+  const base = { type: 'tool', id: 't', name: 'Read', status: 'running' };
+  assert.ok(isChatEvent({ ...base, parent: 'a', at: 5, stats: { tokens: 1, tools: 2, ms: 3 } }));
+  assert.ok(!isChatEvent({ ...base, parent: '' }));
+  assert.ok(!isChatEvent({ ...base, stats: { cost: 1 } }));
+  assert.ok(!isChatEvent({ ...base, at: 'now' }));
+  assert.ok(isChatEvent({ type: 'settings', subagent_summaries: true }));
+  assert.ok(!isChatEvent({ type: 'settings', subagent_summaries: 'on' }));
+  assert.equal(conversationView([{ type: 'settings', subagent_summaries: true }]).subagentSummaries, true);
+});

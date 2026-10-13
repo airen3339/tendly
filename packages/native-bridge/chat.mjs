@@ -28,6 +28,8 @@ export function validateChatInput(message, first=false) {
     // that stops asking; it is named for what it costs rather than for what it
     // saves, so nobody selects it by mistake.
     if(!['ask','plan','accept_edits','danger'].includes(message.mode))throw Error('Unsupported permission mode.');
+  }else if(message.type==='summaries'){
+    if(typeof message.enabled!=='boolean')throw Error('Invalid subagent summary choice.');
   }else if(!['interrupt','shutdown'].includes(message.type))throw Error('Unsupported chat control message.');
   return message;
 }
@@ -68,6 +70,7 @@ export function runChatBridge(input=process.stdin,output=process.stdout,options=
           else if(message.type==='interrupt')await runtime.interrupt();
           else if(message.type==='model')await runtime.selectModel(message);
           else if(message.type==='permission')await runtime.setPermissionMode(message);
+          else if(message.type==='summaries')await runtime.setSummaries(message);
           else await shutdown();
         }
       }catch(error){emit({type:'error',message:error instanceof Error?error.message:'Native chat operation failed.'});if(!initialized){void shutdown();}}

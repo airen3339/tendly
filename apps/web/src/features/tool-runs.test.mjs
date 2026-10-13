@@ -21,3 +21,14 @@ test('a run is running while any of its calls is', () => {
   const [run] = toolRuns([tool('1', 'Bash'), tool('2', 'Read', 'running')]);
   assert.equal(toolRunStatus(run), 'running');
 });
+
+test('running subagents are found at any depth, and only a quiet one is stalled', async () => {
+  const { runningSubagents, stalledFor, STALL_MS, compactCount } = await import('./tool-runs.ts');
+  const inner = { type: 'tool', id: 'inner', name: 'Agent', status: 'running', text: '', at: 0 };
+  const outer = { type: 'tool', id: 'outer', name: 'Agent', status: 'running', text: '', children: [inner, tool('r', 'Read', 'running')] };
+  assert.deepEqual(runningSubagents([outer, tool('b', 'Bash', 'running')]).map(t => t.id), ['outer', 'inner']);
+  assert.equal(stalledFor(inner, STALL_MS - 1), undefined);
+  assert.equal(stalledFor(inner, STALL_MS), STALL_MS);
+  assert.equal(stalledFor(outer, STALL_MS * 10), undefined, 'a card that never reported progress is never called stalled');
+  assert.deepEqual([12, 3400, 12_000, 1_250_000].map(compactCount), ['12', '3.4k', '12k', '1.3M']);
+});

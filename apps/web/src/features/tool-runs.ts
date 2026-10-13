@@ -1,6 +1,4 @@
-import type { ChatItem } from './chat-model';
-
-type ToolItem = Extract<ChatItem, { type: 'tool' }>;
+import type { ChatItem, ToolItem } from './chat-model';
 /** A stretch of tool calls the agent made one after another, shown as one card. */
 export interface ToolRun { type: 'tool_run'; id: string; tools: ToolItem[] }
 export type DisplayItem = Exclude<ChatItem, { type: 'tool' }> | ToolRun;
@@ -35,4 +33,44 @@ export function toolRunNames(run: ToolRun): string {
 
 export function toolRunStatus(run: ToolRun): 'running' | 'failed' | 'completed' {
   return run.tools.some(tool => tool.status === 'running') ? 'running' : run.tools.some(tool => tool.status === 'failed') ? 'failed' : 'completed';
+}
+
+// The collapsed summary shows where a subagent is now, not where it began.
+export function lastLine(activity: string) {
+  const lines = activity.split('\n').filter(line => line.trim() && line !== '…');
+  const last = lines[lines.length - 1] ?? '';
+  return last.length > 80 ? `${last.slice(0, 79)}…` : last;
+}
+
+/** A card's nested calls, depth first, each with how deep it sits. */
+export function descendants(tool: ToolItem, depth = 1): Array<{ tool: ToolItem; depth: number }> {
+  return (tool.children ?? []).flatMap(child => [{ tool: child, depth }, ...descendants(child, depth + 1)]);
+}
+
+/** The tools that start a subagent. Claude Code renamed Task to Agent. */
+export const SUBAGENT_TOOLS = new Set(['Agent', 'Task']);
+
+/** Subagents still at work anywhere in the conversation, outermost first. */
+export function runningSubagents(items: readonly ChatItem[]): ToolItem[] {
+  const found: ToolItem[] = [];
+  const visit = (tool: ToolItem) => { if (tool.status === 'running' && SUBAGENT_TOOLS.has(tool.name)) found.push(tool); tool.children?.forEach(visit); };
+  for (const item of items) if (item.type === 'tool') visit(item);
+  return found;
+}
+
+/** Long enough that a subagent thinking through a hard step is not called stuck. */
+export const STALL_MS = 5 * 60_000;
+/** A running card the client has said nothing about for a while. Only cards
+ * that report progress at all carry `at`; the rest are never called stalled. */
+export function stalledFor(tool: ToolItem, now: number): number | undefined {
+  if (tool.status !== 'running' || tool.at === undefined) return;
+  const quiet = now - tool.at;
+  return quiet >= STALL_MS ? quiet : undefined;
+}
+
+/** "3.4k", "12", "1.2M": counts the way a glance reads them. */
+export function compactCount(value: number) {
+  if (value < 1000) return String(value);
+  if (value < 1_000_000) return `${(value / 1000).toFixed(value < 10_000 ? 1 : 0).replace(/\.0$/, '')}k`;
+  return `${(value / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`;
 }

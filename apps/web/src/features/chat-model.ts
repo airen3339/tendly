@@ -9,11 +9,13 @@ export interface NativeModel { id: string; name: string; description?: string; e
 /** What a native request reaches for, as the bridge describes it. */
 export interface ApprovalScope { access?: 'read' | 'write' | 'execute' | 'network'; outside?: string[]; command?: string }
 export interface ApprovalQuestion { id: string; header?: string; question: string; options: Array<{ label: string; description?: string }>; isSecret?: boolean; isOther?: boolean; multiSelect?: boolean }
+/** What the client counted for a background task: tokens, tool calls, run time. */
+export interface ToolStats { tokens?: number; tools?: number; ms?: number }
 export type ChatEvent = ({ seq?: number } & (
   | { type: 'ready'; native_session_id?: string; commands?: string[] }
-  | { type: 'settings'; model?: string; effort?: string; models?: NativeModel[]; permission_mode?: string; permission_modes?: string[] }
+  | { type: 'settings'; model?: string; effort?: string; models?: NativeModel[]; permission_mode?: string; permission_modes?: string[]; subagent_summaries?: boolean }
   | { type: 'message'; id: string; role: 'user' | 'assistant'; text: string; delta?: boolean; steered?: boolean }
-  | { type: 'tool'; id: string; name: string; status: 'running' | 'completed' | 'failed'; text?: string; activity?: string }
+  | { type: 'tool'; id: string; name: string; status: 'running' | 'completed' | 'failed'; text?: string; activity?: string; parent?: string; stats?: ToolStats; at?: number }
   | { type: 'approval'; id: string; title: string; text: string; choices: string[]; questions?: ApprovalQuestion[]; scope?: ApprovalScope }
   | { type: 'approval_resolved'; id: string }
   | { type: 'turn'; id?: string; status: 'running' | 'completed' | 'failed' | 'interrupted' }
@@ -26,10 +28,13 @@ export type ChatEvent = ({ seq?: number } & (
 export interface ConversationSnapshot { mode?: 'structured' | 'pty'; running: boolean; events: ChatEvent[]; truncated?: boolean }
 export type ChatItem =
   | { type: 'message'; id: string; role: 'user' | 'assistant'; text: string; steered?: boolean }
-  | { type: 'tool'; id: string; name: string; status: 'running' | 'completed' | 'failed'; text: string; activity?: string }
+  | ToolItem
   | { type: 'approval'; id: string; title: string; text: string; choices: string[]; questions: ApprovalQuestion[]; scope?: ApprovalScope; resolved: boolean }
   | { type: 'configuration'; id: string; profile_name: string; text: string }
   | { type: 'error'; id: string; text: string };
+
+/** A tool call; `children` are the calls a subagent made inside it, nested as deep as they went. */
+export interface ToolItem { type: 'tool'; id: string; name: string; status: 'running' | 'completed' | 'failed'; text: string; activity?: string; parent?: string; stats?: ToolStats; at?: number; children?: ToolItem[] }
 
 /** Newest-first truncation: the latest subagent step matters more than its first. */
 const MAX_ACTIVITY = 4000;
@@ -39,8 +44,11 @@ function clipTail(value: string, limit: number) {
 
 export function conversationView(events: readonly ChatEvent[], running?: boolean) {
   const items: ChatItem[] = [], indexes = new Map<string, number>(), seen = new Set<number>();
+  // Calls made inside a subagent live here rather than in `items`, and are hung
+  // under their parent once every event has been read.
+  const nested = new Map<string, ToolItem>(), childrenOf = new Map<string, string[]>();
   let turn: 'idle' | 'running' | 'completed' | 'failed' | 'interrupted' = 'idle';
-  let ready = false, exited = false, commands: string[] = [], announced = false, models: NativeModel[] = [], model: string | undefined, effort: string | undefined, permissionMode: string | undefined, permissionModes: string[] = [], usage: { input_tokens?: number; output_tokens?: number; context_tokens?: number; context_window?: number } = {};
+  let ready = false, exited = false, commands: string[] = [], announced = false, models: NativeModel[] = [], model: string | undefined, effort: string | undefined, permissionMode: string | undefined, permissionModes: string[] = [], subagentSummaries: boolean | undefined, usage: { input_tokens?: number; output_tokens?: number; context_tokens?: number; context_window?: number } = {};
   for (const event of events) {
     if (event.seq !== undefined) { if (seen.has(event.seq)) continue; seen.add(event.seq); }
     if (event.type === 'message') {
@@ -49,15 +57,20 @@ export function conversationView(events: readonly ChatEvent[], running?: boolean
       const next: ChatItem = { type: 'message', id: event.id, role: event.role, text: event.delta && previous?.type === 'message' ? previous.text + event.text : event.text, ...(steered ? { steered: true } : {}) };
       if (index === undefined) { indexes.set(key, items.length); items.push(next); } else items[index] = next;
     } else if (event.type === 'tool') {
-      const key = 'tool:' + event.id, index = indexes.get(key), previous = index === undefined ? undefined : items[index];
+      const key = 'tool:' + event.id, index = indexes.get(key), previous = index === undefined ? nested.get(event.id) : items[index];
       // Subagent progress accumulates so the card reads as a log, while `text`
       // still carries only the tool's own input and result. Capped because a
       // long-running subagent would otherwise grow this without bound.
       const before = previous?.type === 'tool' ? previous : undefined;
       const activity = event.activity === undefined ? before?.activity
         : clipTail(before?.activity ? `${before.activity}\n${event.activity}` : event.activity, MAX_ACTIVITY);
-      const next: ChatItem = { ...event, text: event.text ?? before?.text ?? '', ...(activity === undefined ? {} : { activity }) };
-      if (index === undefined) { indexes.set(key, items.length); items.push(next); } else items[index] = next;
+      const parent = event.parent ?? before?.parent, stats = event.stats ?? before?.stats, at = event.at ?? before?.at;
+      const next: ToolItem = { ...event, text: event.text ?? before?.text ?? '', ...(activity === undefined ? {} : { activity }), ...(parent === undefined ? {} : { parent }), ...(stats === undefined ? {} : { stats }), ...(at === undefined ? {} : { at }) };
+      // A parent trimmed out of history leaves its calls at the top rather than nowhere.
+      if (parent !== undefined && index === undefined && parent !== event.id && (indexes.has('tool:' + parent) || nested.has(parent))) {
+        if (!nested.has(event.id)) childrenOf.set(parent, [...(childrenOf.get(parent) ?? []), event.id]);
+        nested.set(event.id, next);
+      } else if (index === undefined) { indexes.set(key, items.length); items.push(next); } else items[index] = next;
     } else if (event.type === 'approval') {
       const key = 'approval:' + event.id, index = indexes.get(key);
       const next: ChatItem = { ...event, questions: event.questions ?? [], resolved: false };
@@ -67,22 +80,27 @@ export function conversationView(events: readonly ChatEvent[], running?: boolean
       if (previous?.type === 'approval') previous.resolved = true;
     } else if (event.type === 'turn') turn = event.status;
     else if (event.type === 'ready') { ready = true; exited = false; commands = event.commands ?? []; announced = true; }
-    else if (event.type === 'settings') { if (event.models?.length) models = event.models; if (event.model) model = event.model; if (event.effort) effort = event.effort; if (event.permission_mode) permissionMode = event.permission_mode; if (event.permission_modes?.length) permissionModes = event.permission_modes; }
+    else if (event.type === 'settings') { if (event.subagent_summaries !== undefined) subagentSummaries = event.subagent_summaries; if (event.models?.length) models = event.models; if (event.model) model = event.model; if (event.effort) effort = event.effort; if (event.permission_mode) permissionMode = event.permission_mode; if (event.permission_modes?.length) permissionModes = event.permission_modes; }
     else if (event.type === 'usage') { const { seq: _seq, type: _type, ...values } = event; usage = { ...usage, ...values }; }
     // A new endpoint means a new native client: its command list is whatever it
     // announces next, never the previous client's.
-    else if (event.type === 'configuration') { for (const item of items) if (item.type === 'approval') item.resolved = true; indexes.clear(); items.push(event); ready = false; turn = 'idle'; commands = []; announced = false; models = []; model = undefined; effort = undefined; permissionMode = undefined; permissionModes = []; }
+    else if (event.type === 'configuration') { for (const item of items) if (item.type === 'approval') item.resolved = true; indexes.clear(); nested.clear(); childrenOf.clear(); subagentSummaries = undefined; items.push(event); ready = false; turn = 'idle'; commands = []; announced = false; models = []; model = undefined; effort = undefined; permissionMode = undefined; permissionModes = []; }
     // The client cleared its own context. Keeping the transcript would show a
     // conversation the client can no longer refer to, which is what made
     // /clear look like it had done nothing.
-    else if (event.type === 'cleared') { items.length = 0; indexes.clear(); usage = {}; }
+    else if (event.type === 'cleared') { items.length = 0; indexes.clear(); nested.clear(); childrenOf.clear(); usage = {}; }
     else if (event.type === 'error') items.push({ type: 'error', id: 'error:' + (event.seq ?? items.length), text: event.message });
     else if (event.type === 'exit') { exited = true; ready = false; if (turn === 'running') turn = 'interrupted'; for (const item of items) if (item.type === 'approval') item.resolved = true; }
   }
   // Runtime state outranks stale display history after server restart. Old
   // approvals refer to lost native RPCs and cannot be answered as live ones.
+  const hang = (item: ToolItem, depth: number): ToolItem => {
+    const ids = depth < 16 ? childrenOf.get(item.id) : undefined;
+    return ids ? { ...item, children: ids.map(id => hang(nested.get(id)!, depth + 1)) } : item;
+  };
+  for (let i = 0; i < items.length; i++) { const item = items[i]; if (item.type === 'tool' && childrenOf.has(item.id)) items[i] = hang(item, 0); }
   if (running === false) { ready = false; if (turn === 'running') turn = 'interrupted'; for (const item of items) if (item.type === 'approval') item.resolved = true; }
-  return { items, turn, ready, exited, usage, commands, commandsAnnounced: announced, models, model, effort, permissionMode, permissionModes, awaitingApproval: items.some(item => item.type === 'approval' && !item.resolved) };
+  return { items, turn, ready, exited, usage, commands, commandsAnnounced: announced, models, model, effort, permissionMode, permissionModes, subagentSummaries, awaitingApproval: items.some(item => item.type === 'approval' && !item.resolved) };
 }
 
 /** WS events are already ordered. A replayed sequence must not append deltas twice. */
@@ -127,6 +145,7 @@ export function isChatEvent(value: unknown): value is ChatEvent {
       && (v.commands === undefined || Array.isArray(v.commands) && v.commands.length <= 400 && v.commands.every(name => typeof name === 'string' && /^[A-Za-z0-9][\w:-]{0,63}$/.test(name)));
     case 'settings': return (v.model === undefined || text('model')) && (v.effort === undefined || text('effort'))
       && (v.permission_mode === undefined || text('permission_mode'))
+      && (v.subagent_summaries === undefined || typeof v.subagent_summaries === 'boolean')
       && (v.permission_modes === undefined || Array.isArray(v.permission_modes) && v.permission_modes.length <= 8 && v.permission_modes.every(mode => typeof mode === 'string' && /^[a-z_]{1,24}$/.test(mode)))
       && (v.models === undefined || Array.isArray(v.models) && v.models.length <= 64 && v.models.every(entry => {
         if (!entry || typeof entry !== 'object') return false;
@@ -137,7 +156,9 @@ export function isChatEvent(value: unknown): value is ChatEvent {
       }));
     case 'exit': case 'cleared': return true;
     case 'message': return text('id') && text('text') && ['user', 'assistant'].includes(String(v.role)) && (v.delta === undefined || typeof v.delta === 'boolean');
-    case 'tool': return text('id') && text('name') && ['running', 'completed', 'failed'].includes(String(v.status)) && (v.text === undefined || text('text')) && (v.activity === undefined || text('activity'));
+    case 'tool': return text('id') && text('name') && ['running', 'completed', 'failed'].includes(String(v.status)) && (v.text === undefined || text('text')) && (v.activity === undefined || text('activity'))
+      && (v.parent === undefined || text('parent') && !!v.parent) && (v.at === undefined || typeof v.at === 'number' && Number.isFinite(v.at))
+      && (v.stats === undefined || !!v.stats && typeof v.stats === 'object' && Object.entries(v.stats).every(([key, value]) => ['tokens', 'tools', 'ms'].includes(key) && typeof value === 'number' && value >= 0));
     case 'approval': return text('id') && text('title') && text('text') && Array.isArray(v.choices) && v.choices.every(choice => typeof choice === 'string') && (v.questions === undefined || Array.isArray(v.questions) && v.questions.every(question => {
       if (!question || typeof question !== 'object') return false;
       const q = question as Record<string, unknown>;

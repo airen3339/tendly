@@ -94,10 +94,13 @@ export class ClaudeChat extends ChatBase {
   /** Steered message ids Claude Code has not read back yet. @type {Set<string> | undefined} */
   unconsumed;
   async initialize() {
-    this.launch=claudeLaunch(this.job);this.tools=new Map();
+    this.launch=claudeLaunch(this.job);this.tools=new Map();this.summaries=false;
     this.port=new NativeProcess(this.job.program,this.launch.args,this.job.cwd,message=>this.notification(message),message=>this.fatal(message),()=>this.fatal('Claude Code exited.'),{...this.options,frame:controlRequest});
     // This drives the user's installed native CLI, not SDK query() or an OAuth/token proxy.
-    const initialized=await this.port.rpc('initialize',{promptSuggestions:false});
+    // Without forwardSubagentText the client sends only a subagent's tool calls,
+    // so its cards would show arrows and none of what it said; the nested flag
+    // adds the calls of subagents that subagents start, so the tree goes down.
+    const initialized=await this.port.rpc('initialize',{promptSuggestions:false,forwardSubagentText:true,forwardNestedSubagentToolCalls:true});
     // The client lists its own commands here, before any turn has run, so the
     // composer can offer them on a brand new session.
     this.announce(this.launch.resume??this.launch.sessionId,commandNames(initialized?.commands));
@@ -137,6 +140,15 @@ export class ClaudeChat extends ChatBase {
    * that was asked for -- they differ when the client declines.
    */
   get permissionModes(){return ['ask','plan','accept_edits','danger'];}
+  /**
+   * Progress summaries cost a short model call about every 30 seconds per
+   * running subagent, so they are off until asked for. The client reads this
+   * option on every initialize, which is what lets it change mid-session.
+   */
+  async setSummaries(message) {
+    await this.port.rpc('initialize',{agentProgressSummaries:message.enabled});
+    this.summaries=message.enabled;this.settings(this.models,this.model,this.effort);
+  }
   async setPermissionMode(message) {
     if(this.active)throw Error('Wait for the current turn to finish before changing permissions.');
     const mode=CLAUDE_PERMISSION[message.mode];
@@ -213,11 +225,15 @@ export class ClaudeChat extends ChatBase {
     // on finished, and it carries on. Dropping it hid work that still ran --
     // commits and pushes the user never saw -- so it opens a turn like any other.
     if(!this.active&&['assistant','stream_event'].includes(message.type)&&!message.parent_tool_use_id)this.open(`background-${randomUUID()}`);
-    if(!this.active)return;
     // A subagent's output belongs to the tool call that started it. Emitting it
     // as a message would overwrite the main assistant reply, which is why this
     // was dropped; routing it to the parent card shows the work instead.
+    // Subagents run in the background by default, so their work usually
+    // arrives after the turn that started them has ended: requiring a turn here
+    // is what hid them entirely.
     if(typeof message.parent_tool_use_id==='string'&&message.parent_tool_use_id){this.subagent(message);return;}
+    if(message.type==='system'&&['task_started','task_progress','task_updated','task_notification'].includes(message.subtype)){this.task(message);return;}
+    if(!this.active)return;
     if(message.type==='stream_event'){
       const event=message.event??{};
       if(event.type==='message_start')this.assistantId=event.message?.id;
@@ -234,10 +250,8 @@ export class ClaudeChat extends ChatBase {
       this.usage(body.usage,contextTokens(body.usage));return;
     }
     if(message.type==='user'&&Array.isArray(message.message?.content)){
-      for(const result of message.message.content)if(result.type==='tool_result'&&typeof result.tool_use_id==='string'){
-        const text=typeof result.content==='string'?result.content:Array.isArray(result.content)?result.content.filter(block=>block.type==='text').map(block=>block.text??'').join('\n'):'';
-        this.emit({type:'tool',id:result.tool_use_id,name:this.tools.get(result.tool_use_id)??'Native tool',status:result.is_error?'failed':'completed',text:clip(text)});
-      }return;
+      for(const result of message.message.content)if(result.type==='tool_result'&&typeof result.tool_use_id==='string')this.result(result);
+      return;
     }
     if(message.type==='tool_progress'&&typeof message.tool_use_id==='string'){
       this.emit({type:'tool',id:message.tool_use_id,name:clip(message.tool_name??'Native tool',256),status:'running'});return;
@@ -269,24 +283,62 @@ export class ClaudeChat extends ChatBase {
   }
   // Progress only: an activity line names what the subagent is doing and never
   // replaces the card's own text, which holds the tool's input and result.
+  // The subagent's own tool calls become cards nested under it, so what it ran
+  // can be opened like any other call; a subagent it starts nests in turn.
   subagent(message) {
     const parent=message.parent_tool_use_id;
     if(!this.tools.has(parent))return; // A card we never announced has nothing to attach to.
-    const lines=[];
+    const lines=[],blocks=Array.isArray(message.message?.content)?message.message.content:[];
     if(message.type==='assistant'){
-      for(const block of message.message?.content??[]){
+      for(const block of blocks){
         if(block.type==='text'&&block.text?.trim())lines.push(block.text.trim());
-        else if(block.type==='tool_use')lines.push(`\u2192 ${clip(block.name??'tool',120)}`);
+        else if(block.type==='tool_use'){lines.push(`\u2192 ${clip(block.name??'tool',120)}`);this.tool(block,'running',parent);}
       }
+    }else if(message.type==='user'){
+      for(const result of blocks)if(result.type==='tool_result'&&typeof result.tool_use_id==='string'&&this.tools.has(result.tool_use_id))this.result(result,parent);
     }
     if(!lines.length)return;
-    this.emit({type:'tool',id:parent,name:this.tools.get(parent),status:'running',activity:clip(lines.join('\n'),4096)});
+    this.emit({type:'tool',id:parent,name:this.tools.get(parent),status:'running',activity:clip(lines.join('\n'),4096),at:Date.now()});
+  }
+  result(result,parent) {
+    const text=typeof result.content==='string'?result.content:Array.isArray(result.content)?result.content.filter(block=>block.type==='text').map(block=>block.text??'').join('\n'):'';
+    // A backgrounded task answers at once with a placeholder; the card stays
+    // running until its task_notification says how it actually ended.
+    const status=result.is_error?'failed':this.background?.has(result.tool_use_id)?'running':'completed';
+    this.emit({type:'tool',id:result.tool_use_id,name:this.tools.get(result.tool_use_id)??'Native tool',status,text:clip(text),...(parent?{parent}:{})});
+  }
+  // A background task (subagent or command) reports its own start and end, the
+  // only signal of when it finished once its tool call has returned.
+  task(message) {
+    this.tasks??=new Map();this.background??=new Set();this.summaryOf??=new Map();
+    const id=typeof message.tool_use_id==='string'?message.tool_use_id:this.tasks.get(message.task_id);
+    if(!id||!this.tools.has(id))return;
+    // `at` is when the task last showed signs of life, which is what tells a
+    // slow subagent from a stuck one; the counts are the client's own.
+    const usage=message.usage,count=value=>Number.isSafeInteger(value)&&value>=0?value:undefined;
+    const stats=usage&&typeof usage==='object'?Object.fromEntries(Object.entries({tokens:count(usage.total_tokens),tools:count(usage.tool_uses),ms:count(usage.duration_ms)}).filter(([,value])=>value!==undefined)):{};
+    const card=(status,line)=>this.emit({type:'tool',id,name:this.tools.get(id),status,at:Date.now(),...(Object.keys(stats).length?{stats}:{}),...(typeof line==='string'&&line.trim()?{activity:clip(line.trim(),4096)}:{})});
+    if(message.subtype==='task_started'){
+      if(typeof message.task_id==='string'){this.tasks.set(message.task_id,id);if(this.tasks.size>512)this.tasks.delete(this.tasks.keys().next().value);}
+      if(message.is_backgrounded){this.background.add(id);if(this.background.size>512)this.background.delete(this.background.values().next().value);}
+      card('running',message.description);
+    }else if(message.subtype==='task_updated'){
+      if(message.patch?.is_backgrounded)this.background.add(id);
+    }else if(message.subtype==='task_progress'){
+      // Progress repeats its summary until the subagent moves on; the log keeps one.
+      const summary=message.summary===this.summaryOf.get(id)?undefined:message.summary;
+      if(typeof summary==='string')this.summaryOf.set(id,summary);
+      card('running',summary);
+    }else{
+      this.background.delete(id);this.tasks.delete(message.task_id);this.summaryOf.delete(id);
+      card(message.status==='completed'?'completed':'failed',message.summary);
+    }
   }
 
-  tool(block,status) {
+  tool(block,status,parent) {
     if(typeof block.id!=='string')return;
     const name=clip(block.name??'Native tool',256);this.tools.set(block.id,name);if(this.tools.size>512)this.tools.delete(this.tools.keys().next().value);
-    this.emit({type:'tool',id:block.id,name,status,text:clip(JSON.stringify(block.input??{}))});
+    this.emit({type:'tool',id:block.id,name,status,text:clip(JSON.stringify(block.input??{})),...(parent?{parent}:{})});
   }
   reject(message,text='This Claude Code interaction is unsupported in AgentDock.') {
     this.port.send({type:'control_response',response:{subtype:'error',request_id:message.request_id,error:text}});this.error(text);

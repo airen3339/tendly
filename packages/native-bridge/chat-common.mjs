@@ -183,7 +183,10 @@ export class ChatBase {
     // Set by each client's chat once it is known.
     /** @type {NativeProcess | undefined} */ this.port=undefined;
     /** @type {string | undefined} */ this.permissionMode=undefined;
+    /** Whether the client writes progress summaries for running subagents; undefined where it cannot. @type {boolean | undefined} */ this.summaries=undefined;
   }
+  /** Only Claude Code can summarise a subagent's progress; elsewhere there is nothing to switch. */
+  async setSummaries() { throw Error('This client does not summarise subagent progress.'); }
   /**
    * The permission modes the client accepts, when it says. Each client's chat
    * overrides this getter; assigning the property instead would throw there.
@@ -265,8 +268,9 @@ export class ChatBase {
     // equivalent of plan or accept-edits, and offering a control that errors on
     // use would be worse than not offering it.
     const available=Array.isArray(this.permissionModes)&&this.permissionModes.length?this.permissionModes.filter(mode=>/^[a-z_]{1,24}$/.test(mode)).slice(0,8):undefined;
-    if(!list?.length&&!selected&&!depth&&!permission)return;
-    this.emit({type:'settings',...(selected?{model:selected}:{}),...(depth?{effort:depth}:{}),...(permission?{permission_mode:permission}:{}),...(available?.length?{permission_modes:available}:{}),...(list?.length?{models:list}:{})});
+    const summaries=typeof this.summaries==='boolean'?this.summaries:undefined;
+    if(!list?.length&&!selected&&!depth&&!permission&&summaries===undefined)return;
+    this.emit({type:'settings',...(summaries===undefined?{}:{subagent_summaries:summaries}),...(selected?{model:selected}:{}),...(depth?{effort:depth}:{}),...(permission?{permission_mode:permission}:{}),...(available?.length?{permission_modes:available}:{}),...(list?.length?{models:list}:{})});
   }
   approval(key, description, answer) {
     if(this.approvals.has(key))return;

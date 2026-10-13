@@ -7,7 +7,7 @@ import { AGENT_CLIENTS, agentClient } from './clients';
 import { sessionConnections } from './session-connection';
 import { createSessionStream, type SessionStreamState } from './session-stream';
 import { onPageReturn } from './page-return';
-import { acknowledgeDraft, appendChatEvent, approvalPayloadAnswers, canClearContext, chatDrafts, createChatDraftStore, conversationView, isChatEvent, parseConversationSnapshot, pendingMessageRetry, pruneChatEvents, sessionConfigurationPayload, type ChatDraft, type ChatEvent, type ChatItem, type ConversationSnapshot, type NativeModel } from './chat-model';
+import { acknowledgeDraft, appendChatEvent, approvalPayloadAnswers, canClearContext, chatDrafts, createChatDraftStore, conversationView, isChatEvent, parseConversationSnapshot, pendingMessageRetry, pruneChatEvents, sessionConfigurationPayload, type ChatDraft, type ChatEvent, type ChatItem, type ConversationSnapshot, type NativeModel, type ToolItem, type ToolStats } from './chat-model';
 import ProviderIcon from './ProviderIcon.vue';
 import Icon from './Icon.vue';
 import ContextMenu from './ContextMenu.vue';
@@ -26,7 +26,7 @@ import { messageQueue } from './message-queue';
 import { attachedImagePaths } from './chat-model';
 import { filterModels, mergeModels, resolveModel, offeredModels } from './model-choices';
 import { openLightbox } from './image-lightbox';
-import { toolRuns, toolRunNames, toolRunStatus, type ToolRun } from './tool-runs';
+import { compactCount, descendants, lastLine, runningSubagents, stalledFor, toolRuns, toolRunNames, toolRunStatus, type ToolRun } from './tool-runs';
 import { mentionQuery, applyMention } from './file-mentions';
 import { createFileSearch } from './file-search';
 import type { SearchHit } from './file-search';
@@ -114,6 +114,57 @@ const mentionIndex = ref(0);
 watch(() => mentionHits.value.map(hit => hit.path).join('\u0000'), () => { mentionIndex.value = 0; });
 watch(() => draft.value.text, () => { mentionsDismissed.value = false; });
 onBeforeUnmount(() => mentionSearch.cancel());
+/**
+ * Subagents.
+ *
+ * They run in the background, so most of their work lands after the turn that
+ * started them has ended and nothing else on screen says they are still going.
+ * The strip above the composer does, and takes you to each in turn. A card the
+ * client has gone quiet on for a while says so, since a stuck subagent and a
+ * slow one look the same otherwise.
+ */
+const now = ref(Date.now());
+const subagents = computed(() => running.value ? runningSubagents(view.value.items) : []);
+// The clock only ticks while something could go quiet; an idle pane holds no timer.
+let clock: ReturnType<typeof setInterval> | undefined;
+watch(() => subagents.value.length > 0, active => {
+  clearInterval(clock); clock = undefined;
+  if (active) { now.value = Date.now(); clock = setInterval(() => { now.value = Date.now(); }, 30_000); }
+}, { immediate: true });
+onBeforeUnmount(() => clearInterval(clock));
+let subagentCursor = 0;
+function revealSubagent() {
+  const list = subagents.value; if (!list.length) return;
+  const target = list[subagentCursor++ % list.length];
+  const card = viewport.value?.querySelector<HTMLElement>(`[data-tool-id="${CSS.escape(target.id)}"]`);
+  if (!card) return;
+  // Folded runs and parent cards open on the way, or there is nothing to see.
+  for (let node: HTMLElement | null = card; node && node !== viewport.value; node = node.parentElement) if (node instanceof HTMLDetailsElement) node.open = true;
+  card.scrollIntoView({ block: 'center', behavior: 'smooth' });
+}
+function duration(ms: number) {
+  const seconds = Math.round(ms / 1000);
+  return seconds < 60 ? t('{seconds}s', { seconds }) : t('{minutes}m {seconds}s', { minutes: Math.floor(seconds / 60), seconds: seconds % 60 });
+}
+function statsLine(stats: ToolStats) {
+  const parts: string[] = [];
+  if (stats.tools !== undefined) parts.push(t('{count} tool uses', { count: stats.tools }));
+  if (stats.tokens !== undefined) parts.push(t('{count} tokens', { count: compactCount(stats.tokens) }));
+  if (stats.ms !== undefined) parts.push(duration(stats.ms));
+  return parts.join(' · ');
+}
+function quietLine(tool: ToolItem) {
+  const quiet = running.value ? stalledFor(tool, now.value) : undefined;
+  return quiet === undefined ? '' : t('No progress for {minutes} min', { minutes: Math.floor(quiet / 60_000) });
+}
+/** Off by default: each running subagent then costs a short model call about every 30 seconds. */
+async function toggleSummaries() {
+  closeSessionMenu();
+  const session = props.session.id; actionBusy.value = true; error.value = '';
+  try { await request('/sessions/' + encodeURIComponent(session) + '/conversation/summaries', json('POST', { enabled: !view.value.subagentSummaries })); }
+  catch (cause) { if (props.session.id === session) error.value = errorMessage(cause); }
+  finally { if (props.session.id === session) actionBusy.value = false; }
+}
 function chooseMention(hit: SearchHit | undefined) {
   const query = mentionTarget.value; if (!query || !hit) return;
   const next = applyMention(draft.value.text, query, hit.path);
@@ -349,12 +400,6 @@ async function pickModel(id: string) {
  * advertised that command; AgentDock never invents one.
  */
 const timelineMenu = ref<{ x: number; y: number; text: string } | null>(null);
-// The collapsed summary shows where a subagent is now, not where it began.
-function lastLine(activity: string) {
-  const lines = activity.split('\n').filter(line => line.trim() && line !== '…');
-  const last = lines[lines.length - 1] ?? '';
-  return last.length > 80 ? `${last.slice(0, 79)}…` : last;
-}
 const clearAvailable = computed(() => canClearContext({ preview: isPreview.value, running: running.value, ready: view.value.ready, busy: turnBusy.value || actionBusy.value, connected: streamState.value === 'connected', commands: view.value.commands }));
 function openTimelineMenu(event: MouseEvent) {
   if (isPreview.value || preserveNativeContextMenu(event, mobile.value)) return;
@@ -976,7 +1021,7 @@ function keydown(event: KeyboardEvent) {
 <template>
   <section :class="['chat-pane', { 'has-tab-menu': !!paneId, 'is-phone': mobile }]" :aria-label="t('Conversation with {provider}', {provider:providerLabel(session.provider)})" @keydown="paneKeydown">
     <ContextMenu v-if="timelineMenu" :x="timelineMenu.x" :y="timelineMenu.y" :label="t('Conversation actions')" @close="closeTimelineMenu"><button v-if="timelineMenu.text" role="menuitem" @click="copyFromTimeline(timelineMenu!.text)">{{ t('Copy selection') }}</button><button role="menuitem" @click="closeTimelineMenu(); scrollToLatest(true)">{{ t('Latest message') }}</button><button role="menuitem" :disabled="loading" @click="closeTimelineMenu(); load()">{{ t('Refresh conversation') }}</button><template v-if="clearAvailable"><hr/><button role="menuitem" :disabled="actionBusy" :title="t('Runs this client\'s own /clear: the transcript and its context are dropped together.')" @click="clearContext">{{ t('Clear context') }}</button></template></ContextMenu>
-    <Teleport v-if="!isPreview" to="body" :disabled="!paneId"><details :data-session-menu-pane="paneId" ref="sessionMenu" :style="tabMenuStyle" :class="['chat-menu','chat-floating-menu', { 'chat-tab-menu': !!paneId }]" @toggle="positionMenu" @keydown.esc.stop.prevent="closeSessionMenu(true)"><summary :aria-label="t('Session actions')" :title="t('Session actions')"><Icon name="more" :size="17" /></summary><nav :style="tabMenuPanelStyle"><div class="chat-menu-status"><span class="chat-status-dot" :class="{working:turnBusy}" />{{ t(statusLabel,{provider:providerLabel(session.provider)}) }}</div><button @click="closeSessionMenu(); load()"><Icon name="refresh" :size="14" />{{ t('Refresh conversation') }}</button><button @click="closeSessionMenu(); emit('profiles')"><Icon name="account" :size="14" />{{ t('Manage endpoint profiles') }}</button><button v-if="legacyAvailable" @click="closeSessionMenu(); emit('legacy')"><Icon name="terminal" :size="14" />{{ t('Open native client view') }}</button><button v-if="terminalReopenOffered" :disabled="actionBusy||!terminalReopenAvailable" :title="t(terminalReopenAvailable?'For interactive commands such as /config, which the conversation view cannot display':'Available once the conversation has started: send a first message')" @click="closeSessionMenu(); openInTerminal()"><Icon name="terminal" :size="14" />{{ t('Open this session in a terminal') }}</button><hr class="chat-menu-divider" /><slot name="session-actions" :close-menu="closeSessionMenu"><button @click="closeSessionMenu(); emit('environment',session.id)"><Icon name="settings" :size="14" />{{ t('Session environment') }}</button></slot><AgentToolsSwitch v-if="capabilities.agentTools" :session-id="session.id" /><button v-if="running" class="chat-end-button" :disabled="actionBusy" @click="requestEnd"><Icon name="stop" :size="14" />{{ t('End session…') }}</button></nav></details></Teleport>
+    <Teleport v-if="!isPreview" to="body" :disabled="!paneId"><details :data-session-menu-pane="paneId" ref="sessionMenu" :style="tabMenuStyle" :class="['chat-menu','chat-floating-menu', { 'chat-tab-menu': !!paneId }]" @toggle="positionMenu" @keydown.esc.stop.prevent="closeSessionMenu(true)"><summary :aria-label="t('Session actions')" :title="t('Session actions')"><Icon name="more" :size="17" /></summary><nav :style="tabMenuPanelStyle"><div class="chat-menu-status"><span class="chat-status-dot" :class="{working:turnBusy}" />{{ t(statusLabel,{provider:providerLabel(session.provider)}) }}</div><button @click="closeSessionMenu(); load()"><Icon name="refresh" :size="14" />{{ t('Refresh conversation') }}</button><button @click="closeSessionMenu(); emit('profiles')"><Icon name="account" :size="14" />{{ t('Manage endpoint profiles') }}</button><button v-if="legacyAvailable" @click="closeSessionMenu(); emit('legacy')"><Icon name="terminal" :size="14" />{{ t('Open native client view') }}</button><button v-if="terminalReopenOffered" :disabled="actionBusy||!terminalReopenAvailable" :title="t(terminalReopenAvailable?'For interactive commands such as /config, which the conversation view cannot display':'Available once the conversation has started: send a first message')" @click="closeSessionMenu(); openInTerminal()"><Icon name="terminal" :size="14" />{{ t('Open this session in a terminal') }}</button><hr class="chat-menu-divider" /><slot name="session-actions" :close-menu="closeSessionMenu"><button @click="closeSessionMenu(); emit('environment',session.id)"><Icon name="settings" :size="14" />{{ t('Session environment') }}</button></slot><AgentToolsSwitch v-if="capabilities.agentTools" :session-id="session.id" /><button v-if="view.subagentSummaries!==undefined" :aria-pressed="view.subagentSummaries" :disabled="actionBusy" :title="t('Each running subagent costs a short model call about every 30 seconds.')" @click="toggleSummaries"><Icon name="spark" :size="14" />{{ t('Subagent progress summaries') }}<span class="chat-menu-state">{{ t(view.subagentSummaries?'On':'Off') }}</span></button><button v-if="running" class="chat-end-button" :disabled="actionBusy" @click="requestEnd"><Icon name="stop" :size="14" />{{ t('End session…') }}</button></nav></details></Teleport>
     <div v-if="!supported" class="chat-notice">{{ t('Structured conversation requires an updated backend. Your native session is unchanged.') }}<button v-if="legacyAvailable" class="chat-link" @click="emit('legacy')">{{ t('Open native client view') }}</button></div>
     <div v-if="error" class="chat-alert" role="alert">{{ error }}<button @click="load()">{{ t('Refresh conversation') }}</button></div>
     <div v-if="streamNotice&&!loading" class="chat-notice" role="status">{{ t(streamNotice) }}<button class="chat-link" @click="load()">{{ t('Reconnect view') }}</button></div>
@@ -988,7 +1033,7 @@ function keydown(event: KeyboardEvent) {
       <div v-if="!view.items.length" class="chat-welcome"><span class="chat-welcome-mark"><ProviderIcon :provider="session.provider" :size="32" /></span><h3>{{ t('What shall we build?') }}</h3><p>{{ t('A real conversation with your native agent, with room for tools, changes and your next idea.') }}</p><span class="chat-context-chip" :title="activeProfile?(activeProfile.native_config?t('Uses the sign-in and settings in {path}',{path:activeProfile.native_config.config_dir}):undefined):t('A fresh, empty client home: no host sign-in or settings, so it may ask you to log in.')"><ProviderIcon :provider="session.provider" :size="12"/>{{ endpointName }}</span><Transition name="chat-boot" :duration="240"><p v-if="booting" class="chat-boot" role="status"><span class="chat-boot-bar"><i/></span>{{ t('Starting {provider}… models and commands arrive with it.',{provider:providerLabel(session.provider)}) }}</p></Transition><div v-if="startersAvailable" class="chat-starters"><button v-for="(starter,index) in STARTERS" :key="starter.title" type="button" :style="{'--starter-delay':index*60+'ms'}" @click="useStarter(starter.prompt)"><span class="chat-starter-icon" :data-tone="starter.icon"><Icon :name="starter.icon" :size="16"/></span><span><strong>{{ t(starter.title) }}</strong><small>{{ t(starter.note) }}</small></span></button></div><p v-if="chatNote" class="chat-trust-note">{{ t(chatNote) }}</p></div>
       <template v-for="(item,index) in displayItems" :key="item.type+':'+index+':'+item.id">
         <article v-if="item.type==='message'" :class="['chat-message',item.role]"><div class="chat-message-label"><ProviderIcon v-if="item.role==='assistant'" :provider="session.provider" :size="15" /><span>{{ item.role==='user'?t('You'):providerLabel(session.provider) }}</span><em v-if="item.steered" class="chat-steered" :title="t('Written while the agent worked, and read inside that turn')">{{ t('Steer') }}</em></div><div v-if="item.role==='user'&&attachedImagePaths(item.text).length" class="chat-attached-images"><img v-for="path in attachedImagePaths(item.text)" :key="path" :src="workspaceImage(path)" :alt="path" :title="path" loading="lazy" @click="openLightbox(workspaceImage(path), path)" /></div><MarkdownContent :text="item.text" :image-url="workspaceImage" :host-image-url="hostImage" :open-file="openReference" /><div class="chat-message-actions"><CopyButton :text="item.text" label="Copy message" compact /></div></article>
-        <component :is="item.type==='tool_run'&&item.tools.length>1?'details':'div'" v-else-if="item.type==='tool_run'" :class="item.tools.length>1?['chat-tool-run',toolRunStatus(item)]:'chat-tool-solo'"><summary v-if="item.tools.length>1"><span :class="['tool-indicator',toolRunStatus(item)]">{{ toolRunStatus(item)==='completed'?'✓':toolRunStatus(item)==='failed'?'!':'↻' }}</span><strong>{{ t('{count} tool calls',{count:item.tools.length}) }}</strong><small>{{ toolRunStatus(item)==='running' ? runningLine(item) : toolRunNames(item) }}</small><Icon class="chat-tool-chevron" name="chevron" :size="14" /></summary><details v-for="tool in item.tools" :key="tool.id" class="chat-tool"><summary><span :class="['tool-indicator',tool.status]">{{ tool.status==='completed'?'✓':tool.status==='failed'?'!':'↻' }}</span><strong>{{ tool.name }}</strong><small>{{ tool.activity && tool.status==='running' ? lastLine(tool.activity) : t(tool.status==='running'?(running?'Working…':'Session ended'):tool.status==='failed'?'Failed':'Completed') }}</small><Icon class="chat-tool-chevron" name="chevron" :size="14" /></summary><pre v-if="tool.activity" class="tool-activity">{{ tool.activity }}</pre><pre v-if="tool.text">{{ tool.text }}</pre><p v-else-if="!tool.activity">{{ t('The client did not provide tool output.') }}</p></details></component>
+        <component :is="item.type==='tool_run'&&item.tools.length>1?'details':'div'" v-else-if="item.type==='tool_run'" :class="item.tools.length>1?['chat-tool-run',toolRunStatus(item)]:'chat-tool-solo'"><summary v-if="item.tools.length>1"><span :class="['tool-indicator',toolRunStatus(item)]">{{ toolRunStatus(item)==='completed'?'✓':toolRunStatus(item)==='failed'?'!':'↻' }}</span><strong>{{ t('{count} tool calls',{count:item.tools.length}) }}</strong><small>{{ toolRunStatus(item)==='running' ? runningLine(item) : toolRunNames(item) }}</small><Icon class="chat-tool-chevron" name="chevron" :size="14" /></summary><details v-for="tool in item.tools" :key="tool.id" class="chat-tool" :data-tool-id="tool.id"><summary><span :class="['tool-indicator',tool.status]">{{ tool.status==='completed'?'✓':tool.status==='failed'?'!':'↻' }}</span><strong>{{ tool.name }}</strong><small>{{ tool.activity && tool.status==='running' ? lastLine(tool.activity) : t(tool.status==='running'?(running?'Working…':'Session ended'):tool.status==='failed'?'Failed':'Completed') }}</small><span v-if="tool.stats" class="chat-tool-stats">{{ statsLine(tool.stats) }}</span><em v-if="quietLine(tool)" class="chat-tool-stalled">{{ quietLine(tool) }}</em><Icon class="chat-tool-chevron" name="chevron" :size="14" /></summary><pre v-if="tool.activity" class="tool-activity">{{ tool.activity }}</pre><div v-if="tool.children?.length" class="chat-tool-children"><details v-for="entry in descendants(tool)" :key="entry.tool.id" class="chat-tool-nested" :style="{'--depth':entry.depth}" :data-tool-id="entry.tool.id"><summary><span :class="['tool-indicator',entry.tool.status]">{{ entry.tool.status==='completed'?'✓':entry.tool.status==='failed'?'!':'↻' }}</span><strong>{{ entry.tool.name }}</strong><small>{{ entry.tool.activity && entry.tool.status==='running' ? lastLine(entry.tool.activity) : t(entry.tool.status==='running'?(running?'Working…':'Session ended'):entry.tool.status==='failed'?'Failed':'Completed') }}</small><span v-if="entry.tool.stats" class="chat-tool-stats">{{ statsLine(entry.tool.stats) }}</span><em v-if="quietLine(entry.tool)" class="chat-tool-stalled">{{ quietLine(entry.tool) }}</em></summary><pre v-if="entry.tool.activity" class="tool-activity">{{ entry.tool.activity }}</pre><pre v-if="entry.tool.text">{{ entry.tool.text }}</pre></details></div><pre v-if="tool.text">{{ tool.text }}</pre><p v-else-if="!tool.activity&&!tool.children?.length">{{ t('The client did not provide tool output.') }}</p></details></component>
         <p v-else-if="item.type==='approval'" :class="['chat-approval-record',{pending:!item.resolved}]"><Icon :name="item.resolved?'check':'shield'" :size="13"/><span>{{ item.title }}</span><small>{{ t(item.resolved?'Resolved':'Waiting for you below') }}</small></p>
         <div v-else-if="item.type==='configuration'" class="chat-boundary"><span>{{ t('New native context') }} · {{ item.profile_name }}</span><p>{{ t(item.text) }}</p></div>
         <p v-else-if="item.type==='error'" class="chat-alert" role="alert">{{ item.text }}</p>
@@ -997,6 +1042,7 @@ function keydown(event: KeyboardEvent) {
       <p v-if="draft.pending" class="chat-delivery" role="status">{{ t(draft.notice??(draft.pending.state==='sending'?'Sending your message…':'Waiting for delivery confirmation.')) }}<button v-if="draft.pending.state==='unknown'" class="chat-link" @click="load()">{{ t('Refresh conversation') }}</button><button v-if="draft.pending.state==='unknown'&&!isPreview" class="chat-link" :disabled="loading||actionBusy||streamState!=='connected'" @click="retryDelivery">{{ t('Retry the same message request') }}</button></p>
       <div v-if="supported&&!loading&&mode!=='structured'" class="chat-native-note"><p>{{ t(running?'This session is running in the native client. End it there before enabling chat; it will not be taken over automatically.':'Enable chat explicitly to continue this native session in a conversation view.') }}</p><button class="chat-primary" :disabled="isPreview||actionBusy||running" @click="explicitOpen">{{ t('Enable conversation view') }}</button><button v-if="legacyAvailable" class="chat-link" @click="emit('legacy')">{{ t('Open native client view') }}</button></div>
     </div>
+    <button v-if="subagents.length" type="button" class="chat-subagents" :title="t('Show where it is')" @click="revealSubagent"><span class="chat-subagents-dot" />{{ subagents.length===1 ? t('1 subagent running') : t('{count} subagents running',{count:subagents.length}) }}<small v-if="subagents[0]!.activity">{{ lastLine(subagents[0]!.activity) }}</small></button>
     <button v-if="!followBottom" class="chat-latest" @click="scrollToLatest(true)">↓ {{ t('Latest message') }}</button>
     <BottomSheet v-if="mobile && optionsOpen" :title="t('Session settings')" @opened="chipsInSheet=true" @close="optionsClosed"><div v-if="error" class="chat-alert chat-options-alert" role="alert">{{ error }}</div><div v-else-if="notice" class="chat-notice chat-options-alert" role="status">{{ t(notice) }}</div><div :id="optionsTarget" class="chat-options-body" /></BottomSheet>
     <section v-if="dockedApproval" class="chat-approval-dock" :aria-label="t('Waiting for you')">
@@ -1116,6 +1162,21 @@ function keydown(event: KeyboardEvent) {
 .chat-mentions button{display:flex;align-items:baseline;gap:8px}
 .chat-mentions strong{font-weight:550;flex-shrink:0}
 .chat-mentions small{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:right;color:var(--muted)}
+/* A subagent's own calls, indented by how deep they ran. */
+.chat-tool-children{border-top:1px solid var(--border)}
+.chat-tool-nested+.chat-tool-nested{border-top:1px solid var(--border)}
+.chat-tool-nested>summary{display:flex;align-items:center;gap:8px;min-height:32px;padding:5px 13px 5px calc(13px + var(--depth,1) * 16px);cursor:pointer;list-style:none}
+.chat-tool-nested>summary::-webkit-details-marker{display:none}
+.chat-tool-nested>summary strong{font:var(--text-xs) var(--mono);flex:1;min-width:0;overflow-wrap:anywhere}
+.chat-tool-nested pre{padding-left:calc(13px + var(--depth,1) * 16px)}
+.chat-tool-stats{font:var(--text-xs) var(--mono);color:var(--muted);white-space:nowrap}
+.chat-tool-stalled{font-style:normal;font-size:var(--text-xs);color:var(--warn-ink);background:var(--warn-soft);border:1px solid var(--warn-line);border-radius:var(--radius-sm);padding:1px 6px;white-space:nowrap}
+.chat-subagents{flex-shrink:0;align-self:center;display:flex;align-items:center;gap:8px;max-width:min(560px,calc(100% - 32px));margin:0 16px 8px;min-height:32px;padding:5px 13px;border:1px solid var(--line);border-radius:30px;background:var(--surface);color:var(--ink-soft);font-size:var(--text-xs);box-shadow:var(--shadow-sm);cursor:pointer}
+.chat-subagents small{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}
+.chat-subagents-dot{flex-shrink:0;width:7px;height:7px;border-radius:50%;background:var(--teal);animation:chat-breathe 2.6s ease-in-out infinite}
+.chat-menu-state{margin-left:auto;color:var(--muted);font-size:var(--text-xs)}
+@container(max-width:480px){.chat-tool-stats{display:none}}
+@media(prefers-reduced-motion:reduce){.chat-subagents-dot{animation:none}}
 .chat-tool-chevron{transform:rotate(90deg)}.chat-tool[open] .chat-tool-chevron{transform:rotate(270deg)}
 .chat-end-confirm{flex-shrink:0;background:var(--danger-soft);color:var(--danger-ink);border-bottom:1px solid var(--danger-line);padding:11px 16px;font-size:var(--text-sm);line-height:1.7}.chat-end-confirm p{margin:0 0 8px}.chat-end-confirm>div{display:flex;gap:8px;flex-wrap:wrap}.chat-end-confirm button{min-height:44px;padding:8px 13px;border:1px solid var(--danger-line);border-radius:var(--radius-md);background:var(--surface);color:var(--danger)}.chat-end-confirm button:first-child{background:var(--danger);color:var(--on-accent);border-color:var(--danger)}.chat-menu .chat-end-button{color:var(--danger)}
 

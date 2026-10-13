@@ -358,10 +358,75 @@ test('Claude subagent output reaches its parent tool card instead of the main re
   assert.equal(progress[0].status,'running');
   assert.match(progress[0].activity,/Scanning the bridge\./);
   assert.match(progress[0].activity,/→ Grep/);
-  // A nested tool must not open a second top-level card.
-  assert.ok(!events.some(event=>event.type==='tool'&&event.id==='nested-1'));
+  // A nested tool gets a card of its own, under the subagent, never at the top.
+  const nested=events.filter(event=>event.type==='tool'&&event.id==='nested-1');
+  assert.equal(nested.length,1);
+  assert.equal(nested[0].parent,'task-1');
   // And progress never carries `text`, which would clobber the tool's input.
   assert.equal(progress[0].text,undefined);
+});
+
+test('a background subagent stays visible on its card after the turn that started it has ended',()=>{
+  const events=[];
+  const chat=Object.create(ClaudeChat.prototype);
+  chat.emit=event=>events.push(event);chat.tools=new Map();chat.seen=new Map();
+  chat.active={id:'m1',interrupted:false};
+  // The order Claude Code 2.1 sends: the Agent call, its task, then at once a
+  // placeholder result, and the turn ends before the subagent does anything.
+  chat.notification({type:'assistant',message:{id:'a1',content:[{type:'tool_use',id:'agent-1',name:'Agent',input:{}}]}});
+  chat.notification({type:'system',subtype:'task_started',task_id:'t1',tool_use_id:'agent-1',description:'List /tmp',is_backgrounded:true});
+  chat.notification({type:'user',message:{content:[{type:'tool_result',tool_use_id:'agent-1',content:'Async agent launched successfully.'}]}});
+  chat.active=undefined;
+  chat.notification({type:'assistant',parent_tool_use_id:'agent-1',message:{id:'s1',content:[{type:'tool_use',id:'n1',name:'Bash',input:{}}]}});
+  chat.notification({type:'assistant',parent_tool_use_id:'agent-1',message:{id:'s2',content:[{type:'text',text:'Found 12 entries.'}]}});
+  chat.notification({type:'system',subtype:'task_notification',task_id:'t1',tool_use_id:'agent-1',status:'completed',summary:'Listed /tmp'});
+
+  const card=events.filter(event=>event.type==='tool'&&event.id==='agent-1');
+  // The placeholder result must not settle a card whose work has not started.
+  assert.equal(card.find(event=>event.text==='Async agent launched successfully.').status,'running');
+  const activity=card.map(event=>event.activity).filter(Boolean).join('\n');
+  assert.match(activity,/List \/tmp/);
+  assert.match(activity,/→ Bash/);
+  assert.match(activity,/Found 12 entries\./);
+  assert.equal(card.at(-1).status,'completed');
+  assert.ok(!events.some(event=>event.type==='message'),'subagent output never becomes a reply');
+  assert.ok(!events.some(event=>event.type==='turn'),'subagent output opens no turn of its own');
+});
+
+test('a subagent\'s calls nest under it, down through the subagents it starts',()=>{
+  const events=[];
+  const chat=Object.create(ClaudeChat.prototype);
+  chat.emit=event=>events.push(event);chat.tools=new Map([['agent-1','Agent']]);chat.active=undefined;
+  chat.notification({type:'assistant',parent_tool_use_id:'agent-1',message:{content:[{type:'tool_use',id:'agent-2',name:'Agent',input:{description:'inner'}}]}});
+  chat.notification({type:'assistant',parent_tool_use_id:'agent-2',message:{content:[{type:'tool_use',id:'read-1',name:'Read',input:{file_path:'/a'}}]}});
+  chat.notification({type:'user',parent_tool_use_id:'agent-2',message:{content:[{type:'tool_result',tool_use_id:'read-1',content:'contents'}]}});
+  const read=events.filter(event=>event.type==='tool'&&event.id==='read-1');
+  assert.deepEqual(read.map(event=>[event.parent,event.status]),[['agent-2','running'],['agent-2','completed']]);
+  assert.equal(read[1].text,'contents');
+  assert.equal(events.find(event=>event.id==='agent-2').parent,'agent-1');
+});
+
+test('task progress carries the client\'s counts and a summary only when it changes',()=>{
+  const events=[];
+  const chat=Object.create(ClaudeChat.prototype);
+  chat.emit=event=>events.push(event);chat.tools=new Map([['agent-1','Agent']]);
+  const progress=summary=>chat.notification({type:'system',subtype:'task_progress',task_id:'t1',tool_use_id:'agent-1',description:'x',usage:{total_tokens:3400,tool_uses:12,duration_ms:80000},...(summary?{summary}:{})});
+  progress('Reading the bridge');progress('Reading the bridge');progress();
+  assert.equal(events.length,3);
+  assert.deepEqual(events[0].stats,{tokens:3400,tools:12,ms:80000});
+  assert.equal(typeof events[0].at,'number');
+  assert.deepEqual(events.map(event=>event.activity),['Reading the bridge',undefined,undefined]);
+});
+
+test('subagent summaries switch on through a second initialize and are reported back',async()=>{
+  const events=[],calls=[];
+  const chat=Object.create(ClaudeChat.prototype);
+  chat.emit=event=>events.push(event);chat.port={rpc:async(method,params)=>{calls.push([method,params]);return {};}};
+  chat.summaries=false;
+  await chat.setSummaries({enabled:true});
+  assert.deepEqual(calls,[['initialize',{agentProgressSummaries:true}]]);
+  assert.equal(events.at(-1).type,'settings');
+  assert.equal(events.at(-1).subagent_summaries,true);
 });
 
 test('a turn Claude starts by itself, after a background command finished, is shown rather than dropped',()=>{
