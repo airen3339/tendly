@@ -1057,7 +1057,7 @@ async fn supervise<A: ClientAdapter>(
     }
 }
 
-fn normalize_event(mut value: Value) -> Option<Value> {
+pub(crate) fn normalize_event(mut value: Value) -> Option<Value> {
     let object = value.as_object_mut()?;
     let allowed: &[&str] = match object.get("type")?.as_str()? {
         "ready" => &["type", "native_session_id", "commands"],

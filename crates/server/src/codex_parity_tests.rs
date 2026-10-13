@@ -1,0 +1,561 @@
+//! The Rust Codex adapter against the Node bridge it replaces.
+//!
+//! Each scenario runs twice against the same synthetic app-server
+//! (`packages/native-bridge/fixtures/chat-cli.mjs`): once through `node
+//! chat.mjs` (BridgeAdapter) and once through CodexAdapter. Both must produce
+//! the same events, after the server's own validation, and send Codex the same
+//! messages. Approval ids are random, so they are compared by order of
+//! appearance; the scenario's directory is compared as a placeholder.
+use crate::chat_adapter::{BridgeAdapter, ChatCommand, ChatInit, ClientAdapter, dispatch};
+use crate::codex_chat::CodexAdapter;
+use serde_json::{Value, json};
+use std::{collections::BTreeMap, path::PathBuf, process::Stdio, time::Duration};
+
+/// One thing a scenario does.
+enum Step {
+    Send(Value),
+    /// Wait until an event matches.
+    Wait(fn(&Value) -> bool),
+    /// Wait until this many events match.
+    WaitCount(fn(&Value) -> bool, usize),
+    /// Answer the latest approval: the decision, and answers built from it.
+    Answer(&'static str, fn(&Value) -> Value),
+    Sleep(u64),
+}
+use Step::*;
+
+fn bridge_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packages/native-bridge")
+}
+
+/// What the fixture app-server needs in its environment, and a secret the
+/// output must never show.
+fn environment(log: &std::path::Path) -> BTreeMap<String, String> {
+    BTreeMap::from([
+        (
+            "AGENTDOCK_CHAT_TEST_LOG".to_owned(),
+            log.to_string_lossy().into_owned(),
+        ),
+        (
+            "AGENTDOCK_CHAT_TEST_INHERITED".to_owned(),
+            "kept".to_owned(),
+        ),
+        (
+            "AGENTDOCK_SECRET_TEST_CREDENTIAL".to_owned(),
+            "fixture-secret-value".to_owned(),
+        ),
+    ])
+}
+
+struct Run {
+    events: Vec<Value>,
+    native: Vec<Value>,
+}
+
+async fn drive<A: ClientAdapter>(
+    mut adapter: A,
+    init: ChatInit,
+    steps: &[Step],
+    log: &std::path::Path,
+) -> Run {
+    let mut events = Vec::new();
+    adapter.start(&init).await.expect("start");
+    let next = async |adapter: &mut A, events: &mut Vec<Value>, wait: Duration| -> bool {
+        match tokio::time::timeout(wait, adapter.next_event()).await {
+            Ok(Some(Ok(event))) => {
+                if let Some(event) = crate::conversations::normalize_event(event) {
+                    events.push(event);
+                }
+                true
+            }
+            _ => false,
+        }
+    };
+    // Ready, and the models app-server lists, before anything is asked of it.
+    while !events
+        .iter()
+        .any(|e: &Value| e["type"] == "settings" && e.get("models").is_some())
+    {
+        assert!(
+            next(&mut adapter, &mut events, Duration::from_secs(5)).await,
+            "no models announced: {events:?}"
+        );
+    }
+    for step in steps {
+        match step {
+            Send(command) => dispatch(&mut adapter, ChatCommand::parse(command).expect("command"))
+                .await
+                .expect("sent"),
+            Answer(decision, answers) => {
+                let approval = events
+                    .iter()
+                    .rev()
+                    .find(|e| e["type"] == "approval")
+                    .expect("an approval")
+                    .clone();
+                let command = json!({"type":"approval","request_id":approval["id"],"decision":decision,"answers":answers(&approval)});
+                dispatch(&mut adapter, ChatCommand::parse(&command).expect("answer"))
+                    .await
+                    .expect("sent");
+            }
+            Wait(predicate) => {
+                while !events.iter().any(predicate) {
+                    assert!(
+                        next(&mut adapter, &mut events, Duration::from_secs(5)).await,
+                        "timed out: {events:?}"
+                    );
+                }
+            }
+            WaitCount(predicate, count) => {
+                while events.iter().filter(|e| predicate(e)).count() < *count {
+                    assert!(
+                        next(&mut adapter, &mut events, Duration::from_secs(5)).await,
+                        "timed out: {events:?}"
+                    );
+                }
+            }
+            Sleep(ms) => {
+                let until = tokio::time::Instant::now() + Duration::from_millis(*ms);
+                while tokio::time::Instant::now() < until {
+                    next(
+                        &mut adapter,
+                        &mut events,
+                        until - tokio::time::Instant::now(),
+                    )
+                    .await;
+                }
+            }
+        }
+    }
+    // Whatever follows the last step, so a late event is compared too.
+    while next(&mut adapter, &mut events, Duration::from_millis(400)).await {}
+    adapter.shutdown().await;
+    let native = std::fs::read_to_string(log)
+        .unwrap_or_default()
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| serde_json::from_str(line).expect("log line"))
+        .collect();
+    Run { events, native }
+}
+
+/// Approval ids by order of appearance, and the run's directory as a placeholder.
+fn comparable(run: Run, dir: &str) -> (Vec<Value>, Vec<Value>) {
+    let mut ids: Vec<String> = Vec::new();
+    let mut seen = |id: &Value| -> Value {
+        let id = id.as_str().unwrap_or_default().to_owned();
+        let index = ids
+            .iter()
+            .position(|known| *known == id)
+            .unwrap_or_else(|| {
+                ids.push(id);
+                ids.len() - 1
+            });
+        json!(format!("approval#{index}"))
+    };
+    fn placeholder(value: Value, dir: &str) -> Value {
+        match value {
+            Value::String(text) => Value::String(text.replace(dir, "<dir>")),
+            Value::Array(items) => {
+                Value::Array(items.into_iter().map(|v| placeholder(v, dir)).collect())
+            }
+            Value::Object(object) => Value::Object(
+                object
+                    .into_iter()
+                    .map(|(k, v)| (k, placeholder(v, dir)))
+                    .collect(),
+            ),
+            other => other,
+        }
+    }
+    let events = run
+        .events
+        .into_iter()
+        .map(|mut event| {
+            if matches!(
+                event["type"].as_str(),
+                Some("approval" | "approval_resolved")
+            ) {
+                event["id"] = seen(&event["id"]);
+            }
+            placeholder(event, dir)
+        })
+        .collect();
+    let native = run
+        .native
+        .into_iter()
+        .map(|v| placeholder(v, dir))
+        .collect();
+    (events, native)
+}
+
+/// A fresh directory with the fixture app-server in it.
+fn scenario_dir(name: &str) -> PathBuf {
+    let dir =
+        std::env::temp_dir().join(format!("agentdock-parity-{name}-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let program = dir.join("chat-cli.mjs");
+    std::fs::copy(bridge_dir().join("fixtures/chat-cli.mjs"), &program).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    dir
+}
+
+fn init(dir: &std::path::Path, args: &[&str]) -> ChatInit {
+    ChatInit {
+        provider: "codex".into(),
+        program: dir.join("chat-cli.mjs").to_string_lossy().into_owned(),
+        args: args.iter().map(|a| a.to_string()).collect(),
+        cwd: dir.to_string_lossy().into_owned(),
+        resume_id: None,
+    }
+}
+
+async fn both(name: &str, args: &[&str], steps: &[Step]) {
+    let bridge = {
+        let dir = scenario_dir(&format!("{name}-bridge"));
+        let log = dir.join("native.jsonl");
+        let mut command = tokio::process::Command::new(crate::bridge::js_runtime());
+        command
+            .arg(bridge_dir().join("chat.mjs"))
+            .current_dir(&dir)
+            .envs(environment(&log))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .kill_on_drop(true);
+        agentdock_runtime::process::own_group(command.as_std_mut());
+        let adapter = BridgeAdapter::new(command.spawn().expect("node")).unwrap();
+        let run = drive(adapter, init(&dir, args), steps, &log).await;
+        let result = comparable(run, &dir.to_string_lossy());
+        let _ = std::fs::remove_dir_all(&dir);
+        result
+    };
+    let rust = {
+        let dir = scenario_dir(&format!("{name}-rust"));
+        let log = dir.join("native.jsonl");
+        let adapter = CodexAdapter::new(&environment(&log), &[]);
+        let run = drive(adapter, init(&dir, args), steps, &log).await;
+        let result = comparable(run, &dir.to_string_lossy());
+        let _ = std::fs::remove_dir_all(&dir);
+        result
+    };
+    let secret = |events: &[Value]| {
+        events
+            .iter()
+            .any(|e| e.to_string().contains("fixture-secret-value"))
+    };
+    assert!(
+        !secret(&bridge.0) && !secret(&rust.0),
+        "{name}: a secret reached the output"
+    );
+    assert_eq!(
+        rust.0, bridge.0,
+        "{name}: events differ (left: rust, right: bridge)"
+    );
+    assert_eq!(
+        rust.1, bridge.1,
+        "{name}: what Codex received differs (left: rust, right: bridge)"
+    );
+    assert!(!bridge.0.is_empty());
+}
+
+fn turn(event: &Value, id: &str, status: &str) -> bool {
+    event["type"] == "turn" && event["id"] == id && event["status"] == status
+}
+fn none(_: &Value) -> Value {
+    json!({})
+}
+fn brief(approval: &Value) -> Value {
+    json!({ approval["questions"][0]["id"].as_str().unwrap(): ["Brief"] })
+}
+
+#[tokio::test]
+async fn a_simple_turn() {
+    both(
+        "simple",
+        &[],
+        &[
+            Send(json!({"type":"message","id":"one","content":"simple"})),
+            Wait(|e| turn(e, "one", "completed")),
+        ],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn declining_an_approval() {
+    both(
+        "decline",
+        &[],
+        &[
+            Send(json!({"type":"message","id":"approve","content":"approve"})),
+            Wait(|e| e["type"] == "approval"),
+            Answer("decline", none),
+            Wait(|e| turn(e, "approve", "completed")),
+        ],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn accepting_then_cancelling() {
+    both(
+        "accept-cancel",
+        &[],
+        &[
+            Send(json!({"type":"message","id":"accept","content":"approve"})),
+            Wait(|e| e["type"] == "approval"),
+            Answer("accept", none),
+            Wait(|e| turn(e, "accept", "completed")),
+            Send(json!({"type":"message","id":"cancel","content":"approve"})),
+            WaitCount(|e| e["type"] == "approval", 2),
+            Answer("cancel", none),
+            Wait(|e| turn(e, "cancel", "interrupted")),
+        ],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn questions_and_their_answers() {
+    both(
+        "ask",
+        &[],
+        &[
+            Send(json!({"type":"message","id":"ask","content":"ask"})),
+            Wait(|e| e["type"] == "approval"),
+            Answer("accept", none),
+            Wait(|e| e["type"] == "error"),
+            Answer("accept", brief),
+            Wait(|e| turn(e, "ask", "completed")),
+        ],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn permissions_on_a_resumed_thread() {
+    both(
+        "permissions",
+        &["resume", "saved-thread"],
+        &[
+            Send(json!({"type":"message","id":"permissions","content":"permissions"})),
+            Wait(|e| e["type"] == "approval"),
+            Answer("decline", none),
+            Wait(|e| turn(e, "permissions", "completed")),
+        ],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn interrupting_a_turn_and_a_repeated_message() {
+    both(
+        "interrupt",
+        &[],
+        &[
+            Send(json!({"type":"message","id":"hold","content":"hold"})),
+            Wait(|e| e["type"] == "tool" && e["id"] == "hold-1"),
+            Send(json!({"type":"message","id":"hold","content":"hold"})),
+            Send(json!({"type":"interrupt"})),
+            Wait(|e| turn(e, "hold", "interrupted")),
+            Send(json!({"type":"message","id":"after","content":"simple"})),
+            Wait(|e| turn(e, "after", "completed")),
+        ],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn an_unsupported_request_fails_closed() {
+    both(
+        "unknown",
+        &[],
+        &[
+            Send(json!({"type":"message","id":"unknown","content":"unknown"})),
+            Wait(|e| e["type"] == "turn" && e["status"] == "failed"),
+        ],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn leaving_danger_restores_the_sandbox() {
+    both(
+        "sandbox",
+        &[],
+        &[
+            Send(json!({"type":"permission","mode":"danger"})),
+            Wait(|e| e["type"] == "settings" && e["permission_mode"] == "danger"),
+            Send(json!({"type":"message","id":"free","content":"simple"})),
+            Wait(|e| turn(e, "free", "completed")),
+            Send(json!({"type":"permission","mode":"ask"})),
+            Wait(|e| e["type"] == "settings" && e["permission_mode"] == "ask"),
+            Send(json!({"type":"message","id":"guarded","content":"simple"})),
+            Wait(|e| turn(e, "guarded", "completed")),
+            // A mode Codex has no equivalent of is refused in the bridge's words.
+            Send(json!({"type":"permission","mode":"plan"})),
+            Wait(|e| e["type"] == "error"),
+        ],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn file_changes_and_mcp_tools() {
+    both(
+        "tools",
+        &[],
+        &[
+            Send(json!({"type":"message","id":"tools","content":"tools"})),
+            Wait(|e| turn(e, "tools", "completed")),
+        ],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn choosing_a_model_and_a_depth() {
+    both(
+        "model",
+        &[],
+        &[
+            Send(json!({"type":"message","id":"before","content":"simple"})),
+            Wait(|e| turn(e, "before", "completed")),
+            Send(json!({"type":"model","model":"gpt-plain","effort":"high"})),
+            Wait(|e| e["type"] == "settings" && e["model"] == "gpt-plain"),
+            Send(json!({"type":"message","id":"after","content":"simple"})),
+            Wait(|e| turn(e, "after", "completed")),
+            Send(json!({"type":"message","id":"hold","content":"hold"})),
+            Wait(|e| e["type"] == "tool" && e["id"] == "hold-3"),
+            Send(json!({"type":"model","model":"gpt-fixture"})),
+            Wait(|e| e["type"] == "error"),
+            Send(json!({"type":"interrupt"})),
+            Wait(|e| turn(e, "hold", "interrupted")),
+        ],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn steering_the_running_turn() {
+    both(
+        "steer",
+        &[],
+        &[
+            Send(json!({"type":"message","id":"steer-a","content":"hold"})),
+            Wait(|e| turn(e, "steer-a", "running")),
+            Sleep(100),
+            Send(json!({"type":"steer","id":"steer-b","content":"also this"})),
+            Wait(|e| turn(e, "steer-a", "completed")),
+        ],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_turn_that_refuses_steering_passes_it_on() {
+    both(
+        "steer-refused",
+        &[],
+        &[
+            Send(json!({"type":"message","id":"steer-a","content":"review"})),
+            Wait(|e| turn(e, "steer-a", "running")),
+            Sleep(100),
+            Send(json!({"type":"steer","id":"steer-b","content":"afterwards"})),
+            Wait(|e| turn(e, "steer-b", "completed")),
+        ],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn steering_with_no_turn_running_is_a_message() {
+    both(
+        "steer-idle",
+        &[],
+        &[
+            Send(json!({"type":"steer","id":"lone","content":"simple"})),
+            Wait(|e| turn(e, "lone", "completed")),
+        ],
+    )
+    .await;
+}
+
+/// Everything an adapter says when its client cannot even be launched.
+async fn unlaunchable<A: ClientAdapter>(mut adapter: A, init: ChatInit) -> Vec<Value> {
+    adapter.start(&init).await.expect("start");
+    let mut events = Vec::new();
+    while let Ok(Some(Ok(event))) =
+        tokio::time::timeout(Duration::from_secs(5), adapter.next_event()).await
+    {
+        let done = event["type"] == "exit";
+        events.extend(crate::conversations::normalize_event(event));
+        if done {
+            break;
+        }
+    }
+    adapter.shutdown().await;
+    events
+}
+
+#[tokio::test]
+async fn a_client_that_cannot_start() {
+    let missing = |dir: &std::path::Path| {
+        let mut init = init(dir, &[]);
+        init.program = dir.join("no-such-program").to_string_lossy().into_owned();
+        init
+    };
+    let dir = scenario_dir("missing");
+    let mut command = tokio::process::Command::new(crate::bridge::js_runtime());
+    command
+        .arg(bridge_dir().join("chat.mjs"))
+        .current_dir(&dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+    let bridge = unlaunchable(
+        BridgeAdapter::new(command.spawn().expect("node")).unwrap(),
+        missing(&dir),
+    )
+    .await;
+    let rust = unlaunchable(CodexAdapter::new(&BTreeMap::new(), &[]), missing(&dir)).await;
+    assert_eq!(rust, bridge);
+    assert!(
+        bridge
+            .iter()
+            .any(|e| e["message"] == "Could not launch the configured native client."),
+        "{bridge:?}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn an_unusable_launch_option() {
+    let dir = scenario_dir("option");
+    let mut command = tokio::process::Command::new(crate::bridge::js_runtime());
+    command
+        .arg(bridge_dir().join("chat.mjs"))
+        .current_dir(&dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+    let bridge = unlaunchable(
+        BridgeAdapter::new(command.spawn().expect("node")).unwrap(),
+        init(&dir, &["--full-auto"]),
+    )
+    .await;
+    let rust = unlaunchable(
+        CodexAdapter::new(&BTreeMap::new(), &[]),
+        init(&dir, &["--full-auto"]),
+    )
+    .await;
+    assert_eq!(rust, bridge);
+    let _ = std::fs::remove_dir_all(&dir);
+}

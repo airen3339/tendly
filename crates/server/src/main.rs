@@ -13,6 +13,8 @@ mod chat_adapter;
 mod checkouts;
 mod clients;
 mod codex_chat;
+#[cfg(test)]
+mod codex_parity_tests;
 mod conversations;
 mod daemon;
 mod directories;
