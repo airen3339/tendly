@@ -558,6 +558,18 @@ impl Codex {
             };
             self.core.finish(status);
         }
+        self.pass_on(turn);
+    }
+    /// Steering written before a turn had an id, left over when that turn will
+    /// never take it -- Codex refused to start it, or finished it before
+    /// saying its id -- runs as the next turn, like steering a turn refused.
+    fn pass_on(&mut self, turn: usize) {
+        if self.core.turns[turn].interrupted || self.core.turns[turn].extra.early.is_empty() {
+            return;
+        }
+        let early = std::mem::take(&mut self.core.turns[turn].extra.early);
+        self.deferred.extend(early);
+        self.continue_deferred();
     }
     fn steer_turn(&mut self, id: String, content: String) {
         let Some(turn) = self.core.active else {
@@ -706,6 +718,7 @@ impl Codex {
             Then::StartTurn { turn } => match result {
                 Ok(result) => {
                     if self.core.active != Some(turn) {
+                        self.pass_on(turn);
                         return;
                     }
                     self.core.turns[turn].extra.native_turn =

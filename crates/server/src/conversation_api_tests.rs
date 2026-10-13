@@ -955,3 +955,97 @@ async fn a_session_starts_another_follows_its_reply_and_only_its_own() {
     );
     fixture.state.chats.shutdown().await;
 }
+
+/// A client that is ready at once and takes the adapter's full shutdown
+/// allowance (NativeAdapter waits up to 6 s for its task) to stop.
+struct SlowToStop {
+    ready: bool,
+}
+impl crate::chat_adapter::ClientAdapter for SlowToStop {
+    fn pid(&self) -> Option<u32> {
+        None
+    }
+    async fn start(
+        &mut self,
+        _: &crate::chat_adapter::ChatInit,
+    ) -> std::result::Result<(), crate::chat_adapter::Failure> {
+        Ok(())
+    }
+    async fn message(
+        &mut self,
+        _: String,
+        _: String,
+    ) -> std::result::Result<(), crate::chat_adapter::Failure> {
+        Ok(())
+    }
+    async fn steer(
+        &mut self,
+        _: String,
+        _: String,
+    ) -> std::result::Result<(), crate::chat_adapter::Failure> {
+        Ok(())
+    }
+    async fn approve(
+        &mut self,
+        _: String,
+        _: crate::chat_adapter::Decision,
+        _: Option<crate::chat_adapter::Answers>,
+    ) -> std::result::Result<(), crate::chat_adapter::Failure> {
+        Ok(())
+    }
+    async fn interrupt(&mut self) -> std::result::Result<(), crate::chat_adapter::Failure> {
+        Ok(())
+    }
+    async fn set_model(
+        &mut self,
+        _: Option<String>,
+        _: Option<String>,
+    ) -> std::result::Result<(), crate::chat_adapter::Failure> {
+        Ok(())
+    }
+    async fn set_permission_mode(
+        &mut self,
+        _: String,
+    ) -> std::result::Result<(), crate::chat_adapter::Failure> {
+        Ok(())
+    }
+    async fn next_event(
+        &mut self,
+    ) -> Option<std::result::Result<Value, crate::chat_adapter::Failure>> {
+        if !self.ready {
+            self.ready = true;
+            return Some(Ok(json!({"type":"ready"})));
+        }
+        std::future::pending().await
+    }
+    async fn shutdown(self) {
+        tokio::time::sleep(std::time::Duration::from_secs(6)).await;
+    }
+}
+
+/// Stopping a conversation waits for a client that uses the whole time its
+/// adapter allows to shut down, instead of answering "still shutting down"
+/// while it is still on its way out -- which made a restart fail.
+#[tokio::test]
+async fn stopping_waits_for_a_client_that_takes_its_full_shutdown_time() {
+    let fixture = chat_fixture();
+    let id = new_chat(&fixture).await;
+    let session = session_record(&fixture.state, id).await.unwrap();
+    let init = crate::chat_adapter::ChatInit {
+        provider: "codex".into(),
+        program: "codex".into(),
+        args: Vec::new(),
+        cwd: fixture.path.to_string_lossy().into_owned(),
+        resume_id: None,
+    };
+    crate::conversations::run_adapter(&fixture.state, &session, SlowToStop { ready: false }, init)
+        .await
+        .expect("started");
+    let started = std::time::Instant::now();
+    let stopped = fixture.state.chats.stop(session.id).await;
+    assert!(
+        stopped.is_ok(),
+        "stop gave up after {:?}",
+        started.elapsed()
+    );
+}

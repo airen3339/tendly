@@ -34,6 +34,8 @@ use tokio::{
 pub const MAX_NATIVE_LINE: usize = 4 * 1024 * 1024;
 pub const MAX_TEXT: usize = 64 * 1024;
 pub const MAX_EVENT_LINE: usize = 192 * 1024;
+/// Events sent and not yet taken, past which a conversation stops (chat.mjs).
+const MAX_UNSENT: usize = 4 * 1024 * 1024;
 const MAX_NATIVE_TOTAL: usize = 128 * 1024 * 1024;
 const LINE_TIMEOUT: Duration = Duration::from_secs(10);
 pub const RPC_TIMEOUT: Duration = Duration::from_secs(30);
@@ -295,6 +297,10 @@ pub struct Core<T, R, X> {
     finished: bool,
     /// An event too long for the wire: the bridge's `emit` called `fatal`.
     oversized: bool,
+    /// More than 4 MB of events sent and not yet taken: the conversation stops.
+    pub(crate) backlogged: bool,
+    /// Bytes of events sent and not yet taken by the adapter.
+    unsent: Arc<AtomicUsize>,
     pub native_session_id: Option<String>,
     pub permission_mode: Option<String>,
     /// The approval modes this client offers, reported with its settings.
@@ -352,6 +358,8 @@ impl<T, R, X: Default> Core<T, R, X> {
             initialized: false,
             finished: false,
             oversized: false,
+            backlogged: false,
+            unsent: Arc::new(AtomicUsize::new(0)),
             native_session_id: None,
             permission_mode: None,
             permission_modes: protocol.permission_modes,
@@ -362,14 +370,29 @@ impl<T, R, X: Default> Core<T, R, X> {
 
     /// `emit` in chat.mjs: redacted, and refused when the line is too long.
     pub fn emit(&mut self, event: Value) {
-        if self.finished || self.oversized {
+        if self.finished {
             return;
         }
         let event = scrub(event, &self.secrets);
         if stringify(&event).len() + 1 > MAX_EVENT_LINE {
-            self.oversized = true;
+            // `fatal` in the bridge: the error and the failed turn go out now,
+            // so a step that goes on to finish the turn cannot take its place;
+            // the loop closes the connection once this step is done.
+            if !self.oversized {
+                self.oversized = true;
+                self.error("Structured event exceeded its wire size limit.");
+                self.finish("failed");
+            }
             return;
         }
+        // The bridge stops when more than 4 MB of its output is unread, rather
+        // than buffer without bound; the loop shuts the conversation down.
+        if self.backlogged || self.unsent.load(Ordering::Acquire) > MAX_UNSENT {
+            self.backlogged = true;
+            return;
+        }
+        self.unsent
+            .fetch_add(stringify(&event).len() + 1, Ordering::AcqRel);
         let _ = self.events.send(event);
     }
     /// `ChatBase.error`: clipped to 2 KB.
@@ -1065,15 +1088,26 @@ pub trait NativeClient: Send + 'static {
 
 /// `jsonLines` over a client's stdout: bounded UTF-8 JSONL, with a deadline
 /// for a line left incomplete.
-async fn read_lines(mut stdout: tokio::process::ChildStdout, inputs: mpsc::UnboundedSender<Input>) {
+async fn read_lines(stdout: tokio::process::ChildStdout, inputs: mpsc::UnboundedSender<Input>) {
+    read_lines_within(stdout, inputs, LINE_TIMEOUT).await;
+}
+async fn read_lines_within<R: tokio::io::AsyncRead + Unpin>(
+    mut stdout: R,
+    inputs: mpsc::UnboundedSender<Input>,
+    line_timeout: Duration,
+) {
     let mut buffer: Vec<u8> = Vec::new();
     let mut total = 0usize;
     let mut bytes = vec![0u8; 64 * 1024];
+    // When the incomplete line began: the bridge sets its timer once, then,
+    // and clears it only when a line is complete.
+    let mut began: Option<Instant> = None;
     loop {
         let read = if buffer.is_empty() {
             stdout.read(&mut bytes).await
         } else {
-            match tokio::time::timeout(LINE_TIMEOUT, stdout.read(&mut bytes)).await {
+            let deadline = *began.get_or_insert_with(Instant::now) + line_timeout;
+            match tokio::time::timeout_at(deadline, stdout.read(&mut bytes)).await {
                 Ok(read) => read,
                 Err(_) => {
                     let _ = inputs.send(Input::Broken("Incomplete structured message timed out."));
@@ -1098,6 +1132,7 @@ async fn read_lines(mut stdout: tokio::process::ChildStdout, inputs: mpsc::Unbou
         }
         buffer.extend_from_slice(&bytes[..count]);
         while let Some(end) = buffer.iter().position(|b| *b == b'\n') {
+            began = None;
             let line: Vec<u8> = buffer.drain(..=end).collect();
             let line = String::from_utf8_lossy(&line[..line.len() - 1]).into_owned();
             if line.len() > MAX_NATIVE_LINE {
@@ -1133,8 +1168,9 @@ async fn run<C: NativeClient>(
     exited: &'static str,
 ) {
     loop {
-        if std::mem::take(&mut client.core().oversized) {
-            client.fatal("Structured event exceeded its wire size limit.");
+        // The error and the failed turn were emitted with the oversized event.
+        if std::mem::take(&mut client.core().oversized) || client.core().backlogged {
+            client.shutdown();
         }
         if client.core().closed {
             break;
@@ -1188,6 +1224,7 @@ pub struct Protocol {
 pub struct NativeAdapter {
     inputs: mpsc::UnboundedSender<Input>,
     events: mpsc::UnboundedReceiver<Value>,
+    unsent: Arc<AtomicUsize>,
     pid: Arc<std::sync::Mutex<Option<u32>>>,
     task: Option<tokio::task::JoinHandle<()>>,
     done: bool,
@@ -1213,10 +1250,12 @@ impl NativeAdapter {
             inputs.clone(),
             pid.clone(),
         );
+        let unsent = core.unsent.clone();
         let task = tokio::spawn(run(client(core), inputs_rx, protocol.exited));
         Self {
             inputs,
             events,
+            unsent,
             pid,
             task: Some(task),
             done: false,
@@ -1273,8 +1312,12 @@ impl ClientAdapter for NativeAdapter {
             return None;
         }
         let event = self.events.recv().await;
-        if event.is_none() {
-            self.done = true;
+        match &event {
+            Some(event) => {
+                self.unsent
+                    .fetch_sub(stringify(event).len() + 1, Ordering::AcqRel);
+            }
+            None => self.done = true,
         }
         event.map(Ok)
     }
@@ -1332,6 +1375,125 @@ mod tests {
 
     /// A timeout whose answer cannot be sent is reported once, like the
     /// bridge's one-shot timer, instead of firing again on every loop.
+    /// An event too large to send fails the turn there and then, as the bridge's
+    /// `fatal` did: the turn ends "failed" even when the same step goes on to
+    /// finish it, and nothing it emits afterwards is silently lost.
+    /// A line left incomplete times out once, from when it began, as the
+    /// bridge's timer does: a client trickling bytes into it cannot keep it
+    /// open forever.
+    #[tokio::test]
+    async fn an_incomplete_line_times_out_from_when_it_began() {
+        use tokio::io::AsyncWriteExt;
+        let (mut writer, reader) = tokio::io::duplex(1024);
+        let (inputs, mut received) = mpsc::unbounded_channel();
+        tokio::spawn(read_lines_within(
+            reader,
+            inputs,
+            Duration::from_millis(300),
+        ));
+        let started = std::time::Instant::now();
+        writer.write_all(b"{").await.unwrap();
+        // A byte every 100ms: well inside the timeout each time.
+        let trickle = tokio::spawn(async move {
+            for _ in 0..30 {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                if writer.write_all(b" ").await.is_err() {
+                    break;
+                }
+            }
+        });
+        let broken = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                match received.recv().await {
+                    Some(Input::Broken(message)) => break message,
+                    Some(_) => {}
+                    None => break "",
+                }
+            }
+        })
+        .await;
+        trickle.abort();
+        assert_eq!(
+            broken.ok(),
+            Some("Incomplete structured message timed out.")
+        );
+        assert!(started.elapsed() < Duration::from_millis(1000));
+    }
+
+    /// Events nobody takes stop piling up past 4 MB, as the bridge stops when
+    /// its output backs up: the conversation is shut down instead of the
+    /// server's memory growing without bound.
+    #[test]
+    fn a_backlog_of_unread_events_stops_growing() {
+        let (events_tx, mut events) = mpsc::unbounded_channel();
+        let (inputs, _inputs_rx) = mpsc::unbounded_channel();
+        let protocol = Protocol {
+            frame: json_rpc_frame,
+            reply: |_| None,
+            client_name: "Fixture",
+            exited: "Fixture exited.",
+            permission_modes: None,
+        };
+        let mut core: Core<(), (), ()> = Core::new(
+            &BTreeMap::new(),
+            &[],
+            &protocol,
+            events_tx,
+            inputs,
+            Arc::new(std::sync::Mutex::new(None)),
+        );
+        let chunk = "x".repeat(180 * 1024);
+        for _ in 0..32 {
+            core.emit(json!({"type":"tool","text":chunk}));
+        }
+        let mut bytes = 0;
+        while let Ok(event) = events.try_recv() {
+            bytes += stringify(&event).len() + 1;
+        }
+        assert!(
+            bytes <= 4 * 1024 * 1024 + 192 * 1024,
+            "{bytes} bytes queued"
+        );
+        assert!(core.backlogged, "the backlog did not stop the conversation");
+    }
+
+    #[test]
+    fn an_oversized_event_fails_its_turn_at_once() {
+        let (events_tx, mut events) = mpsc::unbounded_channel();
+        let (inputs, _inputs_rx) = mpsc::unbounded_channel();
+        let protocol = Protocol {
+            frame: json_rpc_frame,
+            reply: |_| None,
+            client_name: "Fixture",
+            exited: "Fixture exited.",
+            permission_modes: None,
+        };
+        let mut core: Core<(), (), ()> = Core::new(
+            &BTreeMap::new(),
+            &[],
+            &protocol,
+            events_tx,
+            inputs,
+            Arc::new(std::sync::Mutex::new(None)),
+        );
+        core.open_turn("turn".into());
+        core.emit(json!({"type":"tool","text":"x".repeat(MAX_EVENT_LINE)}));
+        // The same step then finishes the turn, as a handler does.
+        core.finish("completed");
+        let mut seen = Vec::new();
+        while let Ok(event) = events.try_recv() {
+            seen.push(event);
+        }
+        assert!(
+            seen.iter()
+                .any(|e| e["message"] == "Structured event exceeded its wire size limit."),
+            "{seen:?}"
+        );
+        let turns: Vec<&Value> = seen.iter().filter(|e| e["type"] == "turn").collect();
+        assert_eq!(turns.len(), 1, "{seen:?}");
+        assert_eq!(turns[0]["status"], "failed");
+    }
+
     #[test]
     fn an_approval_times_out_once_even_when_its_answer_cannot_be_sent() {
         let (events_tx, mut events) = mpsc::unbounded_channel();

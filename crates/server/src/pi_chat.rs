@@ -164,6 +164,14 @@ enum Then {
     Abort {
         turn: usize,
     },
+    /// Pi's state after a model or depth change: what it actually runs.
+    Follow,
+    /// Pi's state after it answered a prompt whose run has not started.
+    Idle {
+        turn: usize,
+    },
+    /// A request whose answer changes nothing.
+    Ignore,
 }
 
 /// How an extension's dialog is answered.
@@ -183,6 +191,8 @@ struct Pi {
     message_count: u64,
     assistant_id: Option<String>,
     failed: bool,
+    /// The turn whose run Pi has started (agent_start), if any.
+    started: Option<usize>,
 }
 
 impl Pi {
@@ -286,7 +296,10 @@ impl Pi {
                     false,
                 );
             }
-            None => self.report(),
+            // Pi clamps a level its model cannot use, and a new model brings
+            // the level it allows, both without saying so: what it runs is
+            // what get_state says.
+            None => self.rpc("get_state", json!({}), Then::Follow, true),
         }
     }
     fn send_message(&mut self, id: String, content: String) {
@@ -376,18 +389,50 @@ impl Pi {
             Then::SetThinking { effort } => match result {
                 Ok(_) => {
                     self.effort = Some(effort);
-                    self.report();
+                    self.set_thinking(None);
                 }
                 Err(message) => self.core.raw_error(&message),
             },
             Then::Prompt { turn } => {
-                if let Err(message) = result
-                    && self.core.active == Some(turn)
-                {
-                    self.core.error(&message);
-                    self.core.finish("failed");
+                if let Err(message) = result {
+                    if self.core.active == Some(turn) {
+                        self.core.error(&message);
+                        self.core.finish("failed");
+                    }
+                    return;
+                }
+                // Pi answers a prompt an extension handled -- its command, or
+                // its input handler -- and starts no run, so no agent_settled
+                // will end this turn. A real run is already under way when Pi
+                // answers (isStreaming), so a turn whose run has not started
+                // and that Pi says is not streaming is over. Asked after every
+                // prompt, so the answer does not hang on whether Pi's
+                // agent_start was read before its reply.
+                if self.core.active == Some(turn) {
+                    self.rpc("get_state", json!({}), Then::Idle { turn }, true);
                 }
             }
+            Then::Idle { turn } => {
+                if let Ok(state) = result
+                    && self.core.active == Some(turn)
+                    && self.started != Some(turn)
+                    && state.get("isStreaming") == Some(&Value::Bool(false))
+                {
+                    let status = if self.core.turns[turn].interrupted {
+                        "interrupted"
+                    } else {
+                        "completed"
+                    };
+                    self.core.finish(status);
+                }
+            }
+            Then::Follow => {
+                if let Ok(state) = result {
+                    self.follow(&state);
+                }
+                self.report();
+            }
+            Then::Ignore => {}
             Then::Steer => {
                 if let Err(message) = result {
                     self.core.error(&message);
@@ -412,13 +457,24 @@ impl Pi {
         }
         // A run Pi starts by itself -- a queued follow-up, a retry -- is shown
         // like any other rather than dropped.
+        // An interrupt that came before the run started found nothing to
+        // stop: stop the run now that it has.
+        if kind == "agent_start"
+            && let Some(turn) = self.core.active
+        {
+            self.started = Some(turn);
+            if self.core.turns[turn].interrupted {
+                self.rpc("abort", json!({}), Then::Ignore, false);
+            }
+            return;
+        }
         if kind == "agent_start" && self.core.active.is_none() {
             self.message_count += 1;
             let millis = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |d| d.as_millis());
             let id = format!("pi-{millis}-{}", self.message_count);
-            self.core.open_turn(id.clone());
+            self.started = Some(self.core.open_turn(id.clone()));
             self.core
                 .emit(json!({"type":"turn","id":id,"status":"running"}));
             return;
@@ -676,6 +732,7 @@ pub fn adapter(env: &BTreeMap<String, String>, env_remove: &[String]) -> NativeA
             message_count: 0,
             assistant_id: None,
             failed: false,
+            started: None,
         },
     )
 }

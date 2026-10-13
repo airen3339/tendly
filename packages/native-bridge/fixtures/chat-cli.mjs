@@ -49,6 +49,17 @@ for await(const line of createInterface({input:process.stdin})) {
       setTimeout(()=>{send({id,result:{turn:{id:current,status:'inProgress'}}});native('turn/started',{threadId:thread,turn:{id:current}});native('item/started',{threadId:thread,turnId:current,item:{id:item,type:'commandExecution',command:'fixture wait',status:'inProgress'}});},300);
       continue;
     }
+    // `slowfail` refuses the turn late; `racing` runs the whole turn before
+    // answering turn/start. Either way a steer written meanwhile has no turn
+    // to join and must be passed on, not lost.
+    if(message.method==='turn/start'&&message.params.input[0].text==='slowfail'){
+      const id=message.id;setTimeout(()=>send({id,error:{code:-32603,message:'Turn could not start.'}}),300);continue;
+    }
+    if(message.method==='turn/start'&&message.params.input[0].text==='racing'){
+      turn++;activeTurn='turn-'+turn;mode='';const id=message.id,current=activeTurn;
+      setTimeout(()=>{native('turn/started',{threadId:thread,turn:{id:current}});native('turn/completed',{threadId:thread,turn:{id:current,status:'completed'}});send({id,result:{turn:{id:current,status:'inProgress'}}});},300);
+      continue;
+    }
     if(message.method==='turn/start'){
       turn++;activeTurn='turn-'+turn;mode=message.params.input[0].text;send({id:message.id,result:{turn:{id:activeTurn,status:'inProgress'}}});native('turn/started',{threadId:thread,turn:{id:activeTurn}});
       if(mode==='hold'||mode==='review'){native('item/started',{threadId:thread,turnId:activeTurn,item:{id:'hold-'+turn,type:'commandExecution',command:'fixture wait',status:'inProgress'}});continue;}

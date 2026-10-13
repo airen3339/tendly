@@ -76,12 +76,24 @@ export class PiChat extends ChatBase {
       if(Number.isSafeInteger(model?.contextWindow))this.window=model.contextWindow;
     }
     if(message.effort){await this.port.rpc('set_thinking_level',{level:message.effort});this.effort=message.effort;}
+    // Pi clamps a level its model cannot use, and a new model brings the level
+    // it allows, both without saying so: what it runs is what get_state says.
+    this.follow(await this.port.rpc('get_state',{},true).catch(()=>undefined));
     this.report();
   }
   async message(message) {
     const active=this.begin(message);if(!active)return;
     try{await this.port.rpc('prompt',{message:message.content});}
-    catch(error){if(this.active===active){this.error(error.message);this.finish('failed');}}
+    catch(error){if(this.active===active){this.error(error.message);this.finish('failed');return;}}
+    // Pi answers a prompt an extension handled -- its command, or its input
+    // handler -- and starts no run, so no agent_settled will end this turn.
+    // A real run is already under way when Pi answers (isStreaming), so a turn
+    // whose run has not started and that Pi says is not streaming is over.
+    // Asked after every prompt, so the answer does not hang on whether Pi's
+    // agent_start was read before its reply.
+    if(this.active!==active)return;
+    const state=await this.port.rpc('get_state',{},true).catch(()=>undefined);
+    if(this.active===active&&!active.started&&state?.isStreaming===false)this.finish(active.interrupted?'interrupted':'completed');
   }
   /** Written while a turn runs, it is delivered before Pi's next model call. */
   async steer(message) {
@@ -99,7 +111,10 @@ export class PiChat extends ChatBase {
     if(message.type==='extension_ui_request'){this.ask(message);return;}
     // A run Pi starts by itself -- a queued follow-up, a retry -- is shown
     // like any other rather than dropped.
-    if(message.type==='agent_start'&&!this.active){const id=`pi-${Date.now()}-${++this.messageCount}`;this.active={id,interrupted:false};this.emit({type:'turn',id,status:'running'});return;}
+    // An interrupt that came before the run started found nothing to stop:
+    // stop the run now that it has.
+    if(message.type==='agent_start'&&this.active){this.active.started=true;if(this.active.interrupted)void this.port.rpc('abort',{}).catch(()=>{});return;}
+    if(message.type==='agent_start'&&!this.active){const id=`pi-${Date.now()}-${++this.messageCount}`;this.active={id,interrupted:false,started:true};this.emit({type:'turn',id,status:'running'});return;}
     if(message.type==='agent_settled'){if(this.active)this.finish(this.active.interrupted?'interrupted':this.failed?'failed':'completed');this.failed=false;return;}
     if(!this.active)return;
     if(message.type==='message_start'&&message.message?.role==='assistant'){this.assistantId=`pi-assistant-${++this.messageCount}`;return;}

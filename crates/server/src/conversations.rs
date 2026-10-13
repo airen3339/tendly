@@ -38,6 +38,12 @@ pub struct ChatManager {
     /// instead of being refused.
     permissions: Arc<Mutex<HashMap<SessionId, String>>>,
 }
+/// How long stopping a conversation waits for it to end. Its supervisor may
+/// still be starting the client (an in-process adapter allows 5 s for that)
+/// and then stops it (6 s for the client's task), so a shorter wait reports
+/// "still shutting down" for a conversation that is ending normally.
+const STOP_WAIT: Duration = Duration::from_secs(12);
+
 pub struct ChatRuntime {
     commands: mpsc::Sender<Value>,
     stop: Notify,
@@ -95,7 +101,7 @@ impl ChatRuntime {
             return;
         }
         self.stop.notify_one();
-        let _ = tokio::time::timeout(Duration::from_secs(6), done).await;
+        let _ = tokio::time::timeout(STOP_WAIT, done).await;
     }
 }
 impl ChatManager {
@@ -312,7 +318,7 @@ pub async fn start_locked(state: &AppState, session: &Session) -> Result<Arc<Cha
 }
 
 /// Record, supervise and initialize a conversation on `adapter`.
-async fn run_adapter<A: ClientAdapter>(
+pub(crate) async fn run_adapter<A: ClientAdapter>(
     state: &AppState,
     session: &Session,
     adapter: A,

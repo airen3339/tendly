@@ -254,10 +254,13 @@ fn init_for(client: &Client, dir: &std::path::Path, args: &[&str]) -> ChatInit {
     }
 }
 
-async fn both(name: &str, args: &[&str], steps: &[Step]) {
-    both_for(&CODEX, name, args, steps).await;
+async fn both(name: &str, args: &[&str], steps: &[Step]) -> Vec<Value> {
+    both_for(&CODEX, name, args, steps).await
 }
-async fn both_for(client: &Client, name: &str, args: &[&str], steps: &[Step]) {
+/// Runs the scenario through the bridge and through the Rust adapter, asserts
+/// they match, and returns the events, so a scenario can also check that what
+/// both did is right -- they can agree on a bug.
+async fn both_for(client: &Client, name: &str, args: &[&str], steps: &[Step]) -> Vec<Value> {
     let bridge = {
         let dir = scenario_dir_for(client, &format!("{name}-bridge"));
         let log = dir.join("native.jsonl");
@@ -304,6 +307,7 @@ async fn both_for(client: &Client, name: &str, args: &[&str], steps: &[Step]) {
         "{name}: what Codex received differs (left: rust, right: bridge)"
     );
     assert!(!bridge.0.is_empty());
+    rust.0
 }
 
 fn turn(event: &Value, id: &str, status: &str) -> bool {
@@ -625,6 +629,39 @@ async fn steering_before_the_turn_has_an_id() {
 
 /// An interrupt sent before the turn has an id is held until it has one, and
 /// then stops that turn.
+/// A steer written before the turn has an id is not lost when that turn
+/// never takes it: Codex refusing the turn, or finishing it before answering
+/// turn/start. It runs as the next turn, like a steer a turn refused.
+#[tokio::test]
+async fn an_early_steer_survives_a_turn_that_fails_to_start() {
+    both(
+        "steer-early-failed",
+        &[],
+        &[
+            Send(json!({"type":"message","id":"first","content":"slowfail"})),
+            Send(json!({"type":"steer","id":"steer","content":"simple"})),
+            Wait(|e| turn(e, "first", "failed")),
+            Wait(|e| turn(e, "steer", "completed")),
+        ],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn an_early_steer_survives_a_turn_that_ends_before_its_id() {
+    both(
+        "steer-early-raced",
+        &[],
+        &[
+            Send(json!({"type":"message","id":"first","content":"racing"})),
+            Send(json!({"type":"steer","id":"steer","content":"simple"})),
+            Wait(|e| turn(e, "first", "completed")),
+            Wait(|e| turn(e, "steer", "completed")),
+        ],
+    )
+    .await;
+}
+
 #[tokio::test]
 async fn interrupting_before_the_turn_has_an_id() {
     both(
@@ -799,4 +836,79 @@ async fn pi_a_dropped_adapter_stops_pi() {
     }
     let _ = std::fs::remove_dir_all(&dir);
     assert!(!alive(), "Pi outlived its dropped adapter");
+}
+
+/// An extension command is run by the extension: Pi answers the prompt and
+/// starts no run, so no agent_settled ever comes. The turn must still end, or
+/// every later message is refused as "a turn is already running".
+#[tokio::test]
+async fn pi_an_extension_command_ends_its_turn() {
+    both_for(
+        &PI,
+        "pi-extension-command",
+        &[],
+        &[
+            Send(json!({"type":"message","id":"ext","content":"/skill:review"})),
+            Wait(|e| turn(e, "ext", "completed")),
+            Send(json!({"type":"message","id":"after","content":"hello"})),
+            Wait(|e| turn(e, "after", "completed")),
+        ],
+    )
+    .await;
+}
+
+/// Interrupting before Pi has started the run (its preflight) stops the run
+/// once it starts, instead of letting it run to the end as "interrupted".
+#[tokio::test]
+async fn pi_interrupting_before_the_run_starts() {
+    both_for(
+        &PI,
+        "pi-interrupt-early",
+        &[],
+        &[
+            Send(json!({"type":"message","id":"slow","content":"slowstart"})),
+            Send(json!({"type":"interrupt"})),
+            Wait(|e| turn(e, "slow", "interrupted")),
+            Send(json!({"type":"message","id":"after","content":"hello"})),
+            Wait(|e| turn(e, "after", "completed")),
+        ],
+    )
+    .await;
+}
+
+/// Pi clamps a depth its model cannot use, and a model change re-applies the
+/// level that model allows; the depth shown is the one Pi runs, not the one asked.
+#[tokio::test]
+async fn pi_the_depth_shown_is_the_one_pi_runs() {
+    let events = both_for(
+        &PI,
+        "pi-depth",
+        &[],
+        &[
+            // qwen-local does not reason: Pi runs it at `off`.
+            Send(json!({"type":"model","effort":"high"})),
+            Sleep(300),
+            Send(json!({"type":"model","model":"kunlun/zai-org/GLM-5.3","effort":"high"})),
+            Wait(|e| {
+                e["type"] == "settings"
+                    && e["model"] == "kunlun/zai-org/GLM-5.3"
+                    && e["effort"] == "high"
+            }),
+            Send(json!({"type":"model","model":"agentdock/qwen-local"})),
+            Wait(|e| e["type"] == "settings" && e["model"] == "agentdock/qwen-local"),
+            Sleep(300),
+        ],
+    )
+    .await;
+    let settings: Vec<&Value> = events.iter().filter(|e| e["type"] == "settings").collect();
+    assert!(
+        !settings
+            .iter()
+            .any(|e| e["model"] == "agentdock/qwen-local" && e.get("effort").is_some()),
+        "a depth was shown for a model Pi runs without one: {settings:?}"
+    );
+    assert_eq!(
+        settings.last().map(|e| e["model"].clone()),
+        Some(json!("agentdock/qwen-local"))
+    );
 }

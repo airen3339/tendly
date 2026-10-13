@@ -145,7 +145,17 @@ export class CodexChat extends ChatBase {
         // Steering written before the turn had an id waited for it.
         else for(const early of active.early.splice(0))await this.sendSteer(active,early);
       }
-    }catch(error){if(this.active===active){this.error(error.message);this.finish(active.interrupted?'interrupted':'failed');}}
+      else this.passOn(active);
+    }catch(error){if(this.active===active){this.error(error.message);this.finish(active.interrupted?'interrupted':'failed');}this.passOn(active);}
+  }
+  /**
+   * Steering written before a turn had an id, left over when that turn will
+   * never take it -- Codex refused to start it, or finished it before saying
+   * its id -- runs as the next turn, like steering a turn refused.
+   */
+  passOn(active) {
+    if(active.interrupted||!active.early.length)return;
+    this.deferred.push(...active.early.splice(0));this.continueDeferred();
   }
   /**
    * Codex steers through `turn/steer`, bound to the turn it was written for:
