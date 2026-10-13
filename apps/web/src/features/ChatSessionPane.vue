@@ -24,6 +24,7 @@ import { MarkdownContent } from './MarkdownContent';
 import { handoffArrivals, handoffTranscript } from './handoff';
 import { messageQueue, queuedContent, type QueuedMessage } from './message-queue';
 import { attachedImagePaths, lastChatSeq } from './chat-model';
+import { conversationCache } from './conversation-cache';
 import { filterModels, mergeModels, resolveModel, offeredModels } from './model-choices';
 import { openLightbox } from './image-lightbox';
 import { compactCount, descendants, dockRoots, inDock, isLive, lastLine, runningSubagents, stalledFor, toolRuns, toolRunNames, toolRunStatus, toolsById, type ToolRun } from './tool-runs';
@@ -655,11 +656,17 @@ async function load(consumeOpenIntent = false) {
   readController?.abort(); stream?.dispose(); readController = new AbortController();
   if (!mounted.value || !supported.value) { loading.value = false; return; }
   if (props.previewSnapshot) { updateSnapshot(props.previewSnapshot); loading.value = false; streamState.value = 'connected'; streamNotice.value = ''; error.value = ''; return; }
-  loading.value = true; error.value = ''; streamNotice.value = ''; streamState.value = 'connecting';
+  // A conversation shown before is shown again at once, and its socket
+  // resumes after the last event it holds: what happened meanwhile, and the
+  // session's state now, arrive in that greeting. No empty pane in between.
+  const cached = conversationCache.get(id);
+  if (cached) { events.value = cached.events; mode.value = cached.mode; running.value = cached.running; truncated.value = cached.truncated; void scrollToLatest(true); }
+  loading.value = !cached; error.value = ''; streamNotice.value = ''; streamState.value = 'connecting';
   try {
     // ensure only consumes the parent shell's explicit open intent. A normal
     // stopped-session remount has no permission to start a process.
     if (consumeOpenIntent) { await sessionConnections.ensure(props.session); if (own !== generation) return; emit('changed'); }
+    if (cached) { attach(id, own); return; }
     const snapshot = await request<unknown>('/sessions/' + encodeURIComponent(id) + '/conversation', { signal: readController.signal });
     if (!mounted.value || own !== generation || props.session.id !== id) return;
     updateSnapshot(snapshot);
@@ -678,6 +685,8 @@ watch([() => props.session.id, () => props.session.interaction_mode, () => props
   void load(props.consumeOpenIntent !== false && props.session.interaction_mode === 'structured');
 });
 watch(() => props.session.endpoint_profile_id, id => { if (!endpointConfirm.value) selectedProfile.value = id ?? ''; });
+// What this view shows is kept for when it is shown again (conversation-cache.ts).
+watch([events, mode, running, truncated], () => { if (!isPreview.value) conversationCache.remember(props.session.id, { events: events.value, mode: mode.value, running: running.value, truncated: truncated.value }); });
 onMounted(() => {
   mounted.value = true;
   if (!handoffArrivals.delete(props.session.id)) return;
