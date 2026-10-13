@@ -77,7 +77,8 @@ function select(next: SettingsSection) { if (next !== section.value) emit('navig
 .settings-nav{position:sticky;top:0;display:flex;flex-direction:column;gap:2px}
 .settings-nav-item{display:flex;align-items:center;gap:10px;width:100%;min-height:38px;text-align:left;padding:8px 10px;border:0;border-radius:var(--radius-md);background:none;color:var(--ink-soft);cursor:pointer;font:inherit}
 .settings-nav-item:hover{background:var(--fill);color:var(--ink)}
-.settings-nav-item.selected{background:var(--accent-soft);color:var(--accent-ink)}
+.settings-nav-item.selected{background:var(--selected);color:var(--ink)}
+.settings-nav-item.selected>svg:first-child{color:var(--accent)}
 .settings-nav-item strong{font-size:var(--text-md);font-weight:550;color:inherit}
 .settings-nav-item:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 .settings-page{min-width:0;max-width:820px}

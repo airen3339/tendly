@@ -13,7 +13,7 @@ const css = file => {
 
 test('the existing workspace palette remains the source for new conversation and account surfaces', () => {
   const shell = readFileSync(new URL('../styles.css', import.meta.url), 'utf8');
-  for (const token of ['--accent: #0c8376', '--accent-soft: #e7f4f0', '--violet: #7760b5', '--border: #e4e9ed', '--muted: #81909d', '--surface: #ffffff', '--teal: var(--accent)', '--teal-soft: var(--accent-soft)']) assert.ok(shell.includes(token), token);
+  for (const token of ['--accent: #0f7f70', '--accent-soft: #e3f1ec', '--violet: #7760b5', '--border: #e6e2da', '--muted: #817b72', '--surface: #fcfbf9', '--elevated: #ffffff', '--teal: var(--accent)', '--teal-soft: var(--accent-soft)']) assert.ok(shell.includes(token), token);
   for (const file of ['./ChatSessionPane.vue', './AccountsDialog.vue', './ChatPreview.vue']) {
     const style = css(file);
     for (const token of ['var(--teal)', 'var(--teal-soft)', 'var(--border)', 'var(--muted)', 'var(--surface)']) assert.ok(style.includes(token), `${file} reuses ${token}`);
@@ -41,11 +41,14 @@ test('provider orange and purple stay consistent with the existing colored tabs'
 test('chat retains mobile sizing and semantic warning/error colors within the original light palette', () => {
   const style = css('./ChatSessionPane.vue');
   assert.match(style, /\.chat-pane\{[^}]*background:var\(--surface\)/);
-  assert.match(style, /\.chat-send\{[^}]*background:var\(--teal\)/);
-  assert.match(style, /\.chat-composer\{[^}]*background:var\(--surface\)/);
+  // The send button is the one accent-filled control in the composer; the
+  // composer itself is a glass surface over the pane (styles.css --glass-surface).
+  assert.match(style, /\.chat-send\{[^}]*background:var\(--accent\)/);
+  assert.match(style, /\.chat-composer\{[^}]*background:var\(--glass-surface\)/);
   assert.ok(style.includes('min-height:44px'));
   assert.ok(style.includes('font-size:var(--input-text)'));
-  assert.ok(readFileSync(new URL('../styles.css', import.meta.url), 'utf8').includes('--input-text: 16px'));
+  // 16px is the floor that stops iOS zooming a focused field, whatever the text scale.
+  assert.ok(readFileSync(new URL('../styles.css', import.meta.url), 'utf8').includes('--input-text: max(16px,'));
   assert.ok(style.includes('safe-area-inset-bottom'));
   assert.ok(style.includes('#fffaee'));
   // The semantic error colour is unchanged; it is now named rather than repeated.

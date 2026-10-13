@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { setTerminalThemePreference, setThemePreference, terminalThemePreference, themePreference, type TerminalThemePreference, type ThemePreference } from './theme';
+import { CHAT_FONTS, INTERFACE_FONTS, PALETTES, TEXT_SCALES, chatFont, interfaceFont, palette, setChatFont, setInterfaceFont, setPalette, setTextScale, textScale, type ChatFont, type InterfaceFont, type Palette, type TextScale } from './appearance';
 import { desktopNotifications, notificationSupport, setDesktopNotifications } from './attention';
 import type { EndpointProfile } from '@agentdock/protocol';
 import ProviderIcon from './ProviderIcon.vue';
@@ -21,6 +22,10 @@ import { useI18n } from '../i18n';
 const props = defineProps<{ profiles: EndpointProfile[] }>();
 const { t, locale, setLocale } = useI18n();
 const PERMISSION_LABELS: Record<string, string> = { ask: 'Ask every time', plan: 'Plan first', accept_edits: 'Accept edits', danger: 'Never ask' };
+const PALETTE_LABELS: Record<Palette, string> = { dock: 'Dock · warm paper, teal', slate: 'Slate · cool grey, blue', ember: 'Ember · charcoal, coral' };
+const FONT_LABELS: Record<InterfaceFont, string> = { 'instrument-sans': 'Instrument Sans', inter: 'Inter', geist: 'Geist', 'dm-sans': 'DM Sans', system: 'System' };
+const CHAT_FONT_LABELS: Record<ChatFont, string> = { interface: 'Match interface', lora: 'Lora · serif', serif: 'System serif' };
+const SCALE_LABELS: Record<TextScale, string> = { small: 'Small', default: 'Default', large: 'Large', larger: 'Larger' };
 const loaded = ref(false), saving = ref(false), error = ref(''), saved = ref(false);
 const profilesFor = (provider: PreferenceProvider) => props.profiles.filter(profile => profile.provider === provider);
 /** A preference naming a deleted profile reads as none, and says so. */
@@ -95,14 +100,6 @@ async function revokeGrants() { try { hostGrants.value = await request('/host/gr
         <select :value="locale" :aria-label="t('Language')" @change="setLocale(($event.target as HTMLSelectElement).value === 'en' ? 'en' : 'zh-CN')"><option value="zh-CN" lang="zh-CN">中文</option><option value="en" lang="en">English</option></select>
       </label>
       <label class="preference-row">
-        <span><strong>{{ t('Appearance') }}</strong></span>
-        <select :value="themePreference" :aria-label="t('Appearance')" @change="setThemePreference(($event.target as HTMLSelectElement).value as ThemePreference)"><option value="system">{{ t('Match system') }}</option><option value="light">{{ t('Light') }}</option><option value="dark">{{ t('Dark') }}</option></select>
-      </label>
-      <label class="preference-row">
-        <span><strong>{{ t('Terminal appearance') }}</strong></span>
-        <select :value="terminalThemePreference" :aria-label="t('Terminal appearance')" @change="setTerminalThemePreference(($event.target as HTMLSelectElement).value as TerminalThemePreference)"><option value="interface">{{ t('Match interface') }}</option><option value="light">{{ t('Light') }}</option><option value="dark">{{ t('Dark') }}</option></select>
-      </label>
-      <label class="preference-row">
         <span><strong>{{ t('Desktop notifications') }}</strong><small>{{ t(notificationNote) }}</small></span>
         <select :value="desktopNotifications ? 'on' : 'off'" :disabled="!notificationsPossible" :aria-label="t('Desktop notifications')" @change="toggleNotifications(($event.target as HTMLSelectElement).value === 'on')"><option value="off">{{ t('Off') }}</option><option value="on">{{ t('On') }}</option></select>
       </label>
@@ -113,6 +110,42 @@ async function revokeGrants() { try { hostGrants.value = await request('/host/gr
     </article>
     <p v-if="!loaded" class="preferences-quiet">{{ t('Loading…') }}</p>
     <template v-else>
+      <!-- Light and dark are kept by the server with the other preferences;
+           the palette, faces and type size belong to this browser, like the
+           language: a phone and a desk may well differ. -->
+      <article class="preference-card appearance-card">
+        <header><span class="preference-mark general"><Icon name="image" :size="17"/></span><strong>{{ t('Appearance') }}</strong></header>
+        <label class="preference-row">
+          <span><strong>{{ t('Light or dark') }}</strong></span>
+          <select :value="themePreference" :aria-label="t('Light or dark')" @change="setThemePreference(($event.target as HTMLSelectElement).value as ThemePreference)"><option value="system">{{ t('Match system') }}</option><option value="light">{{ t('Light') }}</option><option value="dark">{{ t('Dark') }}</option></select>
+        </label>
+        <label class="preference-row">
+          <span><strong>{{ t('Terminal appearance') }}</strong></span>
+          <select :value="terminalThemePreference" :aria-label="t('Terminal appearance')" @change="setTerminalThemePreference(($event.target as HTMLSelectElement).value as TerminalThemePreference)"><option value="interface">{{ t('Match interface') }}</option><option value="light">{{ t('Light') }}</option><option value="dark">{{ t('Dark') }}</option></select>
+        </label>
+        <div class="preference-row preference-row-stack">
+          <span><strong>{{ t('Palette') }}</strong><small>{{ t('For this browser.') }}</small></span>
+          <div class="palette-choices" role="radiogroup" :aria-label="t('Palette')">
+            <button v-for="option in PALETTES" :key="option" type="button" role="radio" :class="['palette-choice', { selected: palette === option }]" :aria-checked="palette === option" :data-palette="option" @click="setPalette(option)">
+              <span class="palette-swatch" aria-hidden="true"><i class="swatch-bg"/><i class="swatch-surface"/><i class="swatch-accent"/></span>
+              <span class="palette-name">{{ t(PALETTE_LABELS[option]) }}</span>
+            </button>
+          </div>
+        </div>
+        <label class="preference-row">
+          <span><strong>{{ t('Interface font') }}</strong><small>{{ t('Chrome, lists and controls. Code stays in JetBrains Mono.') }}</small></span>
+          <select :value="interfaceFont" :aria-label="t('Interface font')" @change="setInterfaceFont(($event.target as HTMLSelectElement).value as InterfaceFont)"><option v-for="option in INTERFACE_FONTS" :key="option" :value="option">{{ t(FONT_LABELS[option]) }}</option></select>
+        </label>
+        <label class="preference-row">
+          <span><strong>{{ t('Conversation font') }}</strong><small>{{ t('Prose in the conversation only.') }}</small></span>
+          <select :value="chatFont" :aria-label="t('Conversation font')" @change="setChatFont(($event.target as HTMLSelectElement).value as ChatFont)"><option v-for="option in CHAT_FONTS" :key="option" :value="option">{{ t(CHAT_FONT_LABELS[option]) }}</option></select>
+        </label>
+        <label class="preference-row">
+          <span><strong>{{ t('Text size') }}</strong></span>
+          <select :value="textScale" :aria-label="t('Text size')" @change="setTextScale(($event.target as HTMLSelectElement).value as TextScale)"><option v-for="option in TEXT_SCALES" :key="option" :value="option">{{ t(SCALE_LABELS[option]) }}</option></select>
+        </label>
+        <p class="preference-sample" aria-hidden="true"><span class="sample-ui">{{ t('Interface text') }} · Aa 字体</span><span class="sample-chat">{{ t('The quick brown fox jumps over the lazy dog. 敏捷的棕色狐狸跳过懒狗。') }}</span><code>const dock = await connect(host);</code></p>
+      </article>
       <article v-for="provider in AGENT_CLIENTS" :key="provider" class="preference-card">
         <header><span :class="['preference-mark',provider]" :style="clientTone(provider)"><ProviderIcon :provider="provider" :size="17"/></span><strong>{{ providerLabel(provider) }}</strong></header>
         <label class="preference-row">
@@ -190,4 +223,23 @@ async function revokeGrants() { try { hostGrants.value = await request('/host/gr
 .preference-note.danger{color:var(--danger-ink)}
 @media(max-width:520px){.preference-row{flex-direction:column;align-items:stretch;gap:6px}.preference-row select{width:100%;height:40px}}
 .grant-path{display:block;margin-top:4px;font-family:var(--mono);font-size:var(--text-xs);color:var(--ink-soft);overflow-wrap:anywhere}
+.preference-row-stack{flex-direction:column;align-items:stretch;gap:10px}
+.palette-choices{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.palette-choice{display:flex;flex-direction:column;gap:8px;padding:8px;border:1px solid var(--line);border-radius:var(--radius-md);background:var(--surface);color:var(--ink-soft);font:inherit;font-size:var(--text-xs);text-align:left;cursor:pointer;transition:border-color var(--duration-fast),box-shadow var(--duration-fast),transform var(--duration-fast) var(--ease-out)}
+.palette-choice:hover{border-color:var(--line-strong);transform:translateY(-1px)}
+.palette-choice.selected{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);color:var(--ink)}
+.palette-name{font-weight:550;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* Each swatch paints its own palette's light tokens, whatever palette is active. */
+.palette-swatch{position:relative;display:block;height:44px;border-radius:var(--radius-sm);overflow:hidden;--sw-bg:#f2f0eb;--sw-surface:#fff;--sw-accent:#0f7f70;--sw-side:#ebe8e1}
+.palette-choice[data-palette="slate"] .palette-swatch{--sw-bg:#f1f3f6;--sw-side:#e9ecf1;--sw-accent:#2f6fdb}
+.palette-choice[data-palette="ember"] .palette-swatch{--sw-bg:#0e1015;--sw-side:#13151b;--sw-surface:#191c24;--sw-accent:#ff5c5c}
+.palette-swatch i{position:absolute;display:block}
+.swatch-bg{inset:0;background:linear-gradient(90deg,var(--sw-side) 0 30%,var(--sw-bg) 30%)}
+.swatch-surface{left:36%;right:8%;top:10px;bottom:0;border-radius:var(--radius-sm) var(--radius-sm) 0 0;background:var(--sw-surface);box-shadow:0 0 0 1px #0000000f}
+.swatch-accent{right:16%;bottom:8px;width:22px;height:8px;border-radius:999px;background:var(--sw-accent)}
+.preference-sample{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px;margin:4px 0 8px;padding:10px 12px;border-radius:var(--radius-md);background:var(--sunken);font-size:var(--text-sm);color:var(--ink-soft)}
+.sample-ui{font-weight:600;color:var(--ink)}
+.sample-chat{font-family:var(--font-chat);font-size:var(--text-base);color:var(--ink)}
+.preference-sample code{font-family:var(--mono);font-size:var(--text-xs);color:var(--muted)}
+@media(max-width:520px){.palette-choices{grid-template-columns:repeat(3,minmax(0,1fr))}}
 </style>

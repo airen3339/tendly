@@ -1,6 +1,8 @@
 import { createApp } from 'vue';
-import '@fontsource-variable/inter';
+import '@fontsource-variable/instrument-sans';
+import '@fontsource-variable/jetbrains-mono';
 import './features/theme';
+import './features/appearance';
 import ChatPreview from './features/ChatPreview.vue';
 import './styles.css';
 

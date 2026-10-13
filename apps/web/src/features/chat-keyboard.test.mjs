@@ -39,7 +39,9 @@ test('the composer uses compact desktop controls and restores touch targets on m
   const { readFile } = await import('node:fs/promises');
   // A Windows checkout may carry CRLF; the rules below match line by line.
   const source = (await readFile(new URL('./ChatSessionPane.vue', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
-  assert.match(source, /\.chat-composer\{margin:0 12px 8px;padding:8px 9px max\(5px,env\(safe-area-inset-bottom\)\);border-radius:var\(--radius-md\)\}/);
+  // The composer is centred under the thread (max-width 48rem); a narrow pane
+  // gives it the pane's width less a small gutter.
+  assert.match(source, /\.chat-composer\{width:calc\(100% - 24px\);margin:0 auto 8px;padding:8px 9px max\(5px,env\(safe-area-inset-bottom\)\);border-radius:var\(--radius-md\)\}/);
   // Endpoint and thinking depth are one shared chip control now, not a native
   // select, so their density contract lives with that primitive.
   const chip = await readFile(new URL('./ChipMenu.vue', import.meta.url), 'utf8');
@@ -78,7 +80,9 @@ test('the working indicator actually animates rather than showing three still do
   const spin = /@keyframes chat-spin\{[^}]*(?:\}[^@}]*)*?\}\}/.exec(source)[0];
   assert.ok(spin.split('transform:rotate').length - 1 >= 4, spin);
   assert.doesNotMatch(source, /animation:chat-spin [^;]*linear/);
-  assert.match(source, /\.chat-working-label\{animation:chat-breathe/);
+  // The label is a sweep of light across the words, the way a running tool
+  // row reads, rather than a fade that could pass for a stuck transition.
+  assert.match(source, /\.chat-working-label\{[^}]*animation:chat-text-shimmer/);
   // Motion is opt-out, like every other animation in this pane.
   const reduced = /@media\(prefers-reduced-motion:reduce\)\{[^}]*\}[^@]*/.exec(source)[0];
   assert.match(reduced, /\.chat-working-mark,\.chat-working-label\{animation:none\}/);

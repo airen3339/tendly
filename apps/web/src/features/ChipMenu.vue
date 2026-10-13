@@ -121,7 +121,7 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', onOutside); 
 .chip-menu.is-disabled>summary{cursor:not-allowed;opacity:.55}
 /* A set control is legible as set from across the row, not only once read:
    colour alone is a weak signal among four chips that otherwise match. */
-.chip-menu.is-active>summary{color:var(--teal);font-weight:600;background:var(--accent-soft);border-color:var(--ok-line)}
+.chip-menu.is-active>summary{color:var(--accent-ink);font-weight:600;background:var(--fill);border-color:var(--line)}
 .chip-menu.is-danger>summary,.chip-menu.is-danger.is-active>summary{color:#a85c4e;background:var(--danger-soft);border-color:#e6b5ad}
 .chip-menu.is-danger[open]>summary{background:var(--danger-soft);color:#8f4b3e}
 /* The mark names the control; the label says what it is set to. Together they
@@ -134,7 +134,7 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', onOutside); 
    what it is on the left, what it is set to on the right. */
 .chip-rows .chip-menu{width:100%}
 .chip-rows .chip-menu>summary{min-height:54px;gap:12px;padding:0 12px;border-radius:var(--radius-lg);background:none;border-color:transparent;font-size:var(--text-lg);color:var(--ink)}
-.chip-rows .chip-menu>summary:active,.chip-rows .chip-menu[open]>summary{background:var(--teal-soft)}
+.chip-rows .chip-menu>summary:active,.chip-rows .chip-menu[open]>summary{background:var(--selected)}
 .chip-rows .chip-menu>summary>svg:first-child{width:18px;height:18px}
 .chip-rows .chip-menu-caption{display:block;flex:1;min-width:0;font-weight:400;overflow:hidden;text-overflow:ellipsis}
 .chip-rows .chip-menu-label{flex:0 1 auto;max-width:55%;color:var(--ink-soft);font-size:var(--text-base);font-weight:400}
@@ -145,7 +145,7 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', onOutside); 
 .chip-rows .chip-menu-caret,.chip-rows .chip-menu[open] .chip-menu-caret{transform:none}
 .chip-menu-caret{transform:rotate(90deg);flex:0 0 auto;opacity:.55}
 .chip-menu[open] .chip-menu-caret{transform:rotate(-90deg)}
-.chip-menu-panel{position:fixed;bottom:var(--chip-bottom);left:var(--chip-left);z-index:60;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow-lg)}
+.chip-menu-panel{position:fixed;bottom:var(--chip-bottom);left:var(--chip-left);z-index:60;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow-lg),inset 0 1px 0 var(--card-highlight)}
 /* Density follows the pointing device, not the pane width: a narrow pane on a
    desktop is still a mouse. */
 @media(pointer:coarse){.chip-menu>summary{min-height:44px;border-radius:var(--radius-md);padding:0 10px;font-size:var(--text-xs)}}

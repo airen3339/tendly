@@ -42,7 +42,7 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKey));
 
 <style scoped>
 .page-shell:focus,.page-shell:focus-visible{outline:none}
-.page-shell{position:absolute;inset:0;z-index:20;display:flex;flex-direction:column;min-height:0;background:var(--bg);outline:0;animation:page-in var(--duration-normal) var(--ease-out)}
+.page-shell{position:absolute;inset:0;z-index:20;display:flex;flex-direction:column;min-height:0;background:var(--backdrop-glow) no-repeat,var(--bg);outline:0;animation:page-in var(--duration-normal) var(--ease-out)}
 .page-header{display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap;padding:var(--space-4) var(--space-6) var(--space-3);max-width:1180px;width:100%;margin:0 auto}
 .page-back{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 10px 0 6px;border:0;border-radius:var(--radius-md);background:none;color:var(--ink-soft);font-size:var(--text-sm);cursor:pointer}
 .page-back:hover{background:var(--fill);color:var(--ink)}
