@@ -31,9 +31,10 @@ for await(const line of createInterface({input:process.stdin})){
   // An extension command is handled by the extension: Pi answers the prompt
   // and runs nothing, so no agent_start or agent_settled follows.
   else if(command.type==='prompt'&&command.message.startsWith('/'))respond(command);
-  // A run that starts late, as after Pi's preflight; an abort before it starts
-  // finds nothing to stop, as on an idle Pi.
-  else if(command.type==='prompt'&&command.message==='slowstart'){respond(command);running=true;setTimeout(()=>{send({type:'agent_start'});holding=true;},300);}
+  // Pi answers a prompt once its preflight is done, and the run starts just
+  // after; an abort during the preflight finds nothing to stop, as on an
+  // idle Pi. Both late, so an interrupt always lands in the preflight.
+  else if(command.type==='prompt'&&command.message==='slowstart'){setTimeout(()=>{respond(command);running=true;setTimeout(()=>{send({type:'agent_start'});holding=true;},100);},300);}
   else if(command.type==='prompt'){
     respond(command);running=true;send({type:'agent_start'});
     if(command.message==='hold')holding=true;
