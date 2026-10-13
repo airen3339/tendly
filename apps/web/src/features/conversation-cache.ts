@@ -12,6 +12,8 @@ export interface CachedConversation {
   mode: 'structured';
   running: boolean;
   truncated: boolean;
+  /** The cursor to the history before these events, if any. */
+  older?: number;
 }
 
 /**
@@ -30,10 +32,10 @@ export function createConversationCache(limit = 50) {
       return entry;
     },
     /** Only a structured conversation that holds events: there is nothing to resume from otherwise. */
-    remember(id: string, entry: { events: ChatEvent[]; mode?: string; running: boolean; truncated: boolean }) {
+    remember(id: string, entry: { events: ChatEvent[]; mode?: string; running: boolean; truncated: boolean; older?: number }) {
       if (entry.mode !== 'structured' || lastChatSeq(entry.events) === undefined) return;
       entries.delete(id);
-      entries.set(id, { events: entry.events, mode: 'structured', running: entry.running, truncated: entry.truncated });
+      entries.set(id, { events: entry.events, mode: 'structured', running: entry.running, truncated: entry.truncated, ...(entry.older === undefined ? {} : { older: entry.older }) });
       while (entries.size > limit) entries.delete(entries.keys().next().value!);
     },
     forget(id: string) { entries.delete(id); },

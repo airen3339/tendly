@@ -7,6 +7,7 @@ import { AGENT_CLIENTS, agentClient } from './clients';
 import { sessionConnections } from './session-connection';
 import { createSessionStream, type SessionStreamState } from './session-stream';
 import { onPageReturn } from './page-return';
+import { parseConversationPage, prependChatEvents } from './chat-model';
 import { acknowledgeDraft, appendChatEvent, approvalPayloadAnswers, canClearContext, chatDrafts, createChatDraftStore, conversationView, isChatEvent, parseConversationSnapshot, pendingMessageRetry, pruneChatEvents, sessionConfigurationPayload, type ChatDraft, type ChatEvent, type ChatItem, type ConversationSnapshot, type NativeModel, type ToolItem, type ToolStats, type TurnUsage, SUBAGENT_TOOLS } from './chat-model';
 import ProviderIcon from './ProviderIcon.vue';
 import Icon from './Icon.vue';
@@ -25,6 +26,9 @@ import { handoffArrivals, handoffTranscript } from './handoff';
 import { messageQueue, queuedContent, type QueuedMessage } from './message-queue';
 import { attachedImagePaths, lastChatSeq } from './chat-model';
 import { conversationCache } from './conversation-cache';
+import { createFrameBatch } from './frame-batch';
+import { createStableRows } from './stable-items';
+import { useVirtualizer } from '@tanstack/vue-virtual';
 import { filterModels, mergeModels, resolveModel, offeredModels } from './model-choices';
 import { openLightbox } from './image-lightbox';
 import { compactCount, descendants, dockRoots, inDock, isLive, lastLine, runningSubagents, stalledFor, toolRuns, toolRunNames, toolRunStatus, toolsById, type ToolRun } from './tool-runs';
@@ -42,7 +46,7 @@ import { copyText, preserveNativeContextMenu } from './clipboard';
 
 const props = defineProps<{ paneId?: string; session: Session; profiles: EndpointProfile[]; previewSnapshot?: ConversationSnapshot; consumeOpenIntent?: boolean }>();
 const emit = defineEmits<{ changed: []; environment: [id: string]; renameRequest: [id: string]; legacy: []; profiles: []; openSession: [session: Session]; openFile: [reference: { path: string; line?: number; checkout?: string | null }] }>();
-const { t } = useI18n();
+const { t, locale } = useI18n();
 const isPreview = computed(() => props.previewSnapshot !== undefined);
 const capabilities = backendCapabilities as typeof backendCapabilities & { structuredChat?: boolean; sessionConfiguration?: boolean; sessionTerminalEscape?: boolean };
 const supported = computed(() => isPreview.value || capabilities.structuredChat === true);
@@ -69,6 +73,81 @@ const view = computed(() => conversationView(events.value, running.value));
 // A running subagent lives in the dock above the composer, not in the history;
 // it takes its place there once it is done.
 const displayItems = computed(() => toolRuns(running.value ? view.value.items.filter(item => !(item.type === 'tool' && inDock(item))) : view.value.items));
+// Rows keep their identity while unchanged (stable-items.ts), so with v-memo a
+// reply streaming into the last row re-renders that row, not the conversation.
+const stabilize = createStableRows();
+const rows = computed(() => stabilize(displayItems.value));
+/**
+ * The conversation is a window onto its rows, like OpenClaw's: only those near
+ * the viewport are in the page, between two spacers sized from the heights the
+ * others were measured at (or an estimate, until they are seen). Rows keep
+ * their measured height by key, so older history put in front shifts nothing.
+ */
+const rowsElement = ref<HTMLElement>(), rowsMargin = ref(0);
+const virtualizer = useVirtualizer(computed(() => ({
+  count: rows.value.rows.length,
+  getScrollElement: () => viewport.value ?? null,
+  estimateSize: () => 160,
+  overscan: 6,
+  getItemKey: (index: number) => rows.value.keys[index] ?? index,
+  scrollMargin: rowsMargin.value,
+  // A conversation opens at its newest rows: before the timeline has been
+  // measured (and when rendered on the server) the window is the last ones.
+  initialRect: { width: 0, height: 1200 },
+  initialOffset: Number.MAX_SAFE_INTEGER,
+})));
+const visibleRows = computed(() => virtualizer.value.getVirtualItems().map(virtual => ({ key: String(virtual.key), index: virtual.index, item: rows.value.rows[virtual.index]! })));
+const rowsPadding = computed(() => {
+  const items = virtualizer.value.getVirtualItems(), first = items[0], last = items[items.length - 1];
+  if (!first || !last) return { top: 0, bottom: 0 };
+  return { top: first.start - rowsMargin.value, bottom: Math.max(0, virtualizer.value.getTotalSize() - (last.end - rowsMargin.value)) };
+});
+const measureRow = (element: unknown) => { if (element instanceof Element) virtualizer.value.measureElement(element); };
+/** Where the rows begin inside the scrolled timeline, under what sits above them. */
+function measureRowsMargin() {
+  const el = viewport.value, rowsEl = rowsElement.value;
+  if (el && rowsEl) rowsMargin.value = Math.round(rowsEl.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop);
+}
+// Rows measured while the view follows the newest output keep it at the bottom.
+watch(() => virtualizer.value.getTotalSize(), () => { if (followBottom.value) void scrollToLatest(); });
+
+/** The cursor to the history before what the view holds, while there is any. */
+const older = ref<number | undefined>(), loadingOlder = ref(false), olderSentinel = ref<HTMLElement>();
+/** Reads the page before what the view holds, keeping the row in view where it was. */
+async function loadOlder() {
+  const id = props.session.id, own = generation, before = older.value, el = viewport.value;
+  if (loadingOlder.value || before === undefined || isPreview.value || !el) return;
+  loadingOlder.value = true;
+  try {
+    const page = parseConversationPage(await request<unknown>('/sessions/' + encodeURIComponent(id) + '/conversation?before=' + before));
+    if (own !== generation || props.session.id !== id || !mounted.value) return;
+    // The first row in view, and how far it sits below the top, before and after.
+    const anchor = virtualizer.value.getVirtualItems().find(item => item.end > el.scrollTop);
+    const anchorKey = anchor ? String(anchor.key) : undefined, anchorOffset = anchor ? anchor.start - el.scrollTop : 0;
+    events.value = prependChatEvents(page.events, events.value);
+    older.value = page.older;
+    await nextTick();
+    const index = anchorKey === undefined ? -1 : rows.value.keys.indexOf(anchorKey);
+    if (index >= 0) { const start = virtualizer.value.getOffsetForIndex(index, 'start')?.[0]; if (start !== undefined) el.scrollTop = start - anchorOffset; }
+    measureRowsMargin();
+  } catch { if (own === generation) notice.value = 'Could not load earlier messages.'; }
+  finally { if (own === generation) loadingOlder.value = false; }
+  // A short page may leave the top still in reach.
+  if (own === generation && older.value !== undefined && el.scrollTop < 1200) void loadOlder();
+}
+let olderObserver: IntersectionObserver | undefined;
+watch(olderSentinel, sentinel => {
+  olderObserver?.disconnect(); olderObserver = undefined;
+  if (!sentinel || !viewport.value || typeof IntersectionObserver !== 'function') return;
+  // Reached within 1200px of the top, the page before is read: it is there by the time it is scrolled to.
+  olderObserver = new IntersectionObserver(entries => { if (entries.some(entry => entry.isIntersecting)) void loadOlder(); }, { root: viewport.value, rootMargin: '1200px 0px 0px 0px' });
+  olderObserver.observe(sentinel);
+});
+onBeforeUnmount(() => olderObserver?.disconnect());
+// What sits above the rows -- the trimmed notice, the older-history marker,
+// the welcome -- moves where they begin.
+watch([truncated, () => older.value !== undefined, () => rows.value.rows.length === 0], () => { void nextTick(measureRowsMargin); });
+onMounted(() => { void nextTick(measureRowsMargin); });
 /** Images load from this session's workspace, through the server, and nowhere else. */
 const workspaceImage = (path: string) => assetUrl(props.session.workspace_id, path);
 const hostImage = (path: string) => `/api/host/raw?${new URLSearchParams({ path })}`;
@@ -604,15 +683,30 @@ const structuredSession = computed(() => mode.value === 'structured' || mode.val
 const booting = computed(() => !isPreview.value && supported.value && structuredSession.value && !view.value.ready && !error.value
   && (!!(entry.value as { pending?: unknown }).pending || running.value || loading.value && ['starting', 'running', 'waiting'].includes(props.session.status)));
 const statusLabel = computed(() => isPreview.value ? 'Read-only UI preview' : booting.value ? 'Starting {provider}…' : loading.value ? 'Loading conversation…' : view.value.awaitingApproval ? 'Waiting for your approval' : view.value.turn === 'running' ? 'Agent is working' : streamState.value === 'error' || streamState.value === 'disconnected' ? 'View disconnected' : mode.value === 'structured' ? 'Ready for your next idea' : 'Native client session');
-let generation = 0, readController: AbortController | undefined, stream: ReturnType<typeof createSessionStream> | undefined;
+let generation = 0, readController: AbortController | undefined, stream: ReturnType<typeof createSessionStream> | undefined, stopBatch = () => {};
 
 function atBottom() { const el = viewport.value; followBottom.value = !el || el.scrollHeight - el.scrollTop - el.clientHeight < 90; }
-async function scrollToLatest(force = false) { await nextTick(); const el = viewport.value; if (el && (force || followBottom.value) && (force || !window.getSelection()?.toString())) { el.scrollTop = el.scrollHeight; followBottom.value = true; } }
+/** Whether the person is selecting text in the conversation: following new output would pull it away. */
+function selectingInTimeline(el: HTMLElement) { const selection = window.getSelection(); return !!selection && !selection.isCollapsed && !!selection.anchorNode && el.contains(selection.anchorNode); }
+// Asked once a frame while a reply streams: the selection is only looked at,
+// never turned into text, which cost half the frame on a long conversation.
+async function scrollToLatest(force = false) {
+  await nextTick(); const el = viewport.value;
+  if (!el || !(force || followBottom.value) || (!force && selectingInTimeline(el))) return;
+  // The virtualizer goes to the last row and keeps correcting as the rows it
+  // brings in are measured; what follows the rows (the working line) is below.
+  const count = rows.value.rows.length;
+  if (count) virtualizer.value.scrollToIndex(count - 1, { align: 'end' });
+  el.scrollTop = el.scrollHeight; followBottom.value = true;
+}
 function updateSnapshot(raw: unknown) {
   const snapshot = parseConversationSnapshot(raw);
   // A resumed greeting carries only what follows the view's last event.
   const bounded = pruneChatEvents(snapshot.after === undefined ? snapshot.events : snapshot.events.reduce(appendChatEvent, events.value));
   mode.value = snapshot.mode; running.value = snapshot.running; truncated.value = !!snapshot.truncated || bounded.truncated; events.value = bounded.events;
+  // A latest page says where older history begins; a resumed greeting keeps the cursor the view had.
+  if (snapshot.after === undefined) older.value = snapshot.older;
+  if (bounded.dropped !== undefined) older.value = Math.max(older.value ?? 0, bounded.dropped + 1);
   acknowledgeDraft(draft.value, snapshot.events);
   if (!snapshot.running) clearAnswers();
   for (const event of snapshot.events) if (event.type === 'approval_resolved') clearAnswers(event.id);
@@ -621,6 +715,28 @@ function updateSnapshot(raw: unknown) {
 function attach(id: string, own: number) {
   stream?.dispose();
   const current = () => mounted.value && own === generation && props.session.id === id;
+  // A reply streams dozens of pieces a second: they are applied once a frame,
+  // in order, so the view is rebuilt once a frame rather than once a piece.
+  const batch = createFrameBatch<ChatEvent>(messages => {
+    if (!current()) return;
+    let next = events.value;
+    for (const message of messages) next = appendChatEvent(next, message);
+    const bounded = pruneChatEvents(next);
+    events.value = bounded.events; truncated.value ||= bounded.truncated;
+    if (bounded.dropped !== undefined) older.value = Math.max(older.value ?? 0, bounded.dropped + 1);
+    acknowledgeDraft(draft.value, events.value);
+    for (const message of messages) {
+      if (message.type === 'ready') { running.value = true; emit('changed'); }
+      if (message.type === 'exit') { running.value = false; emit('changed'); }
+      if (message.type === 'approval_resolved') clearAnswers(message.id);
+      if (message.type === 'configuration' || message.type === 'exit') clearAnswers();
+      // A turn starting is also worth reporting: the session takes its name from
+      // the message that opened it, and the sidebar is where that name is read.
+      if (message.type === 'turn') emit('changed');
+    }
+    void scrollToLatest();
+  });
+  stopBatch = () => batch.clear();
   stream = createSessionStream({
     createSocket: url => new WebSocket(url),
     // A dropped view re-attaches on its own; the server greets every socket
@@ -633,19 +749,11 @@ function attach(id: string, own: number) {
       if (!current() || typeof raw !== 'string') return;
       if (new TextEncoder().encode(raw).byteLength > 16 * 1024 * 1024) throw Error('Invalid conversation response.');
       const message: unknown = JSON.parse(raw);
-      if (message && typeof message === 'object' && (message as { type?: string }).type === 'snapshot') { updateSnapshot(message); return; }
+      // A snapshot replaces or extends what the queue builds on: what is
+      // waiting goes first, so nothing is applied out of order.
+      if (message && typeof message === 'object' && (message as { type?: string }).type === 'snapshot') { batch.flush(); updateSnapshot(message); return; }
       if (!isChatEvent(message)) throw Error('Invalid conversation response.');
-      const bounded = pruneChatEvents(appendChatEvent(events.value, message));
-      events.value = bounded.events; truncated.value ||= bounded.truncated;
-      acknowledgeDraft(draft.value, events.value);
-      if (message.type === 'ready') { running.value = true; emit('changed'); }
-      if (message.type === 'exit') { running.value = false; emit('changed'); }
-      if (message.type === 'approval_resolved') clearAnswers(message.id);
-      if (message.type === 'configuration' || message.type === 'exit') clearAnswers();
-      // A turn starting is also worth reporting: the session takes its name from
-      // the message that opened it, and the sidebar is where that name is read.
-      if (message.type === 'turn') emit('changed');
-      void scrollToLatest();
+      batch.push(message);
     },
   });
   const url = new URL('/api/sessions/' + encodeURIComponent(id) + '/chat/ws', window.location.href); url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -653,14 +761,14 @@ function attach(id: string, own: number) {
 }
 async function load(consumeOpenIntent = false) {
   const id = props.session.id, own = ++generation;
-  readController?.abort(); stream?.dispose(); readController = new AbortController();
+  readController?.abort(); stream?.dispose(); stopBatch(); readController = new AbortController();
   if (!mounted.value || !supported.value) { loading.value = false; return; }
   if (props.previewSnapshot) { updateSnapshot(props.previewSnapshot); loading.value = false; streamState.value = 'connected'; streamNotice.value = ''; error.value = ''; return; }
   // A conversation shown before is shown again at once, and its socket
   // resumes after the last event it holds: what happened meanwhile, and the
   // session's state now, arrive in that greeting. No empty pane in between.
   const cached = conversationCache.get(id);
-  if (cached) { events.value = cached.events; mode.value = cached.mode; running.value = cached.running; truncated.value = cached.truncated; void scrollToLatest(true); }
+  if (cached) { events.value = cached.events; mode.value = cached.mode; running.value = cached.running; truncated.value = cached.truncated; older.value = cached.older; void scrollToLatest(true); }
   loading.value = !cached; error.value = ''; streamNotice.value = ''; streamState.value = 'connecting';
   try {
     // ensure only consumes the parent shell's explicit open intent. A normal
@@ -681,12 +789,12 @@ async function load(consumeOpenIntent = false) {
 watch([() => props.session.id, () => props.session.interaction_mode, () => props.session.configuration_revision, () => entry.value.epoch, () => props.previewSnapshot, mounted, supported], () => {
   clearAnswers();
   wakeAttempted = ''; launchFallback.value = ''; handoffTarget.value = undefined;
-  mode.value = undefined; events.value = []; endpointConfirm.value = false; confirmEnd.value = false; approvalBusy.value = ''; actionBusy.value = false; notice.value = ''; selectedProfile.value = props.session.endpoint_profile_id ?? ''; followBottom.value = true;
+  mode.value = undefined; events.value = []; older.value = undefined; endpointConfirm.value = false; confirmEnd.value = false; approvalBusy.value = ''; actionBusy.value = false; notice.value = ''; selectedProfile.value = props.session.endpoint_profile_id ?? ''; followBottom.value = true;
   void load(props.consumeOpenIntent !== false && props.session.interaction_mode === 'structured');
 });
 watch(() => props.session.endpoint_profile_id, id => { if (!endpointConfirm.value) selectedProfile.value = id ?? ''; });
 // What this view shows is kept for when it is shown again (conversation-cache.ts).
-watch([events, mode, running, truncated], () => { if (!isPreview.value) conversationCache.remember(props.session.id, { events: events.value, mode: mode.value, running: running.value, truncated: truncated.value }); });
+watch([events, mode, running, truncated, older], () => { if (!isPreview.value) conversationCache.remember(props.session.id, { events: events.value, mode: mode.value, running: running.value, truncated: truncated.value, older: older.value }); });
 onMounted(() => {
   mounted.value = true;
   if (!handoffArrivals.delete(props.session.id)) return;
@@ -710,7 +818,7 @@ onMounted(() => {
     if (streamState.value === 'disconnected' || streamState.value === 'error') void load(); else stream?.wake(stale);
   });
 });
-onBeforeUnmount(() => { stopPageReturn(); mounted.value = false; generation++; readController?.abort(); stream?.dispose(); });
+onBeforeUnmount(() => { stopPageReturn(); mounted.value = false; generation++; readController?.abort(); stream?.dispose(); stopBatch(); });
 
 /** Focusing the composer is an intent to use this session, unlike restoring a
  * layout. Waking here is what makes the model list and the client's own
@@ -1088,13 +1196,16 @@ function keydown(event: KeyboardEvent) {
     <div ref="viewport" :class="['chat-timeline',{'is-empty':!view.items.length}]" role="log" :aria-label="t('Conversation messages')" aria-live="polite" :aria-busy="view.turn==='running'" @contextmenu="openTimelineMenu" @scroll="atBottom">
       <p v-if="truncated" class="chat-history-notice">{{ t('Earlier display history was trimmed. Native history remains managed by the official client.') }}</p>
       <div v-if="!view.items.length" class="chat-welcome"><span class="chat-welcome-mark"><ProviderIcon :provider="session.provider" :size="32" /></span><h3>{{ t('What shall we build?') }}</h3><p>{{ t('A real conversation with your native agent, with room for tools, changes and your next idea.') }}</p><span class="chat-context-chip" :title="activeProfile?(activeProfile.native_config?t('Uses the sign-in and settings in {path}',{path:activeProfile.native_config.config_dir}):undefined):t('A fresh, empty client home: no host sign-in or settings, so it may ask you to log in.')"><ProviderIcon :provider="session.provider" :size="12"/>{{ endpointName }}</span><Transition name="chat-boot" :duration="240"><p v-if="booting" class="chat-boot" role="status"><span class="chat-boot-bar"><i/></span>{{ t('Starting {provider}… models and commands arrive with it.',{provider:providerLabel(session.provider)}) }}</p></Transition><div v-if="startersAvailable" class="chat-starters"><button v-for="(starter,index) in STARTERS" :key="starter.title" type="button" :style="{'--starter-delay':index*60+'ms'}" @click="useStarter(starter.prompt)"><span class="chat-starter-icon" :data-tone="starter.icon"><Icon :name="starter.icon" :size="16"/></span><span><strong>{{ t(starter.title) }}</strong><small>{{ t(starter.note) }}</small></span></button></div><p v-if="chatNote" class="chat-trust-note">{{ t(chatNote) }}</p></div>
-      <template v-for="(item,index) in displayItems" :key="item.type+':'+index+':'+item.id">
+      <div v-if="older!==undefined" ref="olderSentinel" class="chat-history-older" role="status">{{ loadingOlder ? t('Loading earlier messages…') : '' }}</div>
+      <div ref="rowsElement" class="chat-rows" :style="{paddingTop:rowsPadding.top+'px',paddingBottom:rowsPadding.bottom+'px'}">
+      <div v-for="{ key, index, item } in visibleRows" :key="key" :data-index="index" :ref="measureRow" class="chat-row" v-memo="[item, index, running, item.type==='tool_run'?now:0, locale]">
         <article v-if="item.type==='message'" :class="['chat-message',item.role]"><div class="chat-message-label"><ProviderIcon v-if="item.role==='assistant'" :provider="session.provider" :size="15" /><span>{{ item.role==='user'?t('You'):providerLabel(session.provider) }}</span><em v-if="item.steered" class="chat-steered" :title="t('Written while the agent worked, and read inside that turn')">{{ t('Steer') }}</em></div><div v-if="item.role==='user'&&attachedImagePaths(item.text).length" class="chat-attached-images"><img v-for="path in attachedImagePaths(item.text)" :key="path" :src="workspaceImage(path)" :alt="path" :title="path" loading="lazy" @click="openLightbox(workspaceImage(path), path)" /></div><MarkdownContent :text="item.text" :image-url="workspaceImage" :host-image-url="hostImage" :open-file="openReference" /><div class="chat-message-foot"><div class="chat-message-actions"><CopyButton :text="item.text" label="Copy message" compact /></div><span v-if="item.role==='assistant'&&item.usage" class="chat-turn-usage" :title="turnUsageTitle(item.usage)">{{ turnUsageLine(item.usage) }}</span></div></article>
         <component :is="item.type==='tool_run'&&item.tools.length>1?'details':'div'" v-else-if="item.type==='tool_run'" :class="item.tools.length>1?['chat-tool-run',toolRunStatus(item)]:'chat-tool-solo'"><summary v-if="item.tools.length>1"><span :class="['tool-indicator',toolRunStatus(item)]">{{ toolRunStatus(item)==='completed'?'✓':toolRunStatus(item)==='failed'?'!':'↻' }}</span><strong>{{ t('{count} tool calls',{count:item.tools.length}) }}</strong><small>{{ toolRunStatus(item)==='running' ? runningLine(item) : toolRunNames(item) }}</small><Icon class="chat-tool-chevron" name="chevron" :size="14" /></summary><details v-for="tool in item.tools" :key="tool.id" class="chat-tool" :data-tool-id="tool.id"><summary><span :class="['tool-indicator',tool.status]">{{ tool.status==='completed'?'✓':tool.status==='failed'?'!':tool.ended?'–':'↻' }}</span><strong>{{ tool.name }}<template v-if="tool.label"> · {{ tool.label }}</template></strong><small>{{ tool.activity && tool.status==='running' ? lastLine(tool.activity) : t(tool.status==='running'?(running&&!tool.ended?'Working…':'Session ended'):tool.status==='failed'?'Failed':'Completed') }}</small><span v-if="tool.stats" class="chat-tool-stats">{{ statsLine(tool.stats) }}</span><span v-else-if="sizeWorthShowing(tool)" class="chat-tool-stats" :title="t('Its result added about {count} tokens to the context', { count: tool.result_tokens! })">≈ {{ t('{count} tokens', { count: compactCount(tool.result_tokens!) }) }}</span><em v-if="quietLine(tool)" class="chat-tool-stalled">{{ quietLine(tool) }}</em><Icon class="chat-tool-chevron" name="chevron" :size="14" /></summary><pre v-if="tool.activity" class="tool-activity">{{ tool.activity }}</pre><div v-if="tool.children?.length" class="chat-tool-children"><details v-for="entry in descendants(tool)" :key="entry.tool.id" class="chat-tool-nested" :style="{'--depth':entry.depth}" :data-tool-id="entry.tool.id"><summary><span :class="['tool-indicator',entry.tool.status]">{{ entry.tool.status==='completed'?'✓':entry.tool.status==='failed'?'!':entry.tool.ended?'–':'↻' }}</span><strong>{{ entry.tool.name }}<template v-if="entry.tool.label"> · {{ entry.tool.label }}</template></strong><small>{{ entry.tool.activity && entry.tool.status==='running' ? lastLine(entry.tool.activity) : t(entry.tool.status==='running'?(running&&!entry.tool.ended?'Working…':'Session ended'):entry.tool.status==='failed'?'Failed':'Completed') }}</small><span v-if="entry.tool.stats" class="chat-tool-stats">{{ statsLine(entry.tool.stats) }}</span><span v-else-if="sizeWorthShowing(entry.tool)" class="chat-tool-stats" :title="t('Its result added about {count} tokens to the context', { count: entry.tool.result_tokens! })">≈ {{ t('{count} tokens', { count: compactCount(entry.tool.result_tokens!) }) }}</span><em v-if="quietLine(entry.tool)" class="chat-tool-stalled">{{ quietLine(entry.tool) }}</em></summary><pre v-if="entry.tool.activity" class="tool-activity">{{ entry.tool.activity }}</pre><pre v-if="entry.tool.text">{{ entry.tool.text }}</pre></details></div><pre v-if="tool.text">{{ tool.text }}</pre><p v-else-if="!tool.activity&&!tool.children?.length">{{ t('The client did not provide tool output.') }}</p></details></component>
         <p v-else-if="item.type==='approval'" :class="['chat-approval-record',{pending:!item.resolved}]"><Icon :name="item.resolved?'check':'shield'" :size="13"/><span>{{ item.title }}</span><small>{{ t(item.resolved?'Resolved':'Waiting for you below') }}</small></p>
         <div v-else-if="item.type==='configuration'" class="chat-boundary"><span>{{ t('New native context') }} · {{ item.profile_name }}</span><p>{{ t(item.text) }}</p></div>
         <p v-else-if="item.type==='error'" class="chat-alert" role="alert">{{ item.text }}</p>
-      </template>
+      </div>
+      </div>
       <div v-if="view.turn==='running'" class="chat-working"><ProviderIcon class="chat-working-mark" :provider="session.provider" :size="15"/><span class="chat-working-label">{{ t('Agent is working') }}</span></div>
       <p v-if="draft.pending" class="chat-delivery" role="status">{{ t(draft.notice??(draft.pending.state==='sending'?'Sending your message…':'Waiting for delivery confirmation.')) }}<button v-if="draft.pending.state==='unknown'" class="chat-link" @click="load()">{{ t('Refresh conversation') }}</button><button v-if="draft.pending.state==='unknown'&&!isPreview" class="chat-link" :disabled="loading||actionBusy||streamState!=='connected'" @click="retryDelivery">{{ t('Retry the same message request') }}</button></p>
       <div v-if="supported&&!loading&&mode!=='structured'" class="chat-native-note"><p>{{ t(running?'This session is running in the native client. End it there before enabling chat; it will not be taken over automatically.':'Enable chat explicitly to continue this native session in a conversation view.') }}</p><button class="chat-primary" :disabled="isPreview||actionBusy||running" @click="explicitOpen">{{ t('Enable conversation view') }}</button><button v-if="legacyAvailable" class="chat-link" @click="emit('legacy')">{{ t('Open native client view') }}</button></div>
@@ -1363,6 +1474,9 @@ function keydown(event: KeyboardEvent) {
 /* The empty conversation is the screen seen most often, and it was a white
    page with a sentence in it. A little light behind it, and four ways in. */
 .chat-timeline.is-empty{position:relative;isolation:isolate;overflow-x:hidden}
+/* The virtualizer keeps the rows in view where they were as others are measured
+   or put in front; the browser's own anchoring would correct the same shift twice. */
+.chat-timeline{overflow-anchor:none}
 .chat-timeline.is-empty::before{content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;background-image:radial-gradient(circle,var(--line-strong) 1px,transparent 1.3px);background-size:22px 22px;background-position:center 8px;-webkit-mask-image:radial-gradient(ellipse 70% 60% at 50% 32%,#000 10%,transparent 75%);mask-image:radial-gradient(ellipse 70% 60% at 50% 32%,#000 10%,transparent 75%)}
 .chat-welcome{position:relative;isolation:isolate;max-width:560px}
 .chat-welcome::before{content:"";position:absolute;z-index:-1;left:50%;top:-40px;width:min(620px,100cqw);height:340px;transform:translateX(-50%);background:radial-gradient(closest-side at 38% 42%,color-mix(in srgb, var(--accent) 14%, transparent),transparent),radial-gradient(closest-side at 64% 52%,color-mix(in srgb, var(--violet) 12%, transparent),transparent);pointer-events:none}
@@ -1398,6 +1512,11 @@ function keydown(event: KeyboardEvent) {
 
 /* A run of tool calls: one card whose body is the calls themselves. */
 .chat-tool-solo{display:contents}
+/* One row of the conversation: its own margins stay inside it, so its measured
+   height is the room it takes. Only the rows near the view are in the page (the
+   virtualizer), so none needs skipping, and each is measured at its real size. */
+.chat-row{display:flow-root}
+.chat-history-older{min-height:28px;text-align:center;color:var(--muted);font-size:var(--text-xs)}
 .chat-tool-run{max-width:820px;margin:0 auto 13px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--sunken);overflow:hidden}
 .chat-tool-run>summary{display:flex;align-items:center;gap:9px;min-height:46px;padding:8px 13px;cursor:pointer;list-style:none}
 .chat-tool-run>summary::-webkit-details-marker{display:none}

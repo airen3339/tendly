@@ -377,6 +377,8 @@ export const zhCN: Readonly<Record<string, string>> = {
   "Structured conversation requires an updated backend. Your native session is unchanged.": "结构化对话需要更新后端，原生会话不会因此改变。",
   "Conversation messages": "对话消息",
   "Earlier display history was trimmed. Native history remains managed by the official client.": "较早的展示记录已裁剪，完整原生历史仍由官方客户端管理。",
+  "Loading earlier messages…": "正在加载更早的消息…",
+  "Could not load earlier messages.": "无法加载更早的消息。",
   "What shall we build?": "今天，一起做点什么？",
   "A real conversation with your native agent, with room for tools, changes and your next idea.": "直接与原生 Agent 对话，工具、变更和你的下一步想法，都在这里。",
   "You": "你",

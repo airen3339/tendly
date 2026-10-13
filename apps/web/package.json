@@ -13,6 +13,7 @@
   "dependencies": {
     "@agentdock/protocol": "workspace:*",
     "@fontsource-variable/inter": "^5.3.0",
+    "@tanstack/vue-virtual": "3.13.39",
     "@vitejs/plugin-vue": "6.0.8",
     "@xterm/addon-fit": "0.11.0",
     "@xterm/xterm": "6.0.0",

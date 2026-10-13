@@ -30,7 +30,7 @@ export type ChatEvent = ({ seq?: number } & (
   | { type: 'cleared' }
 ));
 /** `after` marks a resumed greeting: `events` holds only what follows that sequence and adds to the view. */
-export interface ConversationSnapshot { mode?: 'structured' | 'pty'; running: boolean; events: ChatEvent[]; truncated?: boolean; after?: number }
+export interface ConversationSnapshot { mode?: 'structured' | 'pty'; running: boolean; events: ChatEvent[]; truncated?: boolean; after?: number; older?: number }
 export type ChatItem =
   | { type: 'message'; id: string; role: 'user' | 'assistant'; text: string; steered?: boolean; usage?: TurnUsage }
   | ToolItem
@@ -151,11 +151,40 @@ export function conversationView(events: readonly ChatEvent[], running?: boolean
 /** WS events are already ordered. A replayed sequence must not append deltas twice. */
 export function appendChatEvent(events: readonly ChatEvent[], event: ChatEvent): ChatEvent[] {
   if (event.seq !== undefined && events.some(existing => existing.seq === event.seq)) return [...events];
+  // A finished message keeps its place but not its pieces, as the server
+  // stores it: the first delta stays, emptied, where the message began among
+  // the calls made while it streamed; the final message carries the text.
+  if (event.type === 'message' && !event.delta) {
+    let first = -1;
+    const kept = events.filter((existing, index) => {
+      if (existing.type !== 'message' || !existing.delta || existing.id !== event.id) return true;
+      if (first === -1) { first = index; return true; }
+      return false;
+    });
+    if (first !== -1) {
+      const place = events[first]!;
+      kept[kept.indexOf(place)] = { ...place, text: '' } as ChatEvent;
+      return [...kept, event];
+    }
+  }
   return [...events, event];
 }
-export function pruneChatEvents(events: readonly ChatEvent[], maxHistoryEvents = 2000, maxHistoryBytes = 8 * 1024 * 1024) {
+/** Each event's size on the wire, measured once: events never change. */
+const eventSizes = new WeakMap<ChatEvent, number>();
+const encoder = new TextEncoder();
+function eventBytes(event: ChatEvent): number {
+  let bytes = eventSizes.get(event);
+  if (bytes === undefined) { bytes = encoder.encode(JSON.stringify(event)).byteLength; eventSizes.set(event, bytes); }
+  return bytes;
+}
+/**
+ * What a view keeps in memory: history is kept in full on the server and read
+ * in pages, so this bounds only how much one view holds (older pages read again
+ * when scrolled back to), not what the session remembers.
+ */
+export function pruneChatEvents(events: readonly ChatEvent[], maxHistoryEvents = 20000, maxHistoryBytes = 32 * 1024 * 1024) {
   const controls = new Map<string, ChatEvent>(), approvals = new Map<string, ChatEvent>();
-  const size = (event: ChatEvent) => new TextEncoder().encode(JSON.stringify(event)).byteLength;
+  const size = eventBytes;
   for (const event of events) {
     // The model list and the current selection can arrive in separate settings
     // events, so the last of each is kept rather than only the last overall.
@@ -180,7 +209,10 @@ export function pruneChatEvents(events: readonly ChatEvent[], maxHistoryEvents =
   }
   // Filtering the original ordered stream preserves ready/exit/configuration
   // boundaries; protected old approvals must never be appended out of order.
-  return { events: events.filter(event => keep.has(event)), truncated: keep.size < events.length, historyBytes, anchorBytes };
+  // The last event let go: a view resumes reading older history after it.
+  let dropped: number | undefined;
+  for (const event of events) if (!keep.has(event) && event.seq !== undefined && (dropped === undefined || event.seq > dropped)) dropped = event.seq;
+  return { events: events.filter(event => keep.has(event)), truncated: keep.size < events.length, historyBytes, anchorBytes, ...(dropped === undefined ? {} : { dropped }) };
 }
 export function isChatEvent(value: unknown): value is ChatEvent {
   if (!value || typeof value !== 'object') return false;
@@ -223,7 +255,21 @@ export function parseConversationSnapshot(value: unknown): ConversationSnapshot 
   const v = value as Record<string, unknown>;
   if (typeof v.running !== 'boolean' || !Array.isArray(v.events) || !v.events.every(isChatEvent) || (v.mode !== undefined && v.mode !== 'structured' && v.mode !== 'pty')) throw Error('Invalid conversation response.');
   if (v.after !== undefined && !(typeof v.after === 'number' && Number.isSafeInteger(v.after) && v.after >= 0)) throw Error('Invalid conversation response.');
-  return { mode: v.mode as ConversationSnapshot['mode'], running: v.running, events: v.events, truncated: v.truncated === true, ...(v.after !== undefined ? { after: v.after as number } : {}) };
+  if (v.older !== undefined && v.older !== null && !(typeof v.older === 'number' && Number.isSafeInteger(v.older) && v.older > 0)) throw Error('Invalid conversation response.');
+  return { mode: v.mode as ConversationSnapshot['mode'], running: v.running, events: v.events, truncated: v.truncated === true, ...(v.after !== undefined ? { after: v.after as number } : {}), ...(typeof v.older === 'number' ? { older: v.older } : {}) };
+}
+/** An older page of a conversation: its events, and the cursor for the page before it. */
+export function parseConversationPage(value: unknown): { events: ChatEvent[]; older?: number } {
+  if (!value || typeof value !== 'object') throw Error('Invalid conversation response.');
+  const v = value as Record<string, unknown>;
+  if (v.type !== 'page' || !Array.isArray(v.events) || !v.events.every(isChatEvent)) throw Error('Invalid conversation response.');
+  if (v.older !== undefined && v.older !== null && !(typeof v.older === 'number' && Number.isSafeInteger(v.older) && v.older > 0)) throw Error('Invalid conversation response.');
+  return { events: v.events, ...(typeof v.older === 'number' ? { older: v.older } : {}) };
+}
+/** Older events put in front of what a view holds, once each. */
+export function prependChatEvents(older: readonly ChatEvent[], events: readonly ChatEvent[]): ChatEvent[] {
+  const held = new Set(events.map(event => event.seq).filter(seq => seq !== undefined));
+  return [...older.filter(event => event.seq === undefined || !held.has(event.seq)), ...events];
 }
 /** The last sequence a view holds, where a socket resumes; none for a view that holds nothing yet. */
 export function lastChatSeq(events: readonly ChatEvent[]): number | undefined {

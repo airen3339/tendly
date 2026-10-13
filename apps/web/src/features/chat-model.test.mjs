@@ -35,11 +35,11 @@ test('native messages and deltas update a stable message without duplicating rep
 test('bounded history retains old pending approvals and latest control anchors in sequence order', () => {
   const controls = [{ seq: 1, type: 'configuration', id: 'config', profile_name: 'Profile', text: 'Boundary' }, { seq: 2, type: 'ready' }, { seq: 3, type: 'turn', status: 'running' }, { seq: 4, type: 'usage', context_tokens: 123 }, { seq: 5, type: 'approval', id: 'pending', title: 'Keep me', text: 'Native approval', choices: ['accept'] }];
   const history = Array.from({ length: 2005 }, (_, index) => ({ seq: 6 + index, type: 'message', id: String(index), role: 'assistant', text: 'fixture' }));
-  const bounded = pruneChatEvents([...controls, ...history]);
+  const bounded = pruneChatEvents([...controls, ...history], 2000);
   assert.equal(bounded.truncated, true); assert.equal(bounded.events.length, 2005);
   assert.deepEqual(bounded.events.slice(0, 5), controls); assert.equal(conversationView(bounded.events, true).awaitingApproval, true); assert.equal(conversationView(bounded.events, true).turn, 'running');
   assert.equal(conversationView(bounded.events, true).usage.context_tokens, 123);
-  const resolved = pruneChatEvents([...bounded.events, { seq: 2011, type: 'approval_resolved', id: 'pending' }]);
+  const resolved = pruneChatEvents([...bounded.events, { seq: 2011, type: 'approval_resolved', id: 'pending' }], 2000);
   assert.ok(!resolved.events.some(event => event.type === 'approval')); assert.equal(conversationView(resolved.events, true).awaitingApproval, false);
   assert.ok(resolved.events.some(event => event.type === 'turn' && event.status === 'running'));
 });
@@ -553,4 +553,47 @@ test('a resumed greeting says where it resumes, and a view resumes from its last
   const held = [{ type: 'ready', seq: 6 }, { type: 'ready', seq: 7 }];
   const merged = [{ type: 'ready', seq: 7 }, { type: 'ready', seq: 8 }].reduce(appendChatEvent, held);
   assert.deepEqual(merged.map(event => event.seq), [6, 7, 8]);
+});
+
+test('a finished message keeps its place but not its pieces, as the server stores it', () => {
+  const deltas = ['Hel', 'lo'].map((text, i) => ({ type: 'message', id: 'a', role: 'assistant', text, delta: true, seq: 2 + i }));
+  let events = [{ type: 'message', id: 'u', role: 'user', text: 'hi', seq: 1 }, deltas[0], { type: 'tool', id: 't', name: 'Bash', status: 'running', text: 'ls', seq: 3 }, { ...deltas[1], seq: 4 }];
+  events = appendChatEvent(events, { type: 'message', id: 'a', role: 'assistant', text: 'Hello', seq: 5 });
+  assert.deepEqual(events.map(e => [e.seq, e.type, e.text]), [[1, 'message', 'hi'], [2, 'message', ''], [3, 'tool', 'ls'], [5, 'message', 'Hello']]);
+  // The message reads whole, where it began.
+  const view = conversationView(events);
+  assert.deepEqual(view.items.map(i => i.type === 'message' ? i.text : i.type), ['hi', 'Hello', 'tool']);
+});
+
+test('keeping a long history bounded does not re-serialize it for every streamed piece', () => {
+  let events = Array.from({ length: 5000 }, (_, i) => ({ type: 'tool', id: `t${i}`, name: 'Bash', status: 'completed', text: 'x'.repeat(200), seq: i + 1 }));
+  events = pruneChatEvents(events).events;
+  const stringify = JSON.stringify; let calls = 0;
+  JSON.stringify = (...args) => { calls++; return stringify(...args); };
+  try {
+    for (let i = 0; i < 100; i++) events = pruneChatEvents(appendChatEvent(events, { type: 'message', id: 'm', role: 'assistant', text: 'x', delta: true, seq: 6000 + i })).events;
+  } finally { JSON.stringify = stringify; }
+  assert.ok(calls <= 200, `${calls} serializations for 100 pieces`);
+  assert.equal(events.length, 5100, 'a long history is kept, not cut at 2,000');
+});
+
+test('a snapshot carries the cursor to older history, and older pages go in front once', async () => {
+  const { parseConversationPage, prependChatEvents } = await import('./chat-model.ts');
+  assert.equal(parseConversationSnapshot({ running: false, events: [], older: 42 }).older, 42);
+  assert.ok(!('older' in parseConversationSnapshot({ running: false, events: [], older: null })));
+  assert.throws(() => parseConversationSnapshot({ running: false, events: [], older: 0 }), /Invalid/);
+  const page = parseConversationPage({ type: 'page', events: [{ type: 'ready', seq: 1 }, { type: 'ready', seq: 2 }], older: null });
+  assert.deepEqual(page, { events: [{ type: 'ready', seq: 1 }, { type: 'ready', seq: 2 }] });
+  assert.throws(() => parseConversationPage({ type: 'snapshot', events: [] }), /Invalid/);
+  // The latest page carries an old settings event already: it is not repeated.
+  const merged = prependChatEvents(page.events, [{ type: 'ready', seq: 2 }, { type: 'ready', seq: 3 }]);
+  assert.deepEqual(merged.map(e => e.seq), [1, 2, 3]);
+});
+
+test('history let go from the front says where reading older history resumes', () => {
+  const events = Array.from({ length: 10 }, (_, i) => ({ type: 'tool', id: `t${i}`, name: 'Bash', status: 'completed', seq: i + 1 }));
+  const bounded = pruneChatEvents(events, 4);
+  assert.deepEqual(bounded.events.map(e => e.seq), [7, 8, 9, 10]);
+  assert.equal(bounded.dropped, 6);
+  assert.ok(!('dropped' in pruneChatEvents(events)));
 });

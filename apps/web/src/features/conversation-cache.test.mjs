@@ -36,3 +36,11 @@ test('the least recently shown conversation goes first', () => {
   cache.forget('a');
   assert.equal(cache.get('a'), undefined);
 });
+
+test('the cursor to older history is kept with the conversation', () => {
+  const cache = createConversationCache();
+  cache.remember('a', { events: events(9), mode: 'structured', running: false, truncated: false, older: 5 });
+  assert.equal(cache.get('a').older, 5);
+  cache.remember('b', { events: events(9), mode: 'structured', running: false, truncated: false });
+  assert.ok(!('older' in cache.get('b')));
+});

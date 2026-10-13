@@ -4,7 +4,8 @@
 // way Claude Code does, so the bridge and the Rust adapter can be compared.
 import { createInterface } from 'node:readline';
 import { appendFileSync } from 'node:fs';
-const log=value=>appendFileSync(process.env.AGENTDOCK_CHAT_TEST_LOG,JSON.stringify(value)+'\n');
+// The parity suite reads what the client received; run by hand, nothing is logged.
+const log=value=>{if(process.env.AGENTDOCK_CHAT_TEST_LOG)appendFileSync(process.env.AGENTDOCK_CHAT_TEST_LOG,JSON.stringify(value)+'\n');};
 const send=message=>process.stdout.write(JSON.stringify(message)+'\n');
 log({event:'args',args:process.argv.slice(2)});
 const session='claude-fixture-session';
@@ -75,8 +76,27 @@ function begin(text){
     case 'fail-auth':reply();result('error_during_execution',{errors:['OAuth token is not supported for this endpoint']});return;
     case 'fail':result('error_max_turns',{result:''});return;
     case 'result-only':result();return;
+    // Load scenarios for the long-conversation harness: a full reply with
+    // the parts that cost the most to render, and a reply streamed at speed.
+    case 'seed':{
+      const code=Array.from({length:30},(_,i)=>`  let value_${i} = compute(${i}); // step ${i}`).join('\n');
+      const text=`## Turn ${turn}\n\nHere is what changed:\n\n- the parser now keeps its place\n- **the cache** is bounded\n- \`compact_deltas\` runs once\n\n\`\`\`rust\nfn main() {\n${code}\n}\n\`\`\`\n\n| file | lines |\n| --- | --- |\n| a.rs | 120 |\n| b.rs | 48 |\n\nThat is all for turn ${turn}.`;
+      send({type:'assistant',message:{id:'tools-'+turn,content:[{type:'tool_use',id:'read-'+turn,name:'Read',input:{file_path:'src/lib.rs'}},{type:'tool_use',id:'bash-'+turn,name:'Bash',input:{command:'cargo test'}}]}});
+      send({type:'user',message:{content:[{type:'tool_result',tool_use_id:'read-'+turn,content:'fn lib() {}\n'.repeat(40)},{type:'tool_result',tool_use_id:'bash-'+turn,content:'test result: ok. 12 passed'}]}});
+      reply(text);result();return;
+    }
     case 'mode-change':send({type:'system',subtype:'status',permissionMode:'acceptEdits'});done();return;
-    default:done();
+    default:
+      if(text.startsWith('stream:')){
+        const pieces=Number(text.slice(7))||200,id='msg-'+turn;let sent=0;
+        send({type:'stream_event',event:{type:'message_start',message:{id}}});
+        const timer=setInterval(()=>{
+          send({type:'stream_event',event:{type:'content_block_delta',delta:{type:'text_delta',text:sent%40===39?'\n\n':`word${sent} `}}});
+          if(++sent>=pieces){clearInterval(timer);reply('streamed '+pieces+' pieces');result();}
+        },15);
+        return;
+      }
+      done();
   }
 }
 
