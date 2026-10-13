@@ -7,6 +7,7 @@ import ProviderIcon from './ProviderIcon.vue';
 import Icon from './Icon.vue';
 import { useI18n } from '../i18n';
 import { formatDuration } from './system-format';
+import { usageRetryHint, type AccountView } from './account-ui';
 import { cacheHitRate, cacheSavings, formatCost, formatHours, formatTokens, rangeStart, trend, type Allowance, type Price, type UsageBucket, type UsageProvider, type UsageReport } from './usage-model';
 
 /**
@@ -32,11 +33,12 @@ async function load() {
   const query = new URLSearchParams({ from: String(from), to: String(now + 60), tz: String(-new Date().getTimezoneOffset()) });
   for (const [key, value] of Object.entries(filter)) if (value) query.set(key, value);
   try {
-    const [next, windows] = await Promise.all([
+    const [next, windows, views] = await Promise.all([
       request<UsageReport>(`/usage?${query}`),
       request<Allowance[]>('/usage/allowance').catch(() => [] as Allowance[]),
+      request<AccountView[]>('/accounts').catch(() => [] as AccountView[]),
     ]);
-    report.value = next; allowance.value = windows;
+    report.value = next; allowance.value = windows; accountViews.value = views;
   } catch (cause) {
     if (cause instanceof ApiError && [404, 501].includes(cause.status)) unsupported.value = true;
     else error.value = errorMessage(cause);
@@ -110,7 +112,56 @@ onMounted(() => {
   resize = new ResizeObserver(entries => { const width = entries[0]?.contentRect.width ?? 0; if (width > 120) chart.width = Math.round(width - 60); });
   watch(chartBox, (element, previous) => { if (previous) resize?.unobserve(previous); if (element) resize?.observe(element); }, { immediate: true });
 });
-onBeforeUnmount(() => resize?.disconnect());
+onBeforeUnmount(() => { resize?.disconnect(); clearInterval(quotaTimer); });
+
+/**
+ * Asking the official endpoint for an account's allowance, from the card
+ * that shows it. The endpoint answers roughly once per window and 429 for the
+ * rest, so each account keeps its own cooldown, and a refusal doubles the wait
+ * instead of spending the next allowance on a retry (see AccountsDialog).
+ */
+const quotaBusy = ref(''), quotaNotice = ref(''), quotaNow = ref(Date.now());
+/** Only an account whose client can be asked gets the button; a Codex plan reports through its own logs. */
+const accountViews = ref<AccountView[]>([]);
+const canRefreshQuota = (id: string) => accountViews.value.find(view => view.id === id)?.capabilities.usage === true;
+const quotaCooldown = reactive<Record<string, number>>({}), quotaRefusals = reactive<Record<string, number>>({});
+let quotaTimer: ReturnType<typeof setInterval> | undefined;
+function quotaWait(id: string): number { return Math.max(0, Math.ceil(((quotaCooldown[id] ?? 0) - quotaNow.value) / 1000)); }
+function beginQuotaCooldown(id: string, seconds: number) {
+  quotaCooldown[id] = Date.now() + seconds * 1000; quotaNow.value = Date.now();
+  clearInterval(quotaTimer);
+  quotaTimer = setInterval(() => { quotaNow.value = Date.now(); if (!Object.values(quotaCooldown).some(until => until > quotaNow.value)) clearInterval(quotaTimer); }, 1000);
+}
+function quotaRefreshTitle(id: string): string {
+  const hint = usageRetryHint(quotaWait(id));
+  if (!hint) return t('Refresh allowance');
+  return hint.unit === 'seconds' ? t('Check again in {n}s', { n: hint.value }) : t('Check again in {n} min', { n: hint.value });
+}
+const QUOTA_NOTICES: Partial<Record<NonNullable<AccountView['usage']>['availability'], string>> = {
+  capture_disabled: 'Usage capture is turned off, so nothing has been recorded.',
+  capture_missing: 'No local usage capture yet. Start an official Claude Code session once, then check again.',
+  not_reported: 'The official client did not report usage for this account. No estimate is shown.',
+  credential_unavailable: 'The official Claude OAuth credential could not be read from its native storage. Sign in with Claude Code, then query again.',
+  query_failed: 'The official Claude usage endpoint could not be reached. Check the network, then query again.',
+  unauthorized: 'The official Claude usage endpoint rejected the stored credential. Sign in again with Claude Code, then query again.',
+  rate_limited: 'The official Claude usage endpoint is rate limited right now. Wait a moment, then query again.',
+  stale: 'This capture predates its reset window, so it is shown as stale rather than current.',
+};
+async function refreshQuota(id: string) {
+  if (quotaBusy.value || quotaWait(id) > 0) return;
+  quotaBusy.value = id; quotaNotice.value = '';
+  try {
+    const view = await request<AccountView>('/accounts/' + encodeURIComponent(id) + '/usage', json('POST', {}));
+    const availability = view.usage?.availability;
+    quotaNotice.value = availability && QUOTA_NOTICES[availability] ? t(QUOTA_NOTICES[availability]!) : t('Allowance updated for {name}.', { name: view.name });
+    if (availability === 'rate_limited') {
+      quotaRefusals[id] = (quotaRefusals[id] ?? 0) + 1;
+      beginQuotaCooldown(id, Math.max(view.usage?.retry_after_seconds || 0, Math.min(300 * 2 ** (quotaRefusals[id] - 1), 1800)));
+    } else { quotaRefusals[id] = 0; beginQuotaCooldown(id, 60); }
+    allowance.value = await request<Allowance[]>('/usage/allowance').catch(() => allowance.value);
+  } catch (cause) { quotaNotice.value = errorMessage(cause); beginQuotaCooldown(id, 60); }
+  finally { quotaBusy.value = ''; }
+}
 const days = computed(() => report.value?.days ?? []);
 interface Part { key: string; label: string; value: number; color: string }
 function stack(day: UsageBucket): Part[] {
@@ -190,7 +241,7 @@ const insights = computed(() => {
 
       <section v-if="accounts.length" class="quota-row" :aria-label="t('Subscription allowance')">
         <article v-for="account in accounts" :key="account.id" class="quota-card">
-          <header><ProviderIcon :provider="account.provider" :size="15" /><strong>{{ account.name }}</strong><span v-if="account.plan" class="plan">{{ account.plan }}</span></header>
+          <header><ProviderIcon :provider="account.provider" :size="15" /><strong>{{ account.name }}</strong><span v-if="account.plan" class="plan">{{ account.plan }}</span><button v-if="canRefreshQuota(account.id)" type="button" class="icon-button quota-refresh" :class="{ busy: quotaBusy === account.id }" :disabled="!!quotaBusy || quotaWait(account.id) > 0" :aria-label="quotaRefreshTitle(account.id)" :title="quotaRefreshTitle(account.id)" @click="refreshQuota(account.id)"><Icon name="refresh" :size="13" /><small v-if="quotaWait(account.id) > 0">{{ quotaWait(account.id) }}</small></button></header>
           <div v-for="row in account.windows" :key="row.window" :class="['quota-line', level(row.used_percent)]">
             <span class="quota-window">{{ windowShort(row) }}</span>
             <span class="quota-amount" :title="estimateHint(row)">
@@ -203,6 +254,7 @@ const insights = computed(() => {
           </div>
         </article>
       </section>
+      <p v-if="quotaNotice" class="inline-notice quota-notice" role="status">{{ quotaNotice }}</p>
 
       <div class="filters">
         <div class="filter-row"><span class="filter-label"><Icon name="clock" :size="13" />{{ t('Date') }}</span>
@@ -312,6 +364,10 @@ const insights = computed(() => {
 .quota-card{display:flex;flex-direction:column;gap:8px;padding:12px 14px;border-radius:var(--radius-lg);background:var(--surface);box-shadow:var(--shadow-card)}
 .quota-card header{display:flex;align-items:center;gap:8px;font-size:var(--text-sm)}
 .quota-card header strong{font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.quota-refresh{margin-left:auto;gap:3px;width:auto;min-width:28px;padding:0 5px;color:var(--muted)}.quota-refresh small{font-size:var(--text-xs);font-variant-numeric:tabular-nums}
+.quota-refresh.busy svg{animation:quota-spin 1s linear infinite}@keyframes quota-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.quota-refresh.busy svg{animation:none}}@media(pointer:coarse){.quota-refresh{min-width:40px;height:40px}}
+.quota-notice{margin:0}
 .plan{margin-left:auto;padding:0 8px;border-radius:var(--radius-full);background:var(--fill);color:var(--ink-soft);font-size:var(--text-xs);line-height:20px}
 .quota-line{--quota:var(--teal);display:grid;grid-template-columns:24px minmax(0,1fr) auto;align-items:baseline;gap:4px 8px;font-size:var(--text-xs);color:var(--muted)}
 .quota-line.warn{--quota:var(--warn)}.quota-line.danger{--quota:var(--danger)}

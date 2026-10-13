@@ -43,7 +43,7 @@
 
 - 移除 Agent 会话中重复的工作区栏、Session 外壳标题和常驻运行信息，标题只由画布 Tab 与聊天内容承担；三点操作菜单固定在对话区右上角。运行信息改为按需打开的只读弹窗，避免三层标题堆叠。
 - 对话输入框改为紧凑字号：桌面正文 13px、标题层级 16px，手机输入保持 16px。聚焦输入时高亮整个 composer 边缘，内部 textarea 不再显示单独的矩形 outline。
-- 键盘行为已接通：Enter 发送、Shift+Enter 换行、Ctrl/⌘+Enter 发送；IME 组合输入不会误提交。Esc 按优先级关闭菜单、取消结束/端点确认、取消当前回复，最后才让输入框失焦，不会误结束 Session。
+- 键盘行为已接通：Enter 发送、Shift+Enter 换行、Ctrl/⌘+Enter 发送；IME 组合输入不会误提交。触控设备（pointer: coarse）上 Enter 只换行，由发送按钮或 Ctrl/⌘+Enter 发送。Esc 按优先级关闭菜单、取消结束/端点确认、取消当前回复，最后才让输入框失焦，不会误结束 Session。
 - Session 外壳和 Chat/Native 子视图继续共用同一个 `session.id`；只切视图不发 HTTP、不 start/stop，不复制会话。普通 PTY 会话默认展示聊天壳，需要显式操作才打开原生终端或启用结构化聊天。工作区栏仅在文件/Git/无绑定面板显示。
 - 当前验证：主页面 5173 无 alert、聊天宽度正常且无横向溢出；样例手机容器 390px 下输入字号 16px、操作按钮最小高度 44px。全量 Node 测试 **280 项**、Rust 测试 **100 项**继续通过，typecheck/build/fmt/Clippy 通过。
 

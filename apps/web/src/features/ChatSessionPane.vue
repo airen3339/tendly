@@ -564,6 +564,10 @@ const permissionDanger = computed(() => livePermission.value === 'danger');
  * sight under a thumb.
  */
 const mobile = useMobile();
+/** A touch-first device: its keyboard has no Shift+Enter, and Enter is how a
+ * phone writes a paragraph. Judged by the pointer, not the width, so a tablet
+ * counts and a narrow desktop window does not. */
+const touchFirst = typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches;
 const optionsOpen = ref(false), chipsInSheet = ref(false);
 const optionsTarget = computed(() => 'chat-options-' + props.session.id.replace(/[^\w-]/g, '_'));
 const optionsSummary = computed(() => [modelDefault.value ? '' : modelName.value, effortStop.value ? effortName.value : ''].filter(Boolean).join(' · ') || endpointName.value);
@@ -1293,7 +1297,11 @@ function keydown(event: KeyboardEvent) {
   if (event.key !== 'Enter') return;
   // Shift+Enter keeps the native newline behavior; plain Enter and Ctrl/⌘
   // Enter submit. Repeated keydown is suppressed to avoid duplicate turns.
+  // On a phone plain Enter stays a newline: several paragraphs are typed far
+  // more often than a turn is meant to leave by accident, and the send button
+  // is under the thumb. Ctrl/⌘+Enter from a hardware keyboard still sends.
   if (event.shiftKey || event.repeat) return;
+  if (touchFirst && !event.ctrlKey && !event.metaKey) return;
   event.preventDefault(); event.stopPropagation();
   if (!sessionMenu.value?.open && !confirmEnd.value && !endpointConfirm.value) void send(event.altKey);
 }

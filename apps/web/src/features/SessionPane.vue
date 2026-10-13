@@ -92,7 +92,7 @@ function renameSession(id: string): void { emit("renameRequest", id); }
         :sessions="sessions"
         :profiles="profiles"
         :terminal="isTerminal"
-        :consume-open-intent="false"
+        :consume-open-intent="isTerminal"
         @changed="emit('changed')"
         @rename-request="renameSession"
         @create="emit('create', $event)"

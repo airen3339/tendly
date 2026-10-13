@@ -41,6 +41,9 @@
   font: var(--text-md)/20px var(--mono);
   tab-size: 4; white-space: pre; overflow-wrap: normal;
 }
+/* Below 16px iOS zooms the page when the editor is focused. The 20px line is
+   kept: the gutter and the current-line band are laid out assuming it. */
+@media (pointer: coarse) { .code-surface > .code-highlight, .code-surface > .code-editor, .code-surface > .code-mirror { font-size: max(16px, var(--text-md)); } }
 .code-highlight {
   position: absolute; inset: 0; overflow: hidden; pointer-events: none;
   background: transparent; color: var(--syn-text);
@@ -161,6 +164,10 @@
 .terminal-keys button.key-text { width: auto; min-width: 32px; padding: 0 6px; font: 600 var(--text-xs)/1 var(--mono); }
 .terminal-keys button:active { background: var(--accent-line); color: var(--accent-ink); }
 .terminal-keys button.armed { background: var(--ok-line); color: var(--accent-hover); }
+/* The second row says what it does: a pencil alone does not read as "keyboard". */
+.terminal-keys button.key-labeled { width: auto; gap: 5px; padding: 0 9px; font: 500 var(--text-xs)/1 var(--font-body); }
+/* 30px keys were hard to hit; width stays so the everyday row still fits a phone. */
+@media (pointer: coarse) { .terminal-keys button { height: 38px; } }
 /* The glyph set has one chevron, pointing right; the arrow keys are that
    chevron turned, so the two directions stay visually identical. */
 .terminal-keys .key-up { transform: rotate(-90deg); }.terminal-keys .key-down { transform: rotate(90deg); }.terminal-keys .key-left { transform: rotate(180deg); }

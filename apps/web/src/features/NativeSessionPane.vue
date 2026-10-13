@@ -27,6 +27,16 @@ const nativeConfig=computed(()=>profile.value?.native_config);
 const unboundImportedConfig=computed(()=>props.session && !props.session.endpoint_profile_id && !props.session.native_source_id && !nativeConfig.value && props.profiles.some(profile=>profile.provider===props.session!.provider && !!profile.native_config));
 const choices=computed(()=>props.sessions.filter(s=>props.terminal?s.provider==="terminal":s.provider!=="terminal"));
 const running=computed(()=>entry.value?.state==="attached");
+/* A terminal whose process ends under the view keeps its last screen, like a
+ * shell window after `exit`, with one line offering to start it again; a tap
+ * or a key does the same. The empty "ended" card is only for a pane that was
+ * never showing output: a restored layout, or a session stopped elsewhere. */
+const exitedInPlace=ref(false);
+const attachCount=ref(0);
+watch(running,(live)=>{if(live){attachCount.value++;exitedInPlace.value=false;}});
+watch(()=>props.session?.id,()=>{exitedInPlace.value=false;});
+function reopenFromView(){if(exitedInPlace.value&&!running.value)void retry();}
+function reopenFromKey(event:KeyboardEvent){if(!exitedInPlace.value||running.value)return;if(event.key.length===1||event.key==="Enter"){event.preventDefault();void retry();}}
 const streamConnected=ref(false);
 watch([()=>props.session?.id,running],()=>{streamConnected.value=false;},{flush:"sync"});
 const terminalStatus=computed(()=>{const id=props.session?.id;return(connected:boolean)=>{if(props.session?.id===id)streamConnected.value=connected;};});
@@ -47,7 +57,7 @@ async function retry(){
     sessionConnections.requestOpen(s.id);await sessionConnections.ensure(s);emit("changed");
   }finally{preparing.value=false;}
 }
-const terminalExited=computed(()=>{const id=props.session?.id;return()=>{if(id)sessionConnections.ended(id);emit("changed");};});
+const terminalExited=computed(()=>{const id=props.session?.id;return()=>{if(id){if(props.session?.id===id)exitedInPlace.value=true;sessionConnections.ended(id);}emit("changed");};});
 async function endSession(){
   const s=props.session;if(!s||ending.value)return;ending.value=true;error.value="";
   try{await request(`/sessions/${encodeURIComponent(s.id)}/stop`,json("POST"));sessionConnections.ended(s.id);if(props.session?.id===s.id)confirmEnd.value=false;emit("changed");}
@@ -64,7 +74,7 @@ function reconnect(){closeSessionMenu();terminalView.value?.reconnect();}
     <button class="primary-button" @click="emit('create',terminal?'terminal':DEFAULT_CLIENT)"><Icon name="plus" :size="15" />{{ t(terminal?'New terminal':'New agent session') }}</button>
     <div v-if="choices.length" class="session-choices"><small>{{ t('OR OPEN AN EXISTING SESSION') }}</small><button v-for="s in choices" :key="s.id" @click="emit('select',s)"><ProviderIcon :provider="s.provider" :size="15" /><span>{{ s.title }}</span><span :class="['state-dot',s.status]" /></button></div>
   </section>
-  <section v-else class="agent-session-pane">
+  <section v-else :class="['agent-session-pane',{'is-exited':exitedInPlace&&!running}]" @pointerdown="reopenFromView" @keydown="reopenFromKey">
     <div v-if="!paneId" class="session-control">
       <div class="session-identity"><span :class="['provider-mark',session.provider]"><ProviderIcon :provider="session.provider" /></span><div><strong>{{ session.provider==='terminal'?t('Terminal'):providerLabel(session.provider) }}</strong><small :title="nativeConfig?.config_dir">{{ session.native_source_id?t('Original client configuration'):nativeConfig?t('{name} · shared host configuration',{name:profile?.name??providerLabel(session.provider)}):profile?.name||t(session.provider==='terminal'?'Host shell':'Isolated native profile') }}</small></div></div>
       <div class="session-actions">
@@ -85,14 +95,19 @@ function reconnect(){closeSessionMenu();terminalView.value?.reconnect();}
     <div v-if="session.native_source_id" class="inline-notice">{{ t('Loaded history uses the original client settings. It does not take over another running terminal.') }}</div>
     <details v-else-if="nativeConfig" class="inline-notice shared-session-details"><summary>{{ t('New session · shared host configuration') }}</summary><code>{{ nativeConfig.config_dir }}</code><p>{{ t('This is a new session using the host configuration, not a resumed history session.') }}</p><p>{{ t('Account, model, endpoint, proxy and permissions follow the native client. Shared configuration is not session-isolated.') }}</p><p>{{ t('This is a live directory reference, not a snapshot of its contents. Changes to native settings affect subsequent starts.') }}</p><p>{{ t('AgentDock does not copy credentials or rewrite this configuration. The native client may update its own sign-in cache and history.') }}</p></details>
     <div v-if="confirmEnd" class="confirmation-bar">{{ t('End this session? Its background process will stop; history remains.') }}<button class="small-button danger" :disabled="ending" @click="endSession">{{ t('End session') }}</button><button class="small-button" :disabled="ending" @click="confirmEnd=false">{{ t('Keep connected') }}</button></div>
-    <TerminalPane v-if="running" :key="session.id" ref="terminalView" :session-id="session.id" @exit="terminalExited" @status="terminalStatus" />
-    <div v-else class="pane-empty"><ProviderIcon :provider="session.provider" :size="28" /><h3>{{ t(entry?.state==='opening'?'Connecting…':entry?.state==='failed'?'Connection failed':'Session ended') }}</h3><p>{{ t(entry?.state==='opening'?'Connecting to the native client.':'Reopen this session to continue. No process is restarted automatically after it ends.') }}</p><TerminalEndpointSetup v-if="entry?.state!=='opening'" ref="endpointSetup" :session="session" :profiles="profiles" :disabled="ending || !!entry?.pending" @changed="emit('changed')" @profiles="emit('profiles')" /><button v-if="entry?.state!=='opening'" class="secondary-button" :disabled="!!entry?.pending||ending||preparing" @click="retry">{{ t('Reopen session') }}</button></div>
+    <TerminalPane v-if="running||exitedInPlace" :key="`${session.id}:${attachCount}`" ref="terminalView" :session-id="session.id" @exit="terminalExited" @status="terminalStatus" />
+    <button v-if="exitedInPlace&&!running" type="button" class="terminal-exited-bar" :disabled="!!entry?.pending||ending||preparing" @click="retry"><Icon :name="entry?.state==='opening'?'refresh':'play'" :size="14" /><span>{{ t(entry?.state==='opening'?'Connecting…':'Process exited · tap or type to start it again') }}</span></button>
+    <div v-else-if="!running" class="pane-empty"><ProviderIcon :provider="session.provider" :size="28" /><h3>{{ t(entry?.state==='opening'?'Connecting…':entry?.state==='failed'?'Connection failed':'Session ended') }}</h3><p>{{ t(entry?.state==='opening'?'Connecting to the native client.':'Reopen this session to continue. No process is restarted automatically after it ends.') }}</p><TerminalEndpointSetup v-if="entry?.state!=='opening'" ref="endpointSetup" :session="session" :profiles="profiles" :disabled="ending || !!entry?.pending" @changed="emit('changed')" @profiles="emit('profiles')" /><button v-if="entry?.state!=='opening'" class="secondary-button" :disabled="!!entry?.pending||ending||preparing" @click="retry">{{ t('Reopen session') }}</button></div>
   </section>
 </template>
 <style scoped>
 .session-menu.session-tab-menu>summary{min-height:28px}.session-menu-content>button>svg{flex:none}
 .session-menu-divider{border:0;border-top:1px solid var(--line);margin:4px 6px}.session-menu-status{display:flex;align-items:center;gap:6px;font-size:var(--text-xs);color:var(--muted);padding:8px 9px;border-bottom:1px solid var(--border)}.session-menu summary:focus-visible,.session-menu button:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 @media(max-width:520px){.session-menu.session-tab-menu>summary{min-width:32px;min-height:32px;width:32px;height:32px}}
+.terminal-exited-bar{display:flex;flex-shrink:0;align-items:center;justify-content:center;gap:8px;min-height:40px;padding:8px 12px;border:0;border-top:1px solid var(--line);background:var(--sunken);color:var(--ink-soft);font:inherit;font-size:var(--text-sm);cursor:pointer}
+.terminal-exited-bar:hover{background:var(--accent-soft);color:var(--accent-ink)}.terminal-exited-bar:disabled{cursor:default;opacity:.7}
+@media(pointer:coarse){.terminal-exited-bar{min-height:48px}}
+.is-exited :deep(.native-terminal){opacity:.72}
 </style>
 <style scoped>.session-menu{position:relative}.session-menu>summary{list-style:none;cursor:pointer;min-width:44px;min-height:44px}.session-menu>summary::-webkit-details-marker{display:none}.session-menu-content{position:absolute;right:0;top:44px;z-index:25;width:190px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-md);padding:5px;box-shadow:var(--shadow-lg)}.session-menu-content>button{display:flex;align-items:center;gap:8px;width:100%;min-height:30px;border:0;border-radius:var(--radius-sm);background:none;padding:6px 9px;text-align:left;font-size:var(--text-sm);color:var(--ink-soft);cursor:pointer}
 @media(pointer:coarse){.session-menu-content>button{min-height:44px}}.session-menu-content>button:hover{background:var(--ok-soft)}.session-tab-menu{position:fixed;z-index:60;display:inline-flex}.session-tab-menu>summary{min-width:28px;width:28px;height:28px;border-radius:var(--radius-sm);display:grid;place-items:center;font-size:var(--text-xl)}.session-tab-menu>summary:hover,.session-tab-menu[open]>summary{background:var(--accent-soft);color:var(--accent-ink)}.session-tab-menu .session-menu-content{top:32px}.shared-session-details{flex-shrink:0;max-height:40%;overflow:auto}.shared-session-details>summary{cursor:pointer;color:var(--accent-ink)}.shared-session-details>code{display:block;overflow-wrap:anywhere;margin-top:8px;font-size:var(--text-xs)}.shared-session-details p{margin-top:7px;line-height:17px}</style>

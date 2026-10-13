@@ -611,6 +611,8 @@ svg { flex-shrink: 0; vertical-align: middle; }
 .content-toolbar>span { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .content-toolbar strong { font-weight: 550; }
 .toolbar-buttons { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+/* A finger needs more than a 28px reload button beside a 22px mode switch. */
+@media (pointer: coarse) { .content-toolbar { min-height: 48px; }.toolbar-buttons { gap: 6px; }.toolbar-buttons .icon-button { width: 40px; height: 40px; }.toolbar-buttons .small-button { min-height: 36px; } }
 .content-footer { min-height: 23px; font-size: var(--text-xs); color: var(--faint); padding: 5px 9px; border-top: 1px solid var(--fill); display: flex; justify-content: space-between; flex-shrink: 0; gap: 8px; }
 /* Notices are quiet: a soft tint and a thin edge in the status colour, so a
    pane can carry one without turning into a banner. */
@@ -706,6 +708,11 @@ svg { flex-shrink: 0; vertical-align: middle; }
  * bar, the way a phone app's navigation does. Sized for a thumb: 44px targets
  * and 15px body copy, not the desktop's dense 10px chrome.
  */
+/* Every shell child sits at z-index 1 (.app-shell > *) and the topbar at 30, so
+   the drawers fixed inside .app-body were drawn under it: the sidebar's first
+   row and the explorer's header hid behind the title bar. The body only ever
+   overlaps the topbar through those drawers, so lifting it changes nothing else. */
+.app-shell.is-mobile .app-body { z-index: 40; }
 .mobile-title, .mobile-session-actions { display: none; }
 .app-shell.is-mobile .topbar { height: calc(52px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 4px 0; gap: 2px; border-bottom-color: var(--fill); }
 .app-shell.is-mobile .brand { flex: none; }

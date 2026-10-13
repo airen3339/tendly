@@ -366,15 +366,21 @@ function openSession(session: Session) {
   if (route.name !== "canvas") void router.push({ name: "canvas" });
   // Opening a session selects its bound view. A legacy PTY shown in the
   // conversation shell must not start just because a pane was mounted;
-  // structured sessions and an explicit native-terminal view retain the
-  // existing start intent.
-  if (session.interaction_mode === "structured") sessionConnections.requestOpen(session.id);
+  // structured sessions, terminals and an explicit native-terminal view
+  // retain the existing start intent.
+  if (opensOnArrival(session)) sessionConnections.requestOpen(session.id);
   sidebarOpen.value = false;
   canvas.value?.openPane(sessionPane(session));
 }
+/** Which sessions start the moment their pane is placed. A structured chat
+ * and a terminal are both asked for by the gesture that creates or opens
+ * them, and a terminal that shows "ended" on arrival only ever wanted one
+ * more tap; a legacy PTY shown in the conversation shell still waits for an
+ * explicit reopen. */
+const opensOnArrival = (session: Session) => session.interaction_mode === "structured" || session.provider === "terminal";
 function sessionPaneDropped(pane: PaneNode) {
   const session = paneSession(pane, sessions.value);
-  if (session && paneWorkspace(pane, workspaces.value, sessions.value) && session.interaction_mode === "structured") sessionConnections.requestOpen(session.id);
+  if (session && paneWorkspace(pane, workspaces.value, sessions.value) && opensOnArrival(session)) sessionConnections.requestOpen(session.id);
 }
 function acceptDroppedPane(pane: PaneNode) { return acceptsScopedPane(pane, workspaces.value, sessions.value); }
 async function revealSession(id: string) {
@@ -620,7 +626,7 @@ function newSession(id = selectedWorkspaceId.value, provider: ProviderKind = DEF
 function draftCreated(paneId: string, session: Session) {
   sessionsRevision++;
   sessions.value = [session, ...sessions.value.filter(item => item.id !== session.id)];
-  if (session.interaction_mode === "structured") sessionConnections.requestOpen(session.id);
+  if (opensOnArrival(session)) sessionConnections.requestOpen(session.id);
   canvas.value?.replaceWith(paneId, sessionPane(session));
 }
 /**
@@ -646,7 +652,7 @@ async function quickSession(id = selectedWorkspaceId.value, provider: ProviderKi
     rememberQuickProvider(provider);
     sessionsRevision++;
     sessions.value = [session, ...sessions.value.filter(item => item.id !== session.id)];
-    if (session.interaction_mode === "structured") sessionConnections.requestOpen(session.id);
+    if (opensOnArrival(session)) sessionConnections.requestOpen(session.id);
     sidebarOpen.value = false;
     // A "+" pressed on a tab strip opens there; the sidebar has no target and
     // falls back to the canvas's own placement.

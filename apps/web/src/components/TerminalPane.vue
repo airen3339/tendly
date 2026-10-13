@@ -102,7 +102,8 @@ const stream = createSessionStream({
       if (hello.resumed !== true || typeof hello.runtime !== "string" || hello.runtime !== resume?.runtime) terminal?.reset();
       resume = typeof hello.runtime === "string" ? { runtime: hello.runtime, seq: hello.resumed === true && resume ? resume.seq : 0 } : undefined;
     } else if (control.type === "exit") {
-      stream.finish("Process exited. Start the session again to create a new process."); emit("exit");
+      // The shell around this pane says the process exited and offers to start it again.
+      stream.finish(""); emit("exit");
     } else if (control.type === "gap") {
       nativeNotice.value = message !== undefined;
       notice.value = message ?? "The stream exceeded its buffer. Reconnect to restore available history; this does not restart the process.";
@@ -424,10 +425,10 @@ onUnmounted(() => { for (const entry of uploads.value) { entry.abort?.(); if (en
     <div ref="host" class="terminal-host" :aria-label="t('Native session {id}', { id: sessionId })" @pointerdown="gestureStart" @pointerup="gestureEnd" @pointercancel="gesture = undefined" @touchstart="touchScrollStart" @touchmove="touchScrollMove" />
     <div v-if="touchDevice" class="terminal-keys" role="group" :aria-label="t('Terminal keys')">
       <div v-if="moreKeys" class="terminal-keys-row">
-        <button type="button" :aria-label="t('Paste')" :title="t('Paste')" @click="moreKeys = false; pressPaste()"><Icon name="clipboard" :size="16" /></button>
-        <button type="button" class="key-text" :aria-label="t('Photo or file')" :title="t('Photo or file')" @click="pickFiles">{{ t('Photo / file') }}</button>
-        <button type="button" :aria-label="t('Keyboard')" :title="t('Keyboard')" @click="moreKeys = false; showKeyboard()"><Icon name="edit" :size="16" /></button>
-        <button type="button" :class="{ armed: tapSelect }" :aria-pressed="tapSelect" :aria-label="t('Tap a row to select it')" :title="t('Tap a row to select it')" @pointerdown="keepFocus" @click="tapSelect = !tapSelect"><Icon name="locate" :size="16" /></button>
+        <button type="button" class="key-labeled" :aria-label="t('Paste')" :title="t('Paste')" @click="moreKeys = false; pressPaste()"><Icon name="clipboard" :size="16" /><span>{{ t('Paste') }}</span></button>
+        <button type="button" class="key-labeled" :aria-label="t('Photo or file')" :title="t('Photo or file')" @click="pickFiles">{{ t('Photo / file') }}</button>
+        <button type="button" class="key-labeled" :aria-label="t('Keyboard')" :title="t('Keyboard')" @click="moreKeys = false; showKeyboard()"><Icon name="edit" :size="16" /><span>{{ t('Keyboard') }}</span></button>
+        <button type="button" :class="['key-labeled', { armed: tapSelect }]" :aria-pressed="tapSelect" :aria-label="t('Tap a row to select it')" :title="t('Tap a row to select it')" @pointerdown="keepFocus" @click="tapSelect = !tapSelect"><Icon name="locate" :size="16" /><span>{{ t('Select rows') }}</span></button>
       </div>
       <div class="terminal-keys-row">
         <button type="button" class="key-text" :aria-label="t('Escape')" :title="t('Escape')" @pointerdown="keepFocus" @click="pressEscape">Esc</button>
