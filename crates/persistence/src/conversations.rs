@@ -76,6 +76,57 @@ pub struct ConversationPage {
     /// start was trimmed away.
     pub truncated: bool,
 }
+/// One place a search found: the event, what it belongs to, and the words
+/// around the match.
+#[derive(Debug, Clone)]
+pub struct SearchHit {
+    pub seq: u64,
+    /// `message` or `tool`.
+    pub kind: String,
+    /// The message's or the call's id: the row it is shown in.
+    pub id: String,
+    pub snippet: String,
+}
+
+/// The match with a little on either side, on one line, cut on characters.
+pub fn snippet_of(text: &str, query: &str) -> String {
+    const AROUND: usize = 40;
+    let chars: Vec<char> = text
+        .chars()
+        .map(|c| {
+            if c == '\n' || c == '\r' || c == '\t' {
+                ' '
+            } else {
+                c
+            }
+        })
+        .collect();
+    let lower = |c: char| c.to_lowercase().next().unwrap_or(c);
+    let needle: Vec<char> = query.trim().chars().map(lower).collect();
+    let at = (!needle.is_empty() && needle.len() <= chars.len())
+        .then(|| {
+            (0..=chars.len() - needle.len()).find(|&i| {
+                needle
+                    .iter()
+                    .enumerate()
+                    .all(|(k, n)| lower(chars[i + k]) == *n)
+            })
+        })
+        .flatten()
+        .unwrap_or(0);
+    let start = at.saturating_sub(AROUND);
+    let end = (at + needle.len() + AROUND).min(chars.len());
+    let mut snippet: String = chars[start..end].iter().collect();
+    snippet = snippet.trim().to_owned();
+    if start > 0 {
+        snippet.insert(0, '…');
+    }
+    if end < chars.len() {
+        snippet.push('…');
+    }
+    snippet
+}
+
 /// How far back a finished message's deltas are looked for when where they
 /// began is not known -- after a restart, mid-message.
 const DELTA_REACH: u64 = 500;
@@ -326,6 +377,70 @@ impl Store {
             older,
             truncated,
         })
+    }
+    /// Where `query` appears in the whole history -- what was said, and the
+    /// calls made and what they answered -- newest first, once per message or
+    /// call, at most `limit`. Streamed pieces are not searched: the finished
+    /// message holds the same words. The query is matched as written, not as
+    /// a pattern, and without regard to case for Latin letters.
+    pub fn search_conversation(
+        &self,
+        id: SessionId,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<SearchHit>> {
+        let query = query.trim();
+        if query.is_empty() || limit == 0 {
+            return Ok(Vec::new());
+        }
+        let escaped: String = query
+            .chars()
+            .flat_map(|c| match c {
+                '\\' | '%' | '_' => vec!['\\', c],
+                c => vec![c],
+            })
+            .collect();
+        let pattern = format!("%{escaped}%");
+        let conn = self.connection.lock().expect("sqlite lock");
+        let mut stmt = conn.prepare(
+            "SELECT seq,event_json FROM conversation_events WHERE session_id=?1 \
+             AND json_extract(event_json,'$.type') IN ('message','tool') \
+             AND coalesce(json_extract(event_json,'$.delta'),0)=0 \
+             AND (json_extract(event_json,'$.text') LIKE ?2 ESCAPE '\\' \
+               OR json_extract(event_json,'$.activity') LIKE ?2 ESCAPE '\\' \
+               OR json_extract(event_json,'$.name') LIKE ?2 ESCAPE '\\') \
+             ORDER BY seq DESC",
+        )?;
+        let mut rows = stmt.query(params![id.to_string(), pattern])?;
+        let mut seen = std::collections::HashSet::new();
+        let mut hits = Vec::new();
+        while let Some(row) = rows.next()? {
+            let seq: u64 = row.get(0)?;
+            let event: Value =
+                serde_json::from_str(&row.get::<_, String>(1)?).map_err(conversion_error)?;
+            let (Some(kind), Some(owner)) = (event["type"].as_str(), event["id"].as_str()) else {
+                continue;
+            };
+            if !seen.insert((kind.to_owned(), owner.to_owned())) {
+                continue;
+            }
+            let lowered = query.to_lowercase();
+            let text = ["text", "activity", "name"]
+                .iter()
+                .filter_map(|field| event[*field].as_str())
+                .find(|text| text.to_lowercase().contains(&lowered))
+                .unwrap_or_default();
+            hits.push(SearchHit {
+                seq,
+                kind: kind.to_owned(),
+                id: owner.to_owned(),
+                snippet: snippet_of(text, query),
+            });
+            if hits.len() >= limit {
+                break;
+            }
+        }
+        Ok(hits)
     }
     /// The events after `after`, or `None` when there are more than `limit` --
     /// a view that far behind is better sent the latest page -- or when
@@ -831,6 +946,76 @@ mod tests {
         // A message that never streamed is stored as it came.
         append(json!({"type":"message","id":"c","role":"assistant","text":"whole"}));
         assert_eq!(store.conversation(id).unwrap().events.len(), 6);
+    }
+
+    /// Search reads the whole history: what was said, and what tools were
+    /// called and answered, newest first, once per message or call; never a
+    /// streamed piece, and the query is text, not a pattern.
+    #[test]
+    fn search_finds_messages_and_calls_across_the_whole_history() {
+        let store = Store::open(":memory:").unwrap();
+        let id = chat(&store);
+        let append = |event: Value| store.append_conversation_event(id, event).unwrap();
+        append(
+            json!({"type":"message","id":"u1","role":"user","text":"Where is the Retry backoff set?"}),
+        );
+        for _ in 0..1500 {
+            append(
+                json!({"type":"tool","id":"noise","name":"Bash","status":"completed","text":"nothing here"}),
+            );
+        }
+        append(
+            json!({"type":"tool","id":"t1","name":"Grep","status":"running","text":"{\"pattern\":\"retry\"}"}),
+        );
+        append(
+            json!({"type":"tool","id":"t1","name":"Grep","status":"completed","text":"src/net.rs:12: // Retry backoff, in ms"}),
+        );
+        append(
+            json!({"type":"message","id":"a1","role":"assistant","text":"The retr","delta":true}),
+        );
+        append(
+            json!({"type":"message","id":"a1","role":"assistant","text":"The retry backoff is 50 ms, in src/net.rs."}),
+        );
+        append(
+            json!({"type":"message","id":"zh","role":"assistant","text":"重试间隔在网络模块里设置。"}),
+        );
+        append(json!({"type":"message","id":"pct","role":"user","text":"100% done_now"}));
+        let hits = store.search_conversation(id, "retry backoff", 50).unwrap();
+        // Newest first; the call once, though two of its events match.
+        let found: Vec<(&str, &str)> = hits
+            .iter()
+            .map(|h| (h.kind.as_str(), h.id.as_str()))
+            .collect();
+        assert_eq!(
+            found,
+            [("message", "a1"), ("tool", "t1"), ("message", "u1")]
+        );
+        assert!(hits[0].snippet.contains("retry backoff is 50 ms"));
+        assert!(hits.iter().all(|h| h.seq > 0));
+        // Chinese, and text that looks like a pattern, are matched as written.
+        assert_eq!(
+            store.search_conversation(id, "重试间隔", 50).unwrap()[0].id,
+            "zh"
+        );
+        assert_eq!(store.search_conversation(id, "100%", 50).unwrap().len(), 1);
+        assert!(store.search_conversation(id, "done_", 50).unwrap().len() == 1);
+        assert!(store.search_conversation(id, "0%d", 50).unwrap().is_empty());
+        assert!(store.search_conversation(id, "   ", 50).unwrap().is_empty());
+        assert_eq!(store.search_conversation(id, "e", 2).unwrap().len(), 2);
+    }
+
+    /// A snippet is the match with a little on either side, cut on characters.
+    #[test]
+    fn a_snippet_shows_the_match_in_its_context() {
+        let text = format!("{}needle{}", "前".repeat(100), "后".repeat(100));
+        let snippet = snippet_of(&text, "needle");
+        assert!(snippet.starts_with('…') && snippet.ends_with('…'));
+        assert!(snippet.contains("needle"));
+        assert!(snippet.chars().count() <= 100);
+        assert_eq!(
+            snippet_of("short needle text", "NEEDLE"),
+            "short needle text"
+        );
     }
 
     /// A message that was streaming when the server restarted is compacted

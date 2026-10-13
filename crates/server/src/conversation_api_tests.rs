@@ -1160,3 +1160,75 @@ async fn conversations_read_in_pages_and_sockets_resume_where_a_view_left_off() 
     }
     server.abort();
 }
+
+/// Search covers the whole stored history, newest first, and refuses an
+/// oversized query.
+#[tokio::test]
+async fn a_conversation_is_searched_through_its_whole_history() {
+    let fixture = chat_fixture();
+    let workspace = fixture
+        .state
+        .store
+        .create_workspace("Search", fixture.path.join("repo").to_str().unwrap())
+        .unwrap();
+    let id = fixture
+        .state
+        .store
+        .create_session(workspace.id, ProviderKind::Codex, "Search")
+        .unwrap()
+        .id;
+    let store = &fixture.state.store;
+    store
+        .append_conversation_event(
+            id,
+            json!({"type":"message","id":"old","role":"user","text":"the needle, long ago"}),
+        )
+        .unwrap();
+    for n in 0..3000 {
+        store
+            .append_conversation_event(id, json!({"type":"tool","id":format!("t{n}"),"name":"Bash","status":"completed","text":"hay"}))
+            .unwrap();
+    }
+    store
+        .append_conversation_event(
+            id,
+            json!({"type":"message","id":"new","role":"assistant","text":"another Needle"}),
+        )
+        .unwrap();
+    let (status, found) = call(
+        fixture.app(),
+        "GET",
+        &format!("/api/sessions/{id}/conversation/search?q=needle"),
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{found}");
+    let ids: Vec<&str> = found["hits"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|h| h["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, ["new", "old"]);
+    assert_eq!(found["hits"][1]["seq"], 1);
+    assert_eq!(found["hits"][1]["snippet"], "the needle, long ago");
+    assert_eq!(found["more"], false);
+    let (_, limited) = call(
+        fixture.app(),
+        "GET",
+        &format!("/api/sessions/{id}/conversation/search?q=hay&limit=5"),
+        Value::Null,
+    )
+    .await;
+    assert_eq!(limited["hits"].as_array().unwrap().len(), 5);
+    assert_eq!(limited["more"], true);
+    let long = "x".repeat(201);
+    let (status, _) = call(
+        fixture.app(),
+        "GET",
+        &format!("/api/sessions/{id}/conversation/search?q={long}"),
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}

@@ -1,5 +1,5 @@
 mod conversations;
-pub use conversations::{ConversationPage, MessageSubmission, StoredConversation};
+pub use conversations::{ConversationPage, MessageSubmission, SearchHit, StoredConversation};
 pub mod metrics;
 
 use agentdock_domain::{

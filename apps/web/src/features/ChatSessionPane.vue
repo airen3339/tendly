@@ -28,6 +28,7 @@ import { attachedImagePaths, lastChatSeq } from './chat-model';
 import { conversationCache } from './conversation-cache';
 import { createFrameBatch } from './frame-batch';
 import { createStableRows } from './stable-items';
+import { occurrences, parseSearchResult, rowForHit, stepHit, type SearchHit as ConversationHit } from './conversation-search';
 import { useVirtualizer } from '@tanstack/vue-virtual';
 import { filterModels, mergeModels, resolveModel, offeredModels } from './model-choices';
 import { openLightbox } from './image-lightbox';
@@ -113,10 +114,16 @@ watch(() => virtualizer.value.getTotalSize(), () => { if (followBottom.value) vo
 
 /** The cursor to the history before what the view holds, while there is any. */
 const older = ref<number | undefined>(), loadingOlder = ref(false), olderSentinel = ref<HTMLElement>();
-/** Reads the page before what the view holds, keeping the row in view where it was. */
-async function loadOlder() {
+/** Reads the page before what the view holds, once at a time for everyone who asks. */
+let olderRead: Promise<void> | undefined;
+function loadOlder(): Promise<void> {
+  olderRead ??= readOlder().finally(() => { olderRead = undefined; });
+  return olderRead;
+}
+/** The page before what the view holds, keeping the row in view where it was. */
+async function readOlder() {
   const id = props.session.id, own = generation, before = older.value, el = viewport.value;
-  if (loadingOlder.value || before === undefined || isPreview.value || !el) return;
+  if (before === undefined || isPreview.value || !el) return;
   loadingOlder.value = true;
   try {
     const page = parseConversationPage(await request<unknown>('/sessions/' + encodeURIComponent(id) + '/conversation?before=' + before));
@@ -133,7 +140,7 @@ async function loadOlder() {
   } catch { if (own === generation) notice.value = 'Could not load earlier messages.'; }
   finally { if (own === generation) loadingOlder.value = false; }
   // A short page may leave the top still in reach.
-  if (own === generation && older.value !== undefined && el.scrollTop < 1200) void loadOlder();
+  if (own === generation && older.value !== undefined && el.scrollTop < 1200) queueMicrotask(() => void loadOlder());
 }
 let olderObserver: IntersectionObserver | undefined;
 watch(olderSentinel, sentinel => {
@@ -144,6 +151,92 @@ watch(olderSentinel, sentinel => {
   olderObserver.observe(sentinel);
 });
 onBeforeUnmount(() => olderObserver?.disconnect());
+
+/**
+ * Search through the whole conversation (the server reads its full history):
+ * each match is brought into view -- older pages read as far as it needs, the
+ * calls it is folded inside opened -- and the words are highlighted where they
+ * show, with the CSS highlight registry, so no row is changed to mark them.
+ */
+const searchOpen = ref(false), searchQuery = ref(''), searchHits = ref<ConversationHit[]>([]), searchMore = ref(false), searchIndex = ref(-1), searchBusy = ref(false), searchNotice = ref(''), searchInput = ref<HTMLInputElement>();
+let searchTimer: ReturnType<typeof setTimeout> | undefined, searchGeneration = 0, searchRow = -1;
+const searchCount = computed(() => searchBusy.value ? '…' : !searchQuery.value.trim() ? '' : !searchHits.value.length ? t('No matches') : `${searchIndex.value + 1} / ${searchHits.value.length}${searchMore.value ? '+' : ''}`);
+function openSearch() { searchOpen.value = true; void nextTick(() => { searchInput.value?.focus(); searchInput.value?.select(); }); }
+function closeSearch() { clearTimeout(searchTimer); searchGeneration++; searchOpen.value = false; searchHits.value = []; searchIndex.value = -1; searchRow = -1; searchBusy.value = false; searchNotice.value = ''; paintHighlights(); }
+watch(searchQuery, query => { clearTimeout(searchTimer); searchTimer = setTimeout(() => void runSearch(query), 250); });
+watch(() => props.session.id, () => { if (searchOpen.value) closeSearch(); });
+async function runSearch(query: string) {
+  const own = ++searchGeneration, id = props.session.id;
+  searchNotice.value = ''; searchRow = -1;
+  if (!query.trim()) { searchHits.value = []; searchIndex.value = -1; searchBusy.value = false; paintHighlights(); return; }
+  searchBusy.value = true;
+  try {
+    const result = parseSearchResult(await request<unknown>('/sessions/' + encodeURIComponent(id) + '/conversation/search?q=' + encodeURIComponent(query.trim())));
+    if (own !== searchGeneration || props.session.id !== id) return;
+    searchHits.value = result.hits; searchMore.value = result.more; searchIndex.value = -1; searchBusy.value = false;
+    if (result.hits.length) await showHit(0); else paintHighlights();
+  } catch { if (own === searchGeneration) { searchBusy.value = false; searchNotice.value = 'Search failed.'; } }
+}
+async function stepSearch(direction: 1 | -1) { const next = stepHit(searchHits.value.length, searchIndex.value, direction); if (next >= 0) await showHit(next); }
+/** Whether the view holds the event `seq`: everything from the older cursor on is held. */
+const holds = (seq: number) => older.value === undefined || seq >= older.value;
+async function showHit(index: number) {
+  const hit = searchHits.value[index], own = searchGeneration;
+  if (!hit) return;
+  searchIndex.value = index; searchNotice.value = '';
+  for (let pages = 0; pages < 500 && !holds(hit.seq); pages++) { await loadOlder(); if (own !== searchGeneration) return; }
+  const target = rowForHit(rows.value.rows, hit);
+  if (!target) { searchRow = -1; searchNotice.value = 'This match is not shown in the conversation.'; paintHighlights(); return; }
+  followBottom.value = false; searchRow = target.index;
+  virtualizer.value.scrollToIndex(target.index, { align: 'center' });
+  await nextTick(); await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  if (own !== searchGeneration) return;
+  const row = viewport.value?.querySelector(`.chat-row[data-index="${target.index}"]`);
+  if (row) {
+    // A run of calls, and each call the match is folded inside, open to show it.
+    if (row.firstElementChild instanceof HTMLDetailsElement) row.firstElementChild.open = true;
+    for (const id of target.path) { const fold = row.querySelector(`[data-tool-id="${CSS.escape(id)}"]`); if (fold instanceof HTMLDetailsElement) fold.open = true; }
+    virtualizer.value.scrollToIndex(target.index, { align: 'center' });
+  }
+  // Let the row settle where the virtualizer put it (it keeps steering to the
+  // row for a few frames), then bring the words themselves to the middle: a
+  // long reply is taller than the view. Through the virtualizer, so the row
+  // it was steering to does not pull the view back.
+  for (let frame = 0; frame < 4; frame++) await new Promise(resolve => requestAnimationFrame(resolve));
+  if (own !== searchGeneration) return;
+  const words = paintHighlights(), el = viewport.value;
+  if (words && el) { const at = words.getBoundingClientRect(), view = el.getBoundingClientRect(); if (at.height) virtualizer.value.scrollBy(at.top - view.top - (view.height - at.height) / 2); }
+}
+/** Marks the matches in the rows shown; the first in the current match's row stands out, and is returned. */
+function paintHighlights(): Range | undefined {
+  const registry = (globalThis.CSS as unknown as { highlights?: Map<string, unknown> } | undefined)?.highlights;
+  const HighlightType = (globalThis as unknown as { Highlight?: new (...ranges: Range[]) => unknown }).Highlight;
+  if (!registry || !HighlightType) return undefined;
+  registry.delete('chat-search'); registry.delete('chat-search-current');
+  const query = searchOpen.value ? searchQuery.value : '', el = viewport.value;
+  if (!query.trim() || !el) return undefined;
+  const all: Range[] = [], current: Range[] = [];
+  for (const row of el.querySelectorAll<HTMLElement>('.chat-row')) {
+    const inCurrent = Number(row.dataset.index) === searchRow;
+    const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      for (const [start, end] of occurrences(node.textContent ?? '', query)) {
+        const range = new Range(); range.setStart(node, start); range.setEnd(node, end);
+        (inCurrent && !current.length ? current : all).push(range);
+      }
+    }
+  }
+  registry.set('chat-search', new HighlightType(...all));
+  if (current.length) registry.set('chat-search-current', new HighlightType(...current));
+  return current[0];
+}
+// Rows coming into view while searching are marked too.
+watch(visibleRows, () => { if (searchOpen.value && searchQuery.value.trim()) void nextTick(paintHighlights); });
+onBeforeUnmount(() => { clearTimeout(searchTimer); if (searchOpen.value) { searchOpen.value = false; paintHighlights(); } });
+function searchKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeSearch(); return; }
+  if (event.key === 'Enter' && !event.isComposing) { event.preventDefault(); void stepSearch(event.shiftKey ? -1 : 1); }
+}
 // What sits above the rows -- the trimmed notice, the older-history marker,
 // the welcome -- moves where they begin.
 watch([truncated, () => older.value !== undefined, () => rows.value.rows.length === 0], () => { void nextTick(measureRowsMargin); });
@@ -1050,6 +1143,10 @@ function closeSessionMenu(restoreFocus = false) {
 function requestEnd() { closeSessionMenu(); confirmEnd.value = true; }
 function cancelEndpointChange() { endpointConfirm.value = false; selectedProfile.value = props.session.endpoint_profile_id ?? ''; }
 function paneKeydown(event: KeyboardEvent) {
+  // ⌘/Ctrl+F searches the whole conversation: the browser's own find sees only the rows in the page.
+  if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'f' && !isPreview.value) {
+    event.preventDefault(); event.stopPropagation(); openSearch(); return;
+  }
   // ⌘/Ctrl+Enter answers the request in the dock: allow, or submit the answers.
   if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.shiftKey && !composing.value && dockedApproval.value) {
     const item = dockedApproval.value;
@@ -1185,7 +1282,7 @@ function keydown(event: KeyboardEvent) {
 
 <template>
   <section :class="['chat-pane', { 'has-tab-menu': !!paneId, 'is-phone': mobile }]" :aria-label="t('Conversation with {provider}', {provider:providerLabel(session.provider)})" @keydown="paneKeydown">
-    <ContextMenu v-if="timelineMenu" :x="timelineMenu.x" :y="timelineMenu.y" :label="t('Conversation actions')" @close="closeTimelineMenu"><button v-if="timelineMenu.text" role="menuitem" @click="copyFromTimeline(timelineMenu!.text)">{{ t('Copy selection') }}</button><button role="menuitem" @click="closeTimelineMenu(); scrollToLatest(true)">{{ t('Latest message') }}</button><button role="menuitem" :disabled="loading" @click="closeTimelineMenu(); load()">{{ t('Refresh conversation') }}</button><template v-if="clearAvailable"><hr/><button role="menuitem" :disabled="actionBusy" :title="t('Runs this client\'s own /clear: the transcript and its context are dropped together.')" @click="clearContext">{{ t('Clear context') }}</button></template></ContextMenu>
+    <ContextMenu v-if="timelineMenu" :x="timelineMenu.x" :y="timelineMenu.y" :label="t('Conversation actions')" @close="closeTimelineMenu"><button v-if="timelineMenu.text" role="menuitem" @click="copyFromTimeline(timelineMenu!.text)">{{ t('Copy selection') }}</button><button role="menuitem" @click="closeTimelineMenu(); scrollToLatest(true)">{{ t('Latest message') }}</button><button v-if="!isPreview" role="menuitem" @click="closeTimelineMenu(); openSearch()">{{ t('Search conversation') }}</button><button role="menuitem" :disabled="loading" @click="closeTimelineMenu(); load()">{{ t('Refresh conversation') }}</button><template v-if="clearAvailable"><hr/><button role="menuitem" :disabled="actionBusy" :title="t('Runs this client\'s own /clear: the transcript and its context are dropped together.')" @click="clearContext">{{ t('Clear context') }}</button></template></ContextMenu>
     <Teleport v-if="!isPreview" to="body" :disabled="!paneId"><details :data-session-menu-pane="paneId" ref="sessionMenu" :style="tabMenuStyle" :class="['chat-menu','chat-floating-menu', { 'chat-tab-menu': !!paneId, 'is-phone': mobile }]" @toggle="positionMenu" @keydown.esc.stop.prevent="closeSessionMenu(true)"><summary :aria-label="t('Session actions')" :title="t('Session actions')"><Icon name="more" :size="17" /></summary><nav :style="tabMenuPanelStyle"><div class="chat-menu-status"><span class="chat-status-dot" :class="{working:turnBusy}" />{{ t(statusLabel,{provider:providerLabel(session.provider)}) }}</div><div class="chat-menu-session"><button v-if="mobile" @click="closeSessionMenu(); load()"><Icon name="refresh" :size="14" />{{ t('Refresh conversation') }}</button><slot name="session-actions" :close-menu="closeSessionMenu"><button @click="closeSessionMenu(); emit('environment',session.id)"><Icon name="settings" :size="14" />{{ t('Session environment') }}</button></slot></div><hr v-if="legacyAvailable||terminalReopenOffered||capabilities.agentTools" class="chat-menu-divider" /><button v-if="legacyAvailable" @click="closeSessionMenu(); emit('legacy')"><Icon name="terminal" :size="14" />{{ t('Open native client view') }}</button><button v-if="terminalReopenOffered" :disabled="actionBusy||!terminalReopenAvailable" :title="t(terminalReopenAvailable?'For interactive commands such as /config, which the conversation view cannot display':'Available once the conversation has started: send a first message')" @click="closeSessionMenu(); openInTerminal()"><Icon name="terminal" :size="14" />{{ t('Open this session in a terminal') }}</button><AgentToolsSwitch v-if="capabilities.agentTools" :session-id="session.id" /><hr v-if="running" class="chat-menu-divider" /><button v-if="running" class="chat-end-button" :disabled="actionBusy" @click="requestEnd"><Icon name="stop" :size="14" />{{ t('End session…') }}</button></nav></details></Teleport>
     <div v-if="!supported" class="chat-notice">{{ t('Structured conversation requires an updated backend. Your native session is unchanged.') }}<button v-if="legacyAvailable" class="chat-link" @click="emit('legacy')">{{ t('Open native client view') }}</button></div>
     <div v-if="error" class="chat-alert" role="alert">{{ error }}<button @click="load()">{{ t('Refresh conversation') }}</button></div>
@@ -1193,7 +1290,8 @@ function keydown(event: KeyboardEvent) {
     <div v-if="notice" class="chat-notice">{{ t(notice) }}</div>
     <div v-if="session.native_source_id" class="chat-notice">{{ t('Native history resumes in the client; earlier transcript is not yet displayed here.') }}</div>
     <div v-if="confirmEnd&&!isPreview" class="chat-end-confirm" role="alertdialog" :aria-label="t('End session')"><p>{{ t('End this session? Its background process will stop; history remains.') }}</p><div><button :disabled="actionBusy" @click="endSession">{{ t('End session') }}</button><button :disabled="actionBusy" @click="confirmEnd=false">{{ t('Keep connected') }}</button></div></div>
-    <div ref="viewport" :class="['chat-timeline',{'is-empty':!view.items.length}]" role="log" :aria-label="t('Conversation messages')" aria-live="polite" :aria-busy="view.turn==='running'" @contextmenu="openTimelineMenu" @scroll="atBottom">
+    <div v-if="searchOpen" class="chat-search" role="search"><Icon name="search" :size="14" class="chat-search-icon"/><input ref="searchInput" v-model="searchQuery" class="chat-search-input" type="search" maxlength="200" :placeholder="t('Search this conversation')" :aria-label="t('Search this conversation')" @keydown="searchKeydown" /><span class="chat-search-count" role="status">{{ searchCount }}</span><button type="button" class="icon-button" :aria-label="t('Previous match')" :title="t('Previous match')" :disabled="!searchHits.length" @click="stepSearch(-1)"><Icon name="chevron" :size="14" class="chat-search-up"/></button><button type="button" class="icon-button" :aria-label="t('Next match')" :title="t('Next match')" :disabled="!searchHits.length" @click="stepSearch(1)"><Icon name="chevron" :size="14" class="chat-search-down"/></button><button type="button" class="icon-button" :aria-label="t('Close search')" :title="t('Close search')" @click="closeSearch"><Icon name="close" :size="14"/></button><p v-if="searchNotice" class="chat-search-notice">{{ t(searchNotice) }}</p></div>
+    <div ref="viewport" tabindex="-1" :class="['chat-timeline',{'is-empty':!view.items.length}]" role="log" :aria-label="t('Conversation messages')" aria-live="polite" :aria-busy="view.turn==='running'" @contextmenu="openTimelineMenu" @scroll="atBottom">
       <p v-if="truncated" class="chat-history-notice">{{ t('Earlier display history was trimmed. Native history remains managed by the official client.') }}</p>
       <div v-if="!view.items.length" class="chat-welcome"><span class="chat-welcome-mark"><ProviderIcon :provider="session.provider" :size="32" /></span><h3>{{ t('What shall we build?') }}</h3><p>{{ t('A real conversation with your native agent, with room for tools, changes and your next idea.') }}</p><span class="chat-context-chip" :title="activeProfile?(activeProfile.native_config?t('Uses the sign-in and settings in {path}',{path:activeProfile.native_config.config_dir}):undefined):t('A fresh, empty client home: no host sign-in or settings, so it may ask you to log in.')"><ProviderIcon :provider="session.provider" :size="12"/>{{ endpointName }}</span><Transition name="chat-boot" :duration="240"><p v-if="booting" class="chat-boot" role="status"><span class="chat-boot-bar"><i/></span>{{ t('Starting {provider}… models and commands arrive with it.',{provider:providerLabel(session.provider)}) }}</p></Transition><div v-if="startersAvailable" class="chat-starters"><button v-for="(starter,index) in STARTERS" :key="starter.title" type="button" :style="{'--starter-delay':index*60+'ms'}" @click="useStarter(starter.prompt)"><span class="chat-starter-icon" :data-tone="starter.icon"><Icon :name="starter.icon" :size="16"/></span><span><strong>{{ t(starter.title) }}</strong><small>{{ t(starter.note) }}</small></span></button></div><p v-if="chatNote" class="chat-trust-note">{{ t(chatNote) }}</p></div>
       <div v-if="older!==undefined" ref="olderSentinel" class="chat-history-older" role="status">{{ loadingOlder ? t('Loading earlier messages…') : '' }}</div>
@@ -1477,6 +1575,8 @@ function keydown(event: KeyboardEvent) {
 /* The virtualizer keeps the rows in view where they were as others are measured
    or put in front; the browser's own anchoring would correct the same shift twice. */
 .chat-timeline{overflow-anchor:none}
+/* Clicked, the conversation takes focus, so ⌘/Ctrl+F and the arrow keys reach it; it shows no ring for that. */
+.chat-timeline:focus{outline:none}
 .chat-timeline.is-empty::before{content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;background-image:radial-gradient(circle,var(--line-strong) 1px,transparent 1.3px);background-size:22px 22px;background-position:center 8px;-webkit-mask-image:radial-gradient(ellipse 70% 60% at 50% 32%,#000 10%,transparent 75%);mask-image:radial-gradient(ellipse 70% 60% at 50% 32%,#000 10%,transparent 75%)}
 .chat-welcome{position:relative;isolation:isolate;max-width:560px}
 .chat-welcome::before{content:"";position:absolute;z-index:-1;left:50%;top:-40px;width:min(620px,100cqw);height:340px;transform:translateX(-50%);background:radial-gradient(closest-side at 38% 42%,color-mix(in srgb, var(--accent) 14%, transparent),transparent),radial-gradient(closest-side at 64% 52%,color-mix(in srgb, var(--violet) 12%, transparent),transparent);pointer-events:none}
@@ -1517,6 +1617,14 @@ function keydown(event: KeyboardEvent) {
    virtualizer), so none needs skipping, and each is measured at its real size. */
 .chat-row{display:flow-root}
 .chat-history-older{min-height:28px;text-align:center;color:var(--muted);font-size:var(--text-xs)}
+.chat-search{display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding:6px 10px;border-bottom:1px solid var(--border);background:var(--surface)}
+.chat-search-icon{color:var(--muted);flex-shrink:0}
+.chat-search-input{flex:1;min-width:0;border:0;background:none;font:inherit;font-size:var(--text-sm);color:var(--ink);padding:4px 2px;outline:none}
+.chat-search-count{font-size:var(--text-xs);color:var(--muted);white-space:nowrap;min-width:3ch;text-align:right}
+.chat-search-up{transform:rotate(-90deg)}.chat-search-down{transform:rotate(90deg)}
+.chat-search-notice{flex-basis:100%;margin:2px 0 0;font-size:var(--text-xs);color:var(--muted)}
+::highlight(chat-search){background-color:#f5c54266;color:inherit}
+::highlight(chat-search-current){background-color:#f59e0bcc;color:#1a1a1a}
 .chat-tool-run{max-width:820px;margin:0 auto 13px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--sunken);overflow:hidden}
 .chat-tool-run>summary{display:flex;align-items:center;gap:9px;min-height:46px;padding:8px 13px;cursor:pointer;list-style:none}
 .chat-tool-run>summary::-webkit-details-marker{display:none}

@@ -171,6 +171,10 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/api/sessions/{id}/conversation", get(get_conversation))
         .route(
+            "/api/sessions/{id}/conversation/search",
+            get(search_conversation),
+        )
+        .route(
             "/api/sessions/{id}/conversation/open",
             post(open_conversation),
         )
@@ -239,6 +243,38 @@ async fn snapshot_of(state: &AppState, id: SessionId, limit: usize) -> Result<Va
     Ok(
         json!({"type":"snapshot","mode":mode,"running":running,"events":page.events,"truncated":page.truncated,"older":page.older}),
     )
+}
+/// The most places one search reports: enough to step through, few enough to read.
+const SEARCH_LIMIT: usize = 200;
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SearchQuery {
+    q: String,
+    limit: Option<usize>,
+}
+/// Where words appear in the whole conversation, newest first: the event,
+/// the message or call it belongs to, and the words around it. The view
+/// reads older pages as far as it needs to show one.
+async fn search_conversation(
+    State(state): State<AppState>,
+    Path(id): Path<SessionId>,
+    Query(query): Query<SearchQuery>,
+) -> Result<Json<Value>> {
+    session_record(&state, id).await?;
+    if query.q.chars().count() > 200 {
+        return Err(ApiError::bad("A search is at most 200 characters"));
+    }
+    let limit = query.limit.unwrap_or(SEARCH_LIMIT).clamp(1, SEARCH_LIMIT);
+    let text = query.q.clone();
+    // One more than asked says whether there are more than were sent.
+    let mut hits = db(&state, move |s| s.search_conversation(id, &text, limit + 1)).await?;
+    let more = hits.len() > limit;
+    hits.truncate(limit);
+    let hits: Vec<Value> = hits
+        .into_iter()
+        .map(|hit| json!({"seq":hit.seq,"kind":hit.kind,"id":hit.id,"snippet":hit.snippet}))
+        .collect();
+    Ok(Json(json!({"hits":hits,"more":more})))
 }
 /// Which page of a conversation: the latest, or the one before `before`.
 #[derive(Deserialize)]
