@@ -48,8 +48,9 @@ pub struct ChatRuntime {
     ready: AtomicBool,
     busy: AtomicBool,
     approvals: Mutex<HashMap<String, HashSet<String>>>,
-    /// The bridge process; the native client runs beneath it.
-    pid: Option<u32>,
+    /// The process this conversation owns: the bridge, with the native client
+    /// beneath it, or the native client itself. Known once it has started.
+    pid: Mutex<Option<u32>>,
 }
 impl ChatRuntime {
     pub fn running(&self) -> bool {
@@ -105,7 +106,7 @@ impl ChatManager {
             .expect("chat sessions")
             .iter()
             .filter(|(_, runtime)| runtime.running())
-            .filter_map(|(id, runtime)| runtime.pid.map(|pid| (*id, pid)))
+            .filter_map(|(id, runtime)| runtime.pid.lock().expect("chat pid").map(|pid| (*id, pid)))
             .collect()
     }
     pub fn get(&self, id: SessionId) -> Option<Arc<ChatRuntime>> {
@@ -302,7 +303,7 @@ pub async fn start_locked(state: &AppState, session: &Session) -> Result<Arc<Cha
         ready: AtomicBool::new(false),
         busy: AtomicBool::new(false),
         approvals: Mutex::new(HashMap::new()),
-        pid: adapter.pid(),
+        pid: Mutex::new(adapter.pid()),
     });
     db(state, move |s| {
         s.set_session_status(id, SessionStatus::Starting)
@@ -979,6 +980,7 @@ async fn supervise<A: ClientAdapter>(
     if let Err(message) = adapter.start(&init).await {
         failure = Some(message);
     }
+    *runtime.pid.lock().expect("chat pid") = adapter.pid();
     while failure.is_none() && !native_exit {
         tokio::select! {
             _=runtime.stop.notified()=>break,
@@ -1324,7 +1326,7 @@ impl ChatRuntime {
             ready: AtomicBool::new(true),
             busy: AtomicBool::new(false),
             approvals: Mutex::new(HashMap::new()),
-            pid: None,
+            pid: Mutex::new(None),
         }
     }
 }

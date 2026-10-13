@@ -220,6 +220,26 @@ pub fn keep_standard_handles_private() {
 /// run with Node directly. A batch file that is not an npm shim is refused
 /// rather than handed to `cmd.exe`.
 pub fn launcher(program: &str, args: &[String]) -> io::Result<(String, Vec<String>)> {
+    launch_with(program, args, None)
+}
+
+/// [`launcher`], running a script shim under `node` when it is a `.js` file or
+/// an npm shim for one, instead of `AGENTDOCK_NODE_BIN`: for a caller that
+/// already chose the JavaScript runtime its own scripts use.
+pub fn launcher_with_node(
+    program: &str,
+    args: &[String],
+    node: &str,
+) -> io::Result<(String, Vec<String>)> {
+    launch_with(program, args, Some(node))
+}
+
+#[cfg_attr(not(windows), allow(unused_variables))]
+fn launch_with(
+    program: &str,
+    args: &[String],
+    node: Option<&str>,
+) -> io::Result<(String, Vec<String>)> {
     #[cfg(not(windows))]
     {
         Ok((program.to_owned(), args.to_vec()))
@@ -234,7 +254,10 @@ pub fn launcher(program: &str, args: &[String]) -> io::Result<(String, Vec<Strin
             (runner, all)
         };
         match extension.as_str() {
-            "js" | "mjs" | "cjs" => Ok(prefixed(node_program(None), &path)),
+            "js" | "mjs" | "cjs" => Ok(prefixed(
+                node.map_or_else(|| node_program(None), str::to_owned),
+                &path,
+            )),
             "cmd" | "bat" => {
                 let target = shim_target(&path).ok_or_else(|| {
                     io::Error::new(
@@ -246,7 +269,16 @@ pub fn launcher(program: &str, args: &[String]) -> io::Result<(String, Vec<Strin
                     )
                 })?;
                 if matches!(extension_of(&target).as_str(), "js" | "mjs" | "cjs") {
-                    Ok(prefixed(node_program(path.parent()), &target))
+                    // Node beside the shim still comes first, as the shim prefers.
+                    let runner = match node {
+                        Some(node)
+                            if !path.parent().is_some_and(|d| d.join("node.exe").is_file()) =>
+                        {
+                            node.to_owned()
+                        }
+                        _ => node_program(path.parent()),
+                    };
+                    Ok(prefixed(runner, &target))
                 } else {
                     Ok((target.to_string_lossy().into_owned(), args.to_vec()))
                 }

@@ -12,6 +12,7 @@ mod canvas;
 mod chat_adapter;
 mod checkouts;
 mod clients;
+mod codex_chat;
 mod conversations;
 mod daemon;
 mod directories;
