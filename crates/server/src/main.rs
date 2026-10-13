@@ -33,6 +33,7 @@ mod native_chat;
 mod native_config;
 mod native_history;
 mod paths;
+mod pi_chat;
 mod preferences;
 mod price_list;
 mod providers;
