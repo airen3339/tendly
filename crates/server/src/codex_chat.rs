@@ -2485,6 +2485,9 @@ mod tests {
         );
     }
 
+    // Paths here are resolved as the platform does, as Node's `path.resolve`
+    // does for the bridge: these expectations are POSIX ones.
+    #[cfg(unix)]
     #[test]
     fn scopes_report_access_and_what_lies_outside_the_workspace() {
         let scope = approval_scope(
