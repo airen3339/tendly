@@ -169,11 +169,48 @@ pub fn newer(candidate: &str, than: &str) -> bool {
     matches!((version_key(candidate), version_key(than)), (Some(a), Some(b)) if a > b)
 }
 
+/// The package holding this machine's binary, `@wnzzer/agentdock-<platform>`,
+/// read from where this executable sits.
+fn platform_package(executable: &Path) -> Option<String> {
+    let mut parts = executable
+        .components()
+        .map(|part| part.as_os_str().to_string_lossy());
+    while let Some(part) = parts.next() {
+        if part == "@wnzzer"
+            && let Some(name) = parts.clone().next()
+            && name.starts_with("agentdock-")
+        {
+            return Some(format!("@wnzzer/{name}"));
+        }
+    }
+    None
+}
+
+/// Whether npm can see `package@version` yet.
+///
+/// The binary is an optional dependency, and npm skips one it cannot find
+/// without failing the install. For a few minutes after a release the
+/// registry can serve the new main package and not yet the new platform one;
+/// an update then replaced a working install with one that had no binary.
+async fn published(package: &str, version: &str) -> bool {
+    let answer = tokio::time::timeout(
+        CHECK_TIMEOUT,
+        npm()
+            .args(["view", &format!("{package}@{version}"), "version"])
+            .output(),
+    )
+    .await;
+    matches!(answer, Ok(Ok(output)) if output.status.success()
+        && String::from_utf8_lossy(&output.stdout).trim() == version)
+}
+
 /// The newest published version, as this machine's npm sees it.
 ///
 /// Asking npm rather than the registry directly keeps whatever registry,
 /// mirror and proxy the user configured for npm, which is also what the
-/// install itself will use.
+/// install itself will use. A version whose binary for this machine npm
+/// cannot see yet is not offered: it is still arriving, and installing it
+/// would leave no binary at all.
 pub async fn latest(force: bool) -> std::result::Result<String, String> {
     if !force
         && let Some((at, version)) = LATEST.lock().expect("update cache").as_ref()
@@ -200,6 +237,12 @@ pub async fn latest(force: bool) -> std::result::Result<String, String> {
     if version_key(&version).is_none() {
         return Err(format!("npm reported an unreadable version: {version:?}"));
     }
+    if let Some(package) = executable().and_then(platform_package)
+        && !published(&package, &version).await
+    {
+        // Not cached, so it is offered as soon as it arrives.
+        return Ok(env!("CARGO_PKG_VERSION").to_owned());
+    }
     *LATEST.lock().expect("update cache") = Some((Instant::now(), version.clone()));
     Ok(version)
 }
@@ -222,6 +265,42 @@ pub async fn install(install: &NpmInstall, version: &str) -> std::result::Result
     let _only = INSTALLING
         .try_lock()
         .map_err(|_| "An update is already being installed".to_owned())?;
+    let program = executable().ok_or("Cannot locate the AgentDock executable")?;
+    if let Some(package) = platform_package(program)
+        && !published(&package, version).await
+    {
+        return Err(format!(
+            "{version} is still being published: npm cannot see {package}@{version} yet. Try again in a few minutes."
+        ));
+    }
+    let installed = npm_install_version(install, program, version).await;
+    if let Ok(on_disk) = &installed {
+        *INSTALLED.lock().expect("update state") = Some(on_disk.clone());
+        return installed;
+    }
+    // The tree npm left may have no working binary. Putting back the running
+    // version is what keeps the next start from failing.
+    let running = env!("CARGO_PKG_VERSION");
+    if running == version {
+        return installed;
+    }
+    let reason = installed.unwrap_err();
+    match npm_install_version(install, program, running).await {
+        Ok(_) => Err(format!(
+            "{reason}. {running} was put back, so AgentDock still starts."
+        )),
+        Err(again) => Err(format!(
+            "{reason}. Putting {running} back failed too ({again}); run `npm install -g {PACKAGE}@{running}` before restarting."
+        )),
+    }
+}
+
+/// One `npm install` of `version`, confirmed by asking the binary it left.
+async fn npm_install_version(
+    install: &NpmInstall,
+    program: &Path,
+    version: &str,
+) -> std::result::Result<String, String> {
     let output = tokio::time::timeout(
         INSTALL_TIMEOUT,
         npm()
@@ -241,7 +320,6 @@ pub async fn install(install: &NpmInstall, version: &str) -> std::result::Result
     }
     // Trust the binary, not npm's exit status: the version that a restart
     // would run is whatever now answers at this path.
-    let program = executable().ok_or("Cannot locate the AgentDock executable")?;
     let answer = Command::new(program)
         .arg("--version")
         .stdin(Stdio::null())
@@ -258,7 +336,6 @@ pub async fn install(install: &NpmInstall, version: &str) -> std::result::Result
             program.display()
         ));
     }
-    *INSTALLED.lock().expect("update state") = Some(installed.clone());
     Ok(installed)
 }
 
@@ -555,6 +632,28 @@ mod tests {
             assert_eq!(found.prefix, root);
         }
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_platform_package_is_read_from_where_the_binary_sits() {
+        assert_eq!(
+            platform_package(Path::new(
+                "/home/u/.local/lib/node_modules/@wnzzer/agentdock/node_modules/@wnzzer/agentdock-linux-x64/bin/agentdock-server"
+            ))
+            .as_deref(),
+            Some("@wnzzer/agentdock-linux-x64")
+        );
+        assert_eq!(
+            platform_package(Path::new(
+                "/usr/lib/node_modules/@wnzzer/agentdock-darwin-arm64/bin/agentdock-server"
+            ))
+            .as_deref(),
+            Some("@wnzzer/agentdock-darwin-arm64")
+        );
+        assert_eq!(
+            platform_package(Path::new("/usr/local/bin/agentdock-server")),
+            None
+        );
     }
 
     #[test]
