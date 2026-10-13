@@ -656,6 +656,10 @@ impl<T, R, X: Default> Core<T, R, X> {
         Some(turn)
     }
     /// A turn without the user message `begin` writes.
+    /// Whether a message id was already taken (`seen` in the bridge).
+    pub fn has_seen(&self, id: &str) -> bool {
+        self.seen.contains_key(id)
+    }
     pub fn open_turn(&mut self, id: String) -> usize {
         self.turns.push(Turn {
             id,

@@ -87,6 +87,18 @@ allowed-origins = ["http://box.local:28789"]
 
 Any other key names the `AGENTDOCK_` variable it spells (`shell`, `claude-bin`, `browse-roots`, …); dashes and underscores are the same, a full `AGENTDOCK_*` name is accepted as written, and a list becomes the comma-separated form those variables already take. Keys always land under that prefix, so this file cannot set a variable outside AgentDock's namespace.
 
+### Running agent clients in the server itself
+
+Structured Codex, Claude Code and Pi conversations run through the Node chat bridge by default. Each client can instead be driven directly by the server, with no Node process per conversation:
+
+```toml
+codex_adapter = "rust"    # AGENTDOCK_CODEX_ADAPTER
+claude_adapter = "rust"   # AGENTDOCK_CLAUDE_ADAPTER
+pi_adapter = "rust"       # AGENTDOCK_PI_ADAPTER
+```
+
+Any other value, or none, keeps the bridge, so going back is one line. The choice is read when a conversation starts: one already running keeps the layer it began on. A change in this file takes effect after a restart; the environment variable takes effect when it is set for the server. Account sign-in, native history and file search still use the bridge either way.
+
 Precedence is command line → environment → file → default. `--lan` outranks the file only about the host: a port written down is still the port that was meant. `AGENTDOCK_HOME` and `AGENTDOCK_STATE_DIR` cannot come from the file, which lives inside the directory they choose.
 
 ## Advanced environment configuration
@@ -116,6 +128,9 @@ AGENTDOCK_WEB_DIR             # state-dir/web if installed, else source apps/web
 AGENTDOCK_NATIVE_BRIDGE       # optional path to packages/native-bridge/history.mjs
 AGENTDOCK_JS_RUNTIME          # native helper/chat/account runtime; default node (absolute path supported)
 AGENTDOCK_CHAT_BRIDGE         # optional path to packages/native-bridge/chat.mjs
+AGENTDOCK_CODEX_ADAPTER       # `rust` runs Codex conversations in the server; anything else, the bridge
+AGENTDOCK_CLAUDE_ADAPTER      # the same for Claude Code
+AGENTDOCK_PI_ADAPTER          # the same for Pi
 AGENTDOCK_ACCOUNT_BRIDGE      # optional path to packages/native-bridge/account.mjs
 AGENTDOCK_NODE_BIN            # legacy runtime override, used only if JS_RUNTIME is unset/empty
 AGENTDOCK_CODEX_HISTORY_DIR   # optional history source; otherwise CODEX_HOME or ~/.codex

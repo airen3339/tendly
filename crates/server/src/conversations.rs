@@ -301,6 +301,7 @@ pub async fn start_locked(state: &AppState, session: &Session) -> Result<Arc<Cha
     if crate::chat_adapter::in_process(session.provider) {
         let adapter = match session.provider {
             ProviderKind::Pi => crate::pi_chat::adapter(&spec.env, &spec.env_remove),
+            ProviderKind::ClaudeCode => crate::claude_chat::adapter(&spec.env, &spec.env_remove),
             _ => crate::codex_chat::adapter(&spec.env, &spec.env_remove),
         };
         return run_adapter(state, session, adapter, init).await;

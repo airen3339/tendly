@@ -39,14 +39,16 @@ impl ChatInit {
 /// Whether `provider`'s conversations run in this process rather than under
 /// the Node bridge: `AGENTDOCK_CODEX_ADAPTER=rust` for Codex
 /// ([`crate::codex_chat`]), `AGENTDOCK_PI_ADAPTER=rust` for Pi
-/// ([`crate::pi_chat`]); `codex_adapter = "rust"` and `pi_adapter = "rust"` in
-/// config.toml set them. Anything else, or nothing, is the bridge, so a problem
+/// ([`crate::pi_chat`]), `AGENTDOCK_CLAUDE_ADAPTER=rust` for Claude Code
+/// ([`crate::claude_chat`]); `codex_adapter`, `pi_adapter` and
+/// `claude_adapter = "rust"` in config.toml set them. Anything else, or nothing, is the bridge, so a problem
 /// in a Rust client is one setting from undone. Read at each start: a running
 /// conversation keeps the layer it began on.
 pub fn in_process(provider: agentdock_domain::ProviderKind) -> bool {
     let variable = match provider {
         agentdock_domain::ProviderKind::Codex => "AGENTDOCK_CODEX_ADAPTER",
         agentdock_domain::ProviderKind::Pi => "AGENTDOCK_PI_ADAPTER",
+        agentdock_domain::ProviderKind::ClaudeCode => "AGENTDOCK_CLAUDE_ADAPTER",
         _ => return false,
     };
     adapter_choice(std::env::var(variable).ok().as_deref())
@@ -456,8 +458,7 @@ mod tests {
 
     #[test]
     fn the_bridge_runs_a_client_unless_rust_is_asked_for() {
-        // Claude Code and terminals have no layer to choose yet.
-        assert!(!in_process(agentdock_domain::ProviderKind::ClaudeCode));
+        // Terminals have no layer to choose.
         assert!(!in_process(agentdock_domain::ProviderKind::Terminal));
         assert!(!adapter_choice(None));
         assert!(!adapter_choice(Some("bridge")));

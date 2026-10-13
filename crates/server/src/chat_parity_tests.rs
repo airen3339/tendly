@@ -168,6 +168,9 @@ fn comparable(run: Run, dir: &str) -> (Vec<Value>, Vec<Value>) {
             other => other,
         }
     }
+    // A turn Claude Code starts by itself is named with a fresh UUID, and a
+    // card's `at` is the moment it was emitted: compared by order and presence.
+    let mut background: Vec<String> = Vec::new();
     let events = run
         .events
         .into_iter()
@@ -177,6 +180,23 @@ fn comparable(run: Run, dir: &str) -> (Vec<Value>, Vec<Value>) {
                 Some("approval" | "approval_resolved")
             ) {
                 event["id"] = seen(&event["id"]);
+            }
+            if let Some(id) = event["id"]
+                .as_str()
+                .filter(|id| id.starts_with("background-"))
+            {
+                let id = id.to_owned();
+                let index = background
+                    .iter()
+                    .position(|known| *known == id)
+                    .unwrap_or_else(|| {
+                        background.push(id);
+                        background.len() - 1
+                    });
+                event["id"] = json!(format!("background#{index}"));
+            }
+            if event.get("at").is_some() {
+                event["at"] = json!(0);
             }
             placeholder(event, dir)
         })
@@ -205,6 +225,11 @@ const PI: Client = Client {
     provider: "pi",
     fixture: "pi-cli.mjs",
     adapter: crate::pi_chat::adapter,
+};
+const CLAUDE: Client = Client {
+    provider: "claude_code",
+    fixture: "claude-cli.mjs",
+    adapter: crate::claude_chat::adapter,
 };
 
 /// A turn Pi starts by itself is named for the moment it began
@@ -911,4 +936,747 @@ async fn pi_the_depth_shown_is_the_one_pi_runs() {
         settings.last().map(|e| e["model"].clone()),
         Some(json!("agentdock/qwen-local"))
     );
+}
+
+// --- Claude Code -------------------------------------------------------------
+
+/// Message ids are UUIDs, so what Claude Code receives (`uuid`) is the same on
+/// both sides; any other id goes out as a fresh one.
+fn uuid(n: u8) -> String {
+    format!("00000000-0000-4000-8000-0000000000{n:02}")
+}
+fn send_message(n: u8, content: &str) -> Step {
+    Send(json!({"type":"message","id":uuid(n),"content":content}))
+}
+fn finished(n: u8, status: &'static str) -> Step {
+    // Steps take plain functions, so the id and status are matched here.
+    match (n, status) {
+        (1, "completed") => Wait(|e| turn(e, &uuid(1), "completed")),
+        (2, "completed") => Wait(|e| turn(e, &uuid(2), "completed")),
+        (3, "completed") => Wait(|e| turn(e, &uuid(3), "completed")),
+        (4, "completed") => Wait(|e| turn(e, &uuid(4), "completed")),
+        (5, "completed") => Wait(|e| turn(e, &uuid(5), "completed")),
+        (6, "completed") => Wait(|e| turn(e, &uuid(6), "completed")),
+        (1, "interrupted") => Wait(|e| turn(e, &uuid(1), "interrupted")),
+        (2, "interrupted") => Wait(|e| turn(e, &uuid(2), "interrupted")),
+        (3, "interrupted") => Wait(|e| turn(e, &uuid(3), "interrupted")),
+        (1, "failed") => Wait(|e| turn(e, &uuid(1), "failed")),
+        (2, "failed") => Wait(|e| turn(e, &uuid(2), "failed")),
+        _ => unreachable!("add the pair"),
+    }
+}
+fn claude_native(events: &[Value]) -> Vec<Value> {
+    events.to_vec()
+}
+
+#[tokio::test]
+async fn claude_a_turn_with_its_reply_usage_and_settings() {
+    let events = both_for(
+        &CLAUDE,
+        "claude-simple",
+        &[],
+        &[send_message(1, "simple"), finished(1, "completed")],
+    )
+    .await;
+    let events = claude_native(&events);
+    // The reply streamed, then whole; the turn's cost after it.
+    assert!(
+        events
+            .iter()
+            .any(|e| e["type"] == "message" && e["delta"] == true && e["id"] == "msg-1")
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| e["type"] == "message" && e["delta"] == false && e["text"] == "Hello 🦊")
+    );
+    assert!(
+        events.iter().any(
+            |e| e["type"] == "usage" && e["turn"] == json!({"input":42,"output":4,"cached":30})
+        )
+    );
+    // The models it listed, and `default` as the starting point.
+    assert!(
+        events
+            .iter()
+            .any(|e| e["type"] == "settings" && e["model"] == "default")
+    );
+}
+
+#[tokio::test]
+async fn claude_tools_and_their_results() {
+    let events = both_for(
+        &CLAUDE,
+        "claude-tools",
+        &[],
+        &[send_message(1, "tools"), finished(1, "completed")],
+    )
+    .await;
+    let failed = events
+        .iter()
+        .find(|e| e["type"] == "tool" && e["id"] == "bash-1" && e["status"] == "failed")
+        .expect("a failed tool result");
+    assert_eq!(failed["text"], "ls: denied");
+    assert!(events.iter().any(|e| e["type"] == "tool"
+        && e["id"] == "read-1"
+        && e["status"] == "completed"
+        && e["result_tokens"] == 3));
+}
+
+#[tokio::test]
+async fn claude_steering_joins_a_turn_or_follows_it() {
+    let events = both_for(
+        &CLAUDE,
+        "claude-steer",
+        &[],
+        &[
+            send_message(1, "hold"),
+            Wait(|e| e["type"] == "tool" && e["id"] == "hold-1"),
+            Send(json!({"type":"steer","id":uuid(2),"content":"join"})),
+            finished(1, "completed"),
+            send_message(3, "hold"),
+            Wait(|e| e["type"] == "tool" && e["id"] == "hold-2"),
+            Send(json!({"type":"steer","id":uuid(4),"content":"late"})),
+            finished(3, "completed"),
+            // Read only after the turn ended: it runs as a turn of its own.
+            finished(4, "completed"),
+            // Steering with no turn running is a message.
+            Send(json!({"type":"steer","id":uuid(5),"content":"simple"})),
+            finished(5, "completed"),
+        ],
+    )
+    .await;
+    assert!(
+        !events.iter().any(|e| turn(e, &uuid(2), "running")),
+        "a steer that joined opened a turn"
+    );
+}
+
+#[tokio::test]
+async fn claude_interrupting_a_turn() {
+    both_for(
+        &CLAUDE,
+        "claude-interrupt",
+        &[],
+        &[
+            send_message(1, "hold"),
+            Wait(|e| e["type"] == "tool" && e["id"] == "hold-1"),
+            Send(json!({"type":"interrupt"})),
+            finished(1, "interrupted"),
+            send_message(2, "simple"),
+            finished(2, "completed"),
+        ],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn claude_approvals_accepted_for_the_session_declined_and_cancelled() {
+    let events = both_for(
+        &CLAUDE,
+        "claude-approve",
+        &[],
+        &[
+            send_message(1, "approve"),
+            Wait(|e| e["type"] == "approval"),
+            Answer("accept_session", none),
+            finished(1, "completed"),
+            send_message(2, "write"),
+            WaitCount(|e| e["type"] == "approval", 2),
+            Answer("decline", none),
+            finished(2, "completed"),
+            send_message(3, "approve"),
+            WaitCount(|e| e["type"] == "approval", 3),
+            Answer("cancel", none),
+            finished(3, "interrupted"),
+        ],
+    )
+    .await;
+    let approval = events.iter().find(|e| e["type"] == "approval").unwrap();
+    assert_eq!(approval["title"], "Allow Bash to remove output?");
+    assert_eq!(
+        approval["choices"],
+        json!(["accept", "accept_session", "decline", "cancel"])
+    );
+    assert!(
+        approval["scope"]["outside"]
+            .as_array()
+            .is_some_and(|o| !o.is_empty()),
+        "{approval}"
+    );
+    // A tool with no suggestions offers no session-wide choice.
+    let write = events
+        .iter()
+        .filter(|e| e["type"] == "approval")
+        .nth(1)
+        .unwrap();
+    assert_eq!(write["choices"], json!(["accept", "decline", "cancel"]));
+}
+
+/// The "don't ask again" rule goes back to the client kept to this session,
+/// and only the updates that are updates.
+#[tokio::test]
+async fn claude_a_session_wide_approval_stays_in_the_session() {
+    let dir = scenario_dir_for(&CLAUDE, "claude-session-rule");
+    let log = dir.join("native.jsonl");
+    let run = drive(
+        crate::claude_chat::adapter(&environment(&log), &[]),
+        init_for(&CLAUDE, &dir, &[]),
+        &[
+            send_message(1, "approve"),
+            Wait(|e| e["type"] == "approval"),
+            Answer("accept_session", none),
+            finished(1, "completed"),
+        ],
+        &log,
+    )
+    .await;
+    let _ = std::fs::remove_dir_all(&dir);
+    let answer = run
+        .native
+        .iter()
+        .find(|m| m["type"] == "control_response")
+        .expect("an answer");
+    let result = &answer["response"]["response"];
+    assert_eq!(result["behavior"], "allow");
+    assert_eq!(result["toolUseID"], "tool-1");
+    assert_eq!(
+        result["updatedPermissions"],
+        json!([{"type":"addRules","rules":[{"toolName":"Bash"}],"behavior":"allow","destination":"session"}])
+    );
+}
+
+#[tokio::test]
+async fn claude_questions_answered_refused_and_declined() {
+    let events = both_for(
+        &CLAUDE,
+        "claude-ask",
+        &[],
+        &[
+            send_message(1, "ask"),
+            Wait(|e| e["type"] == "approval"),
+            // Two answers to a single-choice question are refused...
+            Answer(
+                "accept",
+                |_| json!({"question-0":["Brief","Long"],"question-1":["API"]}),
+            ),
+            Wait(|e| e["type"] == "error"),
+            // ...and the question stays open for a valid answer.
+            Answer(
+                "accept",
+                |_| json!({"question-0":["Brief"],"question-1":["API","UI"]}),
+            ),
+            finished(1, "completed"),
+            send_message(2, "ask"),
+            WaitCount(|e| e["type"] == "approval", 2),
+            Answer("decline", none),
+            finished(2, "completed"),
+        ],
+    )
+    .await;
+    let approval = events.iter().find(|e| e["type"] == "approval").unwrap();
+    assert_eq!(
+        approval["questions"][0]["options"][0],
+        json!({"label":"Brief","description":"One line"})
+    );
+    assert_eq!(approval["questions"][1]["multiSelect"], true);
+}
+
+#[tokio::test]
+async fn claude_requests_it_cannot_take() {
+    let events = both_for(
+        &CLAUDE,
+        "claude-refused",
+        &[],
+        &[
+            send_message(1, "ask-invalid"),
+            finished(1, "completed"),
+            send_message(2, "interaction"),
+            finished(2, "completed"),
+            send_message(3, "unsupported"),
+            finished(3, "completed"),
+        ],
+    )
+    .await;
+    assert_eq!(events.iter().filter(|e| e["type"] == "error").count(), 3);
+    assert!(!events.iter().any(|e| e["type"] == "approval"));
+}
+
+/// A native dialog must be handled in Claude Code itself: the turn is stopped
+/// rather than the dialog answered.
+#[tokio::test]
+async fn claude_a_native_dialog_stops_the_turn() {
+    both_for(
+        &CLAUDE,
+        "claude-dialog",
+        &[],
+        &[send_message(1, "dialog"), finished(1, "interrupted")],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn claude_a_request_the_client_withdraws() {
+    let events = both_for(
+        &CLAUDE,
+        "claude-withdrawn",
+        &[],
+        &[send_message(1, "withdrawn"), finished(1, "completed")],
+    )
+    .await;
+    assert!(events.iter().any(|e| e["type"] == "approval_resolved"));
+}
+
+#[tokio::test]
+async fn claude_subagents_and_background_tasks() {
+    let events = both_for(
+        &CLAUDE,
+        "claude-subagent",
+        &[],
+        &[
+            send_message(1, "subagent"),
+            finished(1, "completed"),
+            Wait(|e| e["type"] == "tool" && e["id"] == "task-1" && e["status"] == "failed"),
+        ],
+    )
+    .await;
+    let cards: Vec<&Value> = events.iter().filter(|e| e["id"] == "task-1").collect();
+    // What the subagent said and ran, nested under its card.
+    assert!(
+        cards.iter().any(|e| e["activity"]
+            == "Reading the tree\n\u{2192} Grep \u{00b7} TODO \u{00b7} src/lib.rs")
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| e["id"] == "grep-1" && e["parent"] == "task-1" && e["status"] == "completed")
+    );
+    // A backgrounded call stays running after its placeholder result.
+    assert!(
+        cards.iter().any(|e| e["status"] == "running"
+            && e["background"] == true
+            && e.get("text").is_some())
+    );
+    // A repeated progress line is logged once.
+    assert_eq!(
+        cards
+            .iter()
+            .filter(|e| e["activity"] == "Searching")
+            .count(),
+        1
+    );
+    assert!(cards.iter().any(|e| e["status"] == "completed"
+        && e["activity"] == "Found 1 TODO"
+        && e["stats"] == json!({"tokens":2000,"tools":3,"ms":5000})));
+}
+
+#[tokio::test]
+async fn claude_a_turn_the_client_starts_by_itself() {
+    let events = both_for(
+        &CLAUDE,
+        "claude-background",
+        &[],
+        &[
+            send_message(1, "background"),
+            finished(1, "completed"),
+            Wait(|e| {
+                e["type"] == "turn"
+                    && e["id"]
+                        .as_str()
+                        .is_some_and(|id| id.starts_with("background-"))
+                    && e["status"] == "completed"
+            }),
+        ],
+    )
+    .await;
+    assert!(
+        events
+            .iter()
+            .any(|e| e["type"] == "message" && e["text"] == "Carried on")
+    );
+}
+
+#[tokio::test]
+async fn claude_failed_turns_say_why() {
+    let events = both_for(
+        &CLAUDE,
+        "claude-fail",
+        &[],
+        &[
+            send_message(1, "fail-auth"),
+            finished(1, "failed"),
+            send_message(2, "fail"),
+            finished(2, "failed"),
+            send_message(3, "result-only"),
+            finished(3, "completed"),
+        ],
+    )
+    .await;
+    let errors: Vec<&Value> = events.iter().filter(|e| e["type"] == "error").collect();
+    assert!(
+        errors[0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("authentication mode")
+    );
+    assert!(
+        errors[1]["message"]
+            .as_str()
+            .unwrap()
+            .contains("could not complete the turn")
+    );
+    // A result with no assistant message is the reply.
+    assert!(
+        events
+            .iter()
+            .any(|e| e["type"] == "message" && e["id"] == format!("assistant-{}", uuid(3)))
+    );
+}
+
+#[tokio::test]
+async fn claude_models_depths_and_permission_modes() {
+    let events = both_for(
+        &CLAUDE,
+        "claude-settings",
+        &[],
+        &[
+            Send(json!({"type":"model","model":"sonnet","effort":"high"})),
+            Wait(|e| e["type"] == "settings" && e["model"] == "sonnet" && e["effort"] == "high"),
+            // A depth-only change keeps the model.
+            Send(json!({"type":"model","effort":"low"})),
+            Wait(|e| e["type"] == "settings" && e["model"] == "sonnet" && e["effort"] == "low"),
+            Send(json!({"type":"model","model":"refused-model"})),
+            Wait(|e| e["type"] == "error"),
+            Send(json!({"type":"permission","mode":"plan"})),
+            Wait(|e| e["type"] == "settings" && e["permission_mode"] == "plan"),
+            // The client changes its own mode; the interface follows it.
+            send_message(1, "mode-change"),
+            finished(1, "completed"),
+            Wait(|e| e["type"] == "settings" && e["permission_mode"] == "accept_edits"),
+            // The init message names the resolved model; the listed choice stays.
+            send_message(2, "simple"),
+            finished(2, "completed"),
+            Send(json!({"type":"permission","mode":"danger"})),
+            Wait(|e| e["type"] == "settings" && e["permission_mode"] == "danger"),
+        ],
+    )
+    .await;
+    assert!(
+        !events
+            .iter()
+            .any(|e| e["type"] == "settings" && e["model"] == "claude-sonnet-5-fixture"),
+        "the listed choice was replaced by the resolved id"
+    );
+    let refused = events.iter().find(|e| e["type"] == "error").unwrap();
+    assert!(
+        refused["message"]
+            .as_str()
+            .unwrap()
+            .contains("availability probe refused")
+    );
+}
+
+#[tokio::test]
+async fn claude_a_resumed_session_with_its_model_and_depth() {
+    let events = both_for(
+        &CLAUDE,
+        "claude-resume",
+        &[
+            "--resume",
+            "claude-fixture-session",
+            "--model",
+            "opus",
+            "--effort",
+            "high",
+        ],
+        &[send_message(1, "simple"), finished(1, "completed")],
+    )
+    .await;
+    assert!(
+        events
+            .iter()
+            .any(|e| e["type"] == "settings" && e["model"] == "opus" && e["effort"] == "high")
+    );
+}
+
+#[tokio::test]
+async fn claude_a_launch_option_structured_mode_refuses() {
+    let dir = scenario_dir_for(&CLAUDE, "claude-unusable-rust");
+    let log = dir.join("native.jsonl");
+    let rust = unlaunchable(
+        crate::claude_chat::adapter(&environment(&log), &[]),
+        init_for(&CLAUDE, &dir, &["--permission-mode", "bypassPermissions"]),
+    )
+    .await;
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(
+        rust.iter().any(|e| e["type"] == "error"
+            && e["message"] == "Structured mode does not enable permission bypass."),
+        "{rust:?}"
+    );
+    assert!(rust.iter().any(|e| e["type"] == "exit"));
+}
+
+/// Claude's conversation ends with its dropped adapter too.
+#[cfg(unix)]
+#[tokio::test]
+async fn claude_a_dropped_adapter_stops_claude() {
+    let dir = scenario_dir_for(&CLAUDE, "claude-dropped-rust");
+    let log = dir.join("native.jsonl");
+    let mut adapter = crate::claude_chat::adapter(&environment(&log), &[]);
+    adapter
+        .start(&init_for(&CLAUDE, &dir, &[]))
+        .await
+        .expect("start");
+    let mut pid = None;
+    for _ in 0..50 {
+        pid = adapter.pid();
+        if pid.is_some() {
+            break;
+        }
+        let _ = tokio::time::timeout(Duration::from_millis(100), adapter.next_event()).await;
+    }
+    let pid = pid.expect("a running client") as libc::pid_t;
+    drop(adapter);
+    let alive = || unsafe { libc::kill(pid, 0) } == 0;
+    for _ in 0..50 {
+        if !alive() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(!alive(), "claude outlived its dropped adapter");
+}
+
+/// The real Claude Code, not the fixture: a short turn and an interrupted one,
+/// through the bridge and through the Rust adapter. It uses the host's own
+/// `claude` and sign-in and spends a little of its quota on the cheapest
+/// model, so it only runs when asked: `cargo test -- --ignored real_claude`.
+#[tokio::test]
+#[ignore]
+async fn real_claude_a_turn_and_an_interrupt_on_both_layers() {
+    let program = std::env::var("AGENTDOCK_REAL_CLAUDE").unwrap_or_else(|_| "claude".into());
+    async fn next<A: ClientAdapter>(adapter: &mut A, events: &mut Vec<Value>, wait: u64) -> bool {
+        match tokio::time::timeout(Duration::from_secs(wait), adapter.next_event()).await {
+            Ok(Some(Ok(event))) => {
+                events.extend(crate::conversations::normalize_event(event));
+                true
+            }
+            _ => false,
+        }
+    }
+    async fn until<A: ClientAdapter>(
+        adapter: &mut A,
+        events: &mut Vec<Value>,
+        what: &str,
+        done: impl Fn(&Value) -> bool,
+    ) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(120);
+        while !events.iter().any(&done) {
+            assert!(
+                std::time::Instant::now() < deadline && next(adapter, events, 120).await,
+                "{what}: {events:#?}"
+            );
+        }
+    }
+    async fn run<A: ClientAdapter>(mut adapter: A, program: &str, layer: &str) -> Vec<Value> {
+        let dir = std::env::temp_dir().join(format!(
+            "agentdock-real-claude-{layer}-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let init = ChatInit {
+            provider: "claude_code".into(),
+            program: program.into(),
+            args: std::env::var("AGENTDOCK_REAL_CLAUDE_ARGS").map_or_else(
+                |_| vec!["--model".into(), "haiku".into()],
+                |args| args.split_whitespace().map(str::to_owned).collect(),
+            ),
+            cwd: dir.to_string_lossy().into_owned(),
+            resume_id: None,
+        };
+        adapter.start(&init).await.expect("start");
+        let mut events = Vec::new();
+        until(&mut adapter, &mut events, "models", |e| {
+            e["type"] == "settings" && e.get("models").is_some()
+        })
+        .await;
+        let one = uuid(1);
+        dispatch(&mut adapter, ChatCommand::parse(&json!({"type":"message","id":one,"content":"Reply with exactly the word pong and nothing else."})).unwrap()).await.unwrap();
+        until(&mut adapter, &mut events, "first turn", |e| {
+            e["type"] == "turn" && e["id"] == uuid(1) && e["status"] != "running"
+        })
+        .await;
+        let two = uuid(2);
+        dispatch(&mut adapter, ChatCommand::parse(&json!({"type":"message","id":two,"content":"Write the numbers from 1 to 400, one per line, with no other text."})).unwrap()).await.unwrap();
+        until(&mut adapter, &mut events, "second reply", |e| {
+            e["type"] == "message" && e["delta"] == true && events_after_two(e)
+        })
+        .await;
+        dispatch(
+            &mut adapter,
+            ChatCommand::parse(&json!({"type":"interrupt"})).unwrap(),
+        )
+        .await
+        .unwrap();
+        until(&mut adapter, &mut events, "interrupt", |e| {
+            e["type"] == "turn" && e["id"] == uuid(2) && e["status"] != "running"
+        })
+        .await;
+        // A tool call: approved here if the host's settings ask for it.
+        let three = uuid(3);
+        dispatch(&mut adapter, ChatCommand::parse(&json!({"type":"message","id":three,"content":"Use the Bash tool to run exactly this command: touch agentdock-smoke.txt && echo agentdock-smoke. Then reply done."})).unwrap()).await.unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(180);
+        let mut answered = 0;
+        loop {
+            if events
+                .iter()
+                .any(|e| e["type"] == "turn" && e["id"] == uuid(3) && e["status"] != "running")
+            {
+                break;
+            }
+            let open: Vec<Value> = events
+                .iter()
+                .filter(|e| e["type"] == "approval")
+                .skip(answered)
+                .cloned()
+                .collect();
+            for approval in open {
+                answered += 1;
+                dispatch(&mut adapter, ChatCommand::parse(&json!({"type":"approval","request_id":approval["id"],"decision":"accept","answers":{}})).unwrap()).await.unwrap();
+            }
+            assert!(
+                std::time::Instant::now() < deadline && next(&mut adapter, &mut events, 120).await,
+                "tool turn: {events:#?}"
+            );
+        }
+        adapter.shutdown().await;
+        let _ = std::fs::remove_dir_all(&dir);
+        events
+    }
+    // A delta of any assistant message: the second turn is the only one running.
+    fn events_after_two(_: &Value) -> bool {
+        true
+    }
+    let bridge = {
+        let mut command = tokio::process::Command::new(crate::bridge::js_runtime());
+        command
+            .arg(bridge_dir().join("chat.mjs"))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .kill_on_drop(true);
+        agentdock_runtime::process::own_group(command.as_std_mut());
+        run(
+            BridgeAdapter::new(command.spawn().expect("node")).unwrap(),
+            &program,
+            "bridge",
+        )
+        .await
+    };
+    let rust = run(
+        crate::claude_chat::adapter(&BTreeMap::new(), &[]),
+        &program,
+        "rust",
+    )
+    .await;
+    // The real client's approval, as each layer shows it, apart from its id
+    // and the run's directory.
+    let shown = |events: &[Value]| -> Vec<Value> {
+        events
+            .iter()
+            .filter(|e| e["type"] == "approval")
+            .map(|e| {
+                let mut e = e.clone();
+                e["id"] = json!("approval");
+                let text = e.to_string();
+                let text = regex_free_dirs(&text);
+                serde_json::from_str(&text).unwrap()
+            })
+            .collect()
+    };
+    fn regex_free_dirs(text: &str) -> String {
+        // Each layer ran in its own temporary directory.
+        let mut out = String::new();
+        let mut rest = text;
+        while let Some(at) = rest.find("agentdock-real-claude-") {
+            out.push_str(&rest[..at]);
+            let tail = &rest[at..];
+            let end = tail.find(['"', '/', '\\']).unwrap_or(tail.len());
+            out.push_str("<dir>");
+            rest = &tail[end..];
+        }
+        out.push_str(rest);
+        out
+    }
+    eprintln!("approval: {:#}", json!(shown(&rust)));
+    assert_eq!(
+        shown(&rust),
+        shown(&bridge),
+        "the layers showed the real approval differently"
+    );
+    for (layer, events) in [("bridge", &bridge), ("rust", &rust)] {
+        let status = |id: &str| {
+            events
+                .iter()
+                .rev()
+                .find(|e| e["type"] == "turn" && e["id"] == id)
+                .map(|e| e["status"].clone())
+        };
+        assert!(
+            events.iter().any(|e| e["type"] == "ready"),
+            "{layer}: not ready"
+        );
+        assert_eq!(
+            status(&uuid(1)),
+            Some(json!("completed")),
+            "{layer}: {events:#?}"
+        );
+        let reply: String = events
+            .iter()
+            .filter(|e| e["type"] == "message" && e["delta"] == false && e["role"] == "assistant")
+            .filter_map(|e| e["text"].as_str())
+            .collect();
+        assert!(reply.to_lowercase().contains("pong"), "{layer}: {reply}");
+        assert!(
+            events
+                .iter()
+                .any(|e| e["type"] == "usage" && e.get("turn").is_some()),
+            "{layer}: no turn usage"
+        );
+        assert_eq!(
+            status(&uuid(2)),
+            Some(json!("interrupted")),
+            "{layer}: {events:#?}"
+        );
+        assert_eq!(
+            status(&uuid(3)),
+            Some(json!("completed")),
+            "{layer}: {events:#?}"
+        );
+        let ran = events.iter().any(|e| {
+            e["type"] == "tool"
+                && e["status"] == "completed"
+                && e["text"]
+                    .as_str()
+                    .is_some_and(|t| t.contains("agentdock-smoke"))
+        });
+        assert!(
+            ran,
+            "{layer}: the command's output never showed: {events:#?}"
+        );
+        eprintln!(
+            "{layer}: approvals {}",
+            events.iter().filter(|e| e["type"] == "approval").count()
+        );
+        eprintln!(
+            "{layer}: {} events, kinds {:?}",
+            events.len(),
+            events
+                .iter()
+                .filter_map(|e| e["type"].as_str())
+                .collect::<std::collections::BTreeSet<_>>()
+        );
+    }
 }
