@@ -209,9 +209,16 @@ pub(crate) async fn stored(state: &AppState, id: SessionId) -> Result<Value> {
     snapshot(state, id).await
 }
 
-async fn snapshot(state: &AppState, id: SessionId) -> Result<Value> {
+/// How many events a page holds: the latest page a view opens with, and the
+/// most an older page may ask for. History is kept in full and read in pages.
+const PAGE: usize = 1000;
+/// A view at most this many events behind is sent what it missed when it
+/// resumes; one further behind is sent the latest page instead.
+const RESUME_LIMIT: usize = 5000;
+
+/// The session's mode, and whether its process is running.
+async fn state_of(state: &AppState, id: SessionId) -> Result<(InteractionMode, bool)> {
     let session = session_record(state, id).await?;
-    let stored = db(state, move |s| s.conversation(id)).await?;
     let running = if session.interaction_mode == InteractionMode::Structured {
         state.chats.get(id).is_some_and(|r| r.running())
     } else {
@@ -220,15 +227,43 @@ async fn snapshot(state: &AppState, id: SessionId) -> Result<Value> {
             .get(&id.to_string())
             .is_some_and(|r| r.running())
     };
+    Ok((session.interaction_mode, running))
+}
+/// The latest page of the conversation, with the state a view needs to read it.
+async fn snapshot(state: &AppState, id: SessionId) -> Result<Value> {
+    snapshot_of(state, id, PAGE).await
+}
+async fn snapshot_of(state: &AppState, id: SessionId, limit: usize) -> Result<Value> {
+    let (mode, running) = state_of(state, id).await?;
+    let page = db(state, move |s| s.conversation_page(id, None, limit)).await?;
     Ok(
-        json!({"type":"snapshot","mode":session.interaction_mode,"running":running,"events":stored.events,"truncated":stored.truncated}),
+        json!({"type":"snapshot","mode":mode,"running":running,"events":page.events,"truncated":page.truncated,"older":page.older}),
     )
+}
+/// Which page of a conversation: the latest, or the one before `before`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PageQuery {
+    before: Option<u64>,
+    limit: Option<usize>,
 }
 async fn get_conversation(
     State(state): State<AppState>,
     Path(id): Path<SessionId>,
+    Query(query): Query<PageQuery>,
 ) -> Result<Json<Value>> {
-    snapshot(&state, id).await.map(Json)
+    let limit = query.limit.unwrap_or(PAGE).clamp(1, PAGE);
+    let Some(before) = query.before else {
+        return snapshot_of(&state, id, limit).await.map(Json);
+    };
+    session_record(&state, id).await?;
+    let page = db(&state, move |s| {
+        s.conversation_page(id, Some(before), limit)
+    })
+    .await?;
+    Ok(Json(
+        json!({"type":"page","events":page.events,"older":page.older}),
+    ))
 }
 
 pub async fn persist(state: &AppState, id: SessionId, event: Value) -> Result<()> {
@@ -678,45 +713,6 @@ fn model_command(model: Option<&str>, effort: Option<&str>) -> Value {
 }
 
 #[cfg(test)]
-mod greeting_tests {
-    use super::greeting;
-    use serde_json::json;
-
-    fn stored() -> serde_json::Value {
-        json!({"type":"snapshot","mode":"structured","running":true,"truncated":false,
-            "events":[{"seq":3},{"seq":4},{"seq":5}]})
-    }
-
-    #[test]
-    fn a_fresh_view_gets_the_whole_conversation() {
-        let (greeting, last) = greeting(stored(), None);
-        assert_eq!(greeting["events"].as_array().unwrap().len(), 3);
-        assert!(greeting.get("after").is_none());
-        assert_eq!(last, 5);
-    }
-
-    #[test]
-    fn a_view_that_holds_events_gets_only_what_follows() {
-        let (greeting, last) = greeting(stored(), Some(4));
-        assert_eq!(greeting["events"], json!([{"seq":5}]));
-        assert_eq!(greeting["after"], 4);
-        assert_eq!(greeting["running"], true);
-        assert_eq!(last, 5);
-        let (current, _) = super::greeting(stored(), Some(5));
-        assert_eq!(current["events"], json!([]));
-        assert_eq!(current["after"], 5);
-    }
-
-    #[test]
-    fn a_view_past_the_end_gets_everything() {
-        let (greeting, last) = greeting(stored(), Some(9));
-        assert_eq!(greeting["events"].as_array().unwrap().len(), 3);
-        assert!(greeting.get("after").is_none());
-        assert_eq!(last, 5);
-    }
-}
-
-#[cfg(test)]
 mod event_whitelist_tests {
     use super::normalize_event;
     use serde_json::json;
@@ -1005,27 +1001,43 @@ async fn socket(
 /// with `after` so the view adds them instead of replacing what it has.
 /// Sequences never reset, so a view's last event is always a valid place to
 /// resume from; one claiming an event past the end gets everything.
-fn greeting(mut snapshot: Value, after: Option<u64>) -> (Value, u64) {
-    let last_seq = snapshot["events"]
-        .as_array()
-        .and_then(|v| v.last())
-        .and_then(|v| v["seq"].as_u64())
-        .unwrap_or(0);
-    if let Some(after) = after.filter(|after| *after <= last_seq)
-        && let Some(events) = snapshot["events"].as_array_mut()
+/// The greeting a socket opens with: the latest page, or -- for a view that
+/// says which event it holds last -- only the events after it, marked with
+/// `after` so the view adds them instead of replacing what it has. A view too
+/// far behind, or holding an event past the end, gets the latest page.
+async fn greeting(state: &AppState, id: SessionId, after: Option<u64>) -> Result<(Value, u64)> {
+    let last = |events: &Value, floor: u64| {
+        events
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|e| e["seq"].as_u64())
+            .fold(floor, u64::max)
+    };
+    if let Some(after) = after
+        && let Some(events) = db(state, move |s| {
+            s.conversation_after(id, after, RESUME_LIMIT)
+        })
+        .await?
     {
-        events.retain(|event| event["seq"].as_u64().is_some_and(|seq| seq > after));
-        snapshot["after"] = json!(after);
+        let (mode, running) = state_of(state, id).await?;
+        let events = json!(events);
+        let last_seq = last(&events, after);
+        return Ok((
+            json!({"type":"snapshot","mode":mode,"running":running,"events":events,"after":after}),
+            last_seq,
+        ));
     }
-    (snapshot, last_seq)
+    let snapshot = snapshot(state, id).await?;
+    let last_seq = last(&snapshot["events"], 0);
+    Ok((snapshot, last_seq))
 }
 async fn stream(state: AppState, id: SessionId, socket: WebSocket, after: Option<u64>) {
     let mut events = state.chats.channel(id).subscribe();
     let (mut sender, mut receiver) = socket.split();
-    let Ok(initial) = snapshot(&state, id).await else {
+    let Ok((initial, mut last_seq)) = greeting(&state, id, after).await else {
         return;
     };
-    let (initial, mut last_seq) = greeting(initial, after);
     if crate::send_frame(&mut sender, Message::Text(initial.to_string().into()))
         .await
         .is_err()

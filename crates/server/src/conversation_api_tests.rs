@@ -1049,3 +1049,114 @@ async fn stopping_waits_for_a_client_that_takes_its_full_shutdown_time() {
         started.elapsed()
     );
 }
+
+/// History is read in pages: the latest with the state it needs, older ones
+/// by cursor; a socket resumes after the last event a view holds, or sends
+/// the latest page to a view too far behind or holding an event past the end.
+#[tokio::test]
+async fn conversations_read_in_pages_and_sockets_resume_where_a_view_left_off() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let mut fixture = chat_fixture();
+    let workspace = fixture
+        .state
+        .store
+        .create_workspace("Pages", fixture.path.join("repo").to_str().unwrap())
+        .unwrap();
+    let id = fixture
+        .state
+        .store
+        .create_session(workspace.id, ProviderKind::Codex, "Pages")
+        .unwrap()
+        .id;
+    fixture
+        .state
+        .store
+        .set_interaction_mode(id, InteractionMode::Structured)
+        .unwrap();
+    let store = &fixture.state.store;
+    store
+        .append_conversation_event(
+            id,
+            json!({"type":"settings","model":"m","models":[{"id":"m"}]}),
+        )
+        .unwrap();
+    for n in 0..7000 {
+        store
+            .append_conversation_event(
+                id,
+                json!({"type":"tool","id":format!("t{n}"),"name":"Bash","status":"completed"}),
+            )
+            .unwrap();
+    }
+    let (status, latest) = call(
+        fixture.app(),
+        "GET",
+        &format!("/api/sessions/{id}/conversation"),
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{latest}");
+    let events = latest["events"].as_array().unwrap();
+    assert_eq!(
+        events.len(),
+        1001,
+        "the latest thousand and the settings they need"
+    );
+    assert_eq!(events[0]["type"], "settings");
+    assert_eq!(latest["older"], 6002);
+    let (_, older) = call(
+        fixture.app(),
+        "GET",
+        &format!("/api/sessions/{id}/conversation?before=6002&limit=50"),
+        Value::Null,
+    )
+    .await;
+    assert_eq!(older["type"], "page");
+    assert_eq!(older["events"].as_array().unwrap().len(), 50);
+    assert_eq!(older["events"][0]["seq"], 5952);
+    assert_eq!(older["older"], 5952);
+    let (status, _) = call(
+        fixture.app(),
+        "GET",
+        &format!("/api/sessions/{id}/conversation?before=x"),
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    fixture.state.security = security::Security::for_test(address, None);
+    let app = fixture.app();
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let greet = |after: Option<u64>| async move {
+        let query = after.map_or(String::new(), |a| format!("?after={a}"));
+        let (mut ws, _) = connect_async(format!("ws://{address}/api/sessions/{id}/chat/ws{query}"))
+            .await
+            .unwrap();
+        let first = tokio::time::timeout(Duration::from_secs(5), ws.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let _ = ws.close(None).await;
+        serde_json::from_str::<Value>(first.to_text().unwrap()).unwrap()
+    };
+    let resumed = greet(Some(6900)).await;
+    assert_eq!(resumed["after"], 6900);
+    assert_eq!(resumed["events"].as_array().unwrap().len(), 101);
+    assert_eq!(resumed["running"], false);
+    // 4,900 behind is still resumed, not reloaded.
+    assert_eq!(
+        greet(Some(2101)).await["events"].as_array().unwrap().len(),
+        4900
+    );
+    // Too far behind, past the end, or a fresh view: the latest page.
+    for after in [Some(100), Some(9999), None] {
+        let full = greet(after).await;
+        assert!(full.get("after").is_none(), "{after:?}");
+        assert_eq!(full["events"].as_array().unwrap().len(), 1001, "{after:?}");
+    }
+    server.abort();
+}

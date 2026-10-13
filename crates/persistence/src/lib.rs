@@ -1,5 +1,5 @@
 mod conversations;
-pub use conversations::{MessageSubmission, StoredConversation};
+pub use conversations::{ConversationPage, MessageSubmission, StoredConversation};
 pub mod metrics;
 
 use agentdock_domain::{
@@ -23,6 +23,9 @@ pub struct SharedCanvasLayout {
 
 pub struct Store {
     connection: Mutex<Connection>,
+    /// Where each message still streaming wrote its first delta, by session
+    /// and message id, so finishing it compacts exactly its own range.
+    streaming: Mutex<std::collections::HashMap<(String, String), u64>>,
 }
 
 impl Store {
@@ -156,6 +159,7 @@ impl Store {
         tx.commit()?;
         Ok(Self {
             connection: Mutex::new(connection),
+            streaming: Mutex::new(std::collections::HashMap::new()),
         })
     }
 

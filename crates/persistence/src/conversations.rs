@@ -65,6 +65,20 @@ pub struct StoredConversation {
     pub events: Vec<Value>,
     pub truncated: bool,
 }
+/// One page of a conversation, oldest first. `older` is the cursor for the
+/// page before it: the first sequence this page holds, while any event is
+/// older than that.
+#[derive(Debug)]
+pub struct ConversationPage {
+    pub events: Vec<Value>,
+    pub older: Option<u64>,
+    /// Set for a conversation stored before history was kept in full, whose
+    /// start was trimmed away.
+    pub truncated: bool,
+}
+/// How far back a finished message's deltas are looked for when where they
+/// began is not known -- after a restart, mid-message.
+const DELTA_REACH: u64 = 500;
 pub enum MessageSubmission {
     New(Value),
     Duplicate,
@@ -251,10 +265,127 @@ impl Store {
         Ok(StoredConversation { events, truncated })
     }
 
+    /// The latest `limit` events, or the `limit` before `before`, oldest first.
+    /// The latest page also carries the events the current state is read
+    /// from -- controls and pending approvals -- when they are older than it.
+    pub fn conversation_page(
+        &self,
+        id: SessionId,
+        before: Option<u64>,
+        limit: usize,
+    ) -> Result<ConversationPage> {
+        let conn = self.connection.lock().expect("sqlite lock");
+        let session = id.to_string();
+        let (truncated, anchors) = conn
+            .query_row(
+                "SELECT truncated,anchors FROM conversation_meta WHERE session_id=?1",
+                [&session],
+                |r| Ok((r.get::<_, bool>(0)?, r.get::<_, String>(1)?)),
+            )
+            .optional()?
+            .unwrap_or((false, "{}".into()));
+        let mut events: Vec<Value> = {
+            let mut stmt = conn.prepare(
+                "SELECT event_json FROM conversation_events WHERE session_id=?1 AND seq<?2 ORDER BY seq DESC LIMIT ?3",
+            )?;
+            stmt.query_map(
+                params![session, before.map_or(i64::MAX, |b| b as i64), limit as i64],
+                |r| {
+                    serde_json::from_str::<Value>(&r.get::<_, String>(0)?).map_err(conversion_error)
+                },
+            )?
+            .collect::<Result<_>>()?
+        };
+        events.reverse();
+        let first = events.first().and_then(|e| e["seq"].as_u64());
+        let older = match first {
+            Some(first) => conn
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM conversation_events WHERE session_id=?1 AND seq<?2)",
+                    params![session, first as i64],
+                    |r| r.get::<_, bool>(0),
+                )?
+                .then_some(first),
+            None => None,
+        };
+        if before.is_none() {
+            let anchors: std::collections::BTreeMap<String, Value> =
+                serde_json::from_str(&anchors).map_err(conversion_error)?;
+            let start = first.unwrap_or(u64::MAX);
+            let mut carried: Vec<Value> = anchors
+                .into_values()
+                .filter(|event| event["seq"].as_u64().is_some_and(|seq| seq < start))
+                .collect();
+            carried.sort_by_key(|event| event["seq"].as_u64().unwrap_or(0));
+            carried.dedup_by_key(|event| event["seq"].as_u64());
+            carried.extend(events);
+            events = carried;
+        }
+        Ok(ConversationPage {
+            events,
+            older,
+            truncated,
+        })
+    }
+    /// The events after `after`, or `None` when there are more than `limit` --
+    /// a view that far behind is better sent the latest page -- or when
+    /// `after` is past the last event, which no view of this one can hold.
+    pub fn conversation_after(
+        &self,
+        id: SessionId,
+        after: u64,
+        limit: usize,
+    ) -> Result<Option<Vec<Value>>> {
+        let conn = self.connection.lock().expect("sqlite lock");
+        let next: u64 = conn
+            .query_row(
+                "SELECT next_seq FROM conversation_meta WHERE session_id=?1",
+                [id.to_string()],
+                |r| r.get(0),
+            )
+            .optional()?
+            .unwrap_or(1);
+        if after >= next {
+            return Ok(None);
+        }
+        let mut stmt = conn.prepare(
+            "SELECT event_json FROM conversation_events WHERE session_id=?1 AND seq>?2 ORDER BY seq LIMIT ?3",
+        )?;
+        let events: Vec<Value> = stmt
+            .query_map(
+                params![id.to_string(), after as i64, limit as i64 + 1],
+                |r| {
+                    serde_json::from_str::<Value>(&r.get::<_, String>(0)?).map_err(conversion_error)
+                },
+            )?
+            .collect::<Result<_>>()?;
+        Ok((events.len() <= limit).then_some(events))
+    }
+
     pub fn append_conversation_event(&self, id: SessionId, event: Value) -> Result<Value> {
         let mut conn = self.connection.lock().expect("sqlite lock");
         let tx = conn.transaction()?;
         let event = append(&tx, id, event)?;
+        // A finished message keeps its place but not its pieces (`compact_deltas`).
+        if event["type"] == "message"
+            && let (Some(message), Some(seq)) = (event["id"].as_str(), event["seq"].as_u64())
+        {
+            let key = (id.to_string(), message.to_owned());
+            let mut streaming = self.streaming.lock().expect("streaming lock");
+            if event.get("delta") == Some(&Value::Bool(true)) {
+                if streaming.len() >= 4096 && !streaming.contains_key(&key) {
+                    streaming.clear();
+                }
+                streaming.entry(key).or_insert(seq);
+            } else {
+                // Unknown after a restart: only the latest rows are searched.
+                let from = streaming
+                    .remove(&key)
+                    .unwrap_or(seq.saturating_sub(DELTA_REACH));
+                drop(streaming);
+                compact_deltas(&tx, id, message, from, seq)?;
+            }
+        }
         tx.commit()?;
         Ok(event)
     }
@@ -428,33 +559,51 @@ pub(super) fn append(
             ],
         )?;
     }
-    let mut stmt = tx.prepare(
-        "SELECT seq,byte_count FROM conversation_events WHERE session_id=?1 ORDER BY seq DESC",
-    )?;
-    let rows = stmt.query_map([id.to_string()], |r| {
-        Ok((r.get::<_, u64>(0)?, r.get::<_, usize>(1)?))
-    })?;
-    let mut bytes = 0;
-    let mut cutoff = None;
-    for (index, row) in rows.enumerate() {
-        let (sequence, size) = row?;
-        bytes += size;
-        if index >= 2000 || bytes > 8 * 1024 * 1024 {
-            cutoff = Some(sequence);
-            break;
-        }
-    }
-    if let Some(cutoff) = cutoff {
-        tx.execute(
-            "DELETE FROM conversation_events WHERE session_id=?1 AND seq<=?2",
-            params![id.to_string(), cutoff],
-        )?;
-        tx.execute(
-            "UPDATE conversation_meta SET truncated=1 WHERE session_id=?1",
-            [id.to_string()],
-        )?;
-    }
     Ok(event)
+}
+
+/// The deltas a message streamed, once the message is whole: the first stays,
+/// emptied, so the message keeps the place it began in among the tool calls
+/// made while it streamed; the rest are deleted, since the final message
+/// carries the text. Nine in ten stored events were deltas.
+fn compact_deltas(
+    tx: &rusqlite::Transaction<'_>,
+    id: SessionId,
+    message: &str,
+    from: u64,
+    before: u64,
+) -> Result<()> {
+    let session = id.to_string();
+    let rows: Vec<(u64, String)> = {
+        let mut stmt = tx.prepare(
+            "SELECT seq,event_json FROM conversation_events WHERE session_id=?1 AND seq>=?2 AND seq<?3 \
+             AND json_extract(event_json,'$.type')='message' AND json_extract(event_json,'$.delta')=1 \
+             AND json_extract(event_json,'$.id')=?4 ORDER BY seq",
+        )?;
+        stmt.query_map(params![session, from, before, message], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })?
+        .collect::<Result<_>>()?
+    };
+    let Some(((first, json), rest)) = rows.split_first() else {
+        return Ok(());
+    };
+    let mut place: Value = serde_json::from_str(json).map_err(conversion_error)?;
+    place["text"] = json!("");
+    let encoded = serde_json::to_string(&place).map_err(conversion_error)?;
+    tx.execute(
+        "UPDATE conversation_events SET event_json=?1,byte_count=?2 WHERE session_id=?3 AND seq=?4",
+        params![encoded, encoded.len(), session, first],
+    )?;
+    if let Some((last, _)) = rest.last() {
+        let mut stmt = tx.prepare(
+            "DELETE FROM conversation_events WHERE session_id=?1 AND seq>?2 AND seq<=?3 \
+             AND json_extract(event_json,'$.type')='message' AND json_extract(event_json,'$.delta')=1 \
+             AND json_extract(event_json,'$.id')=?4",
+        )?;
+        stmt.execute(params![session, first, last, message])?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -578,7 +727,7 @@ mod tests {
         std::fs::remove_file(path).unwrap();
     }
     #[test]
-    fn model_and_permission_settings_survive_retention() {
+    fn model_and_permission_settings_ride_on_the_latest_page() {
         let store = Store::open(":memory:").unwrap();
         let workspace = store.create_workspace("Fixture", "/fixture").unwrap();
         let id = store
@@ -599,8 +748,8 @@ mod tests {
                 .append_conversation_event(id, json!({"type":"delta","text":"x"}))
                 .unwrap();
         }
-        let conversation = store.conversation(id).unwrap();
-        assert!(conversation.truncated);
+        let conversation = store.conversation_page(id, None, 100).unwrap();
+        assert_eq!(conversation.older, Some(1904));
         let settings: Vec<_> = conversation
             .events
             .iter()
@@ -610,24 +759,32 @@ mod tests {
         assert_eq!(settings[0]["models"].as_array().unwrap().len(), 2);
         assert_eq!(settings[1]["model"], "b", "in their original order");
     }
-    #[test]
-    fn transcript_retention_is_bounded_explicit_and_sequences_never_reset() {
-        let store = Store::open(":memory:").unwrap();
+    fn chat(store: &Store) -> SessionId {
         let workspace = store.create_workspace("Fixture", "/fixture").unwrap();
-        let id = store
+        store
             .create_session(workspace.id, ProviderKind::Codex, "Chat")
             .unwrap()
-            .id;
-        for _ in 0..2002 {
+            .id
+    }
+    fn seqs(events: &[Value]) -> Vec<u64> {
+        events.iter().map(|e| e["seq"].as_u64().unwrap()).collect()
+    }
+
+    /// History is kept in full; sequences never reset, and an event too large
+    /// to keep is refused without taking a sequence.
+    #[test]
+    fn history_is_kept_in_full_and_sequences_never_reset() {
+        let store = Store::open(":memory:").unwrap();
+        let id = chat(&store);
+        for _ in 0..5000 {
             store
                 .append_conversation_event(id, json!({"type":"ready"}))
                 .unwrap();
         }
         let transcript = store.conversation(id).unwrap();
-        assert!(transcript.truncated);
-        assert_eq!(transcript.events.len(), 2000);
-        assert_eq!(transcript.events[0]["seq"], 3);
-        assert_eq!(transcript.events.last().unwrap()["seq"], 2002);
+        assert!(!transcript.truncated);
+        assert_eq!(transcript.events.len(), 5000);
+        assert_eq!(transcript.events[0]["seq"], 1);
         assert!(
             store
                 .append_conversation_event(
@@ -636,46 +793,125 @@ mod tests {
                 )
                 .is_err()
         );
-        assert_eq!(
-            store.conversation(id).unwrap().events.last().unwrap()["seq"],
-            2002
-        );
+        let next = store
+            .append_conversation_event(id, json!({"type":"ready"}))
+            .unwrap();
+        assert_eq!(next["seq"], 5001);
     }
+
+    /// A finished message keeps its place but not its pieces: the first delta
+    /// stays, emptied, where the message began, the rest go, and the final
+    /// message carries the text. Everything else is kept as it was.
     #[test]
-    fn pending_approvals_and_current_turn_survive_display_window_rotation() {
+    fn a_finished_messages_deltas_shrink_to_its_place() {
         let store = Store::open(":memory:").unwrap();
-        let workspace = store.create_workspace("Fixture", "/fixture").unwrap();
-        let id = store
-            .create_session(workspace.id, ProviderKind::Codex, "Chat")
-            .unwrap()
-            .id;
+        let id = chat(&store);
+        let append = |event: Value| store.append_conversation_event(id, event).unwrap();
+        append(json!({"type":"message","id":"u","role":"user","text":"hi"}));
+        for piece in ["Hel", "lo ", "the"] {
+            append(json!({"type":"message","id":"a","role":"assistant","text":piece,"delta":true}));
+        }
+        // A tool card emitted while the text was still streaming.
+        append(json!({"type":"tool","id":"t","name":"Bash","status":"running","text":"ls"}));
+        append(json!({"type":"message","id":"a","role":"assistant","text":"re","delta":true}));
+        // Another message's delta is left alone.
+        append(json!({"type":"message","id":"b","role":"assistant","text":"other","delta":true}));
+        append(
+            json!({"type":"message","id":"a","role":"assistant","text":"Hello there","delta":false}),
+        );
+        let events = store.conversation(id).unwrap().events;
+        assert_eq!(seqs(&events), [1, 2, 5, 7, 8]);
+        assert_eq!(
+            events[1],
+            json!({"type":"message","id":"a","role":"assistant","text":"","delta":true,"seq":2})
+        );
+        assert_eq!(events[2]["type"], "tool");
+        assert_eq!(events[3]["text"], "other");
+        assert_eq!(events[4]["text"], "Hello there");
+        // A message that never streamed is stored as it came.
+        append(json!({"type":"message","id":"c","role":"assistant","text":"whole"}));
+        assert_eq!(store.conversation(id).unwrap().events.len(), 6);
+    }
+
+    /// A message that was streaming when the server restarted is compacted
+    /// all the same once it finishes: its deltas are found among the latest rows.
+    #[test]
+    fn a_message_finished_after_a_restart_is_compacted_too() {
+        let path =
+            std::env::temp_dir().join(format!("agentdock-restart-deltas-{}.db", Uuid::new_v4()));
+        let id = {
+            let store = Store::open(&path).unwrap();
+            let id = chat(&store);
+            for piece in ["a", "b", "c"] {
+                store
+                    .append_conversation_event(id, json!({"type":"message","id":"m","role":"assistant","text":piece,"delta":true}))
+                    .unwrap();
+            }
+            id
+        };
+        let store = Store::open(&path).unwrap();
+        store
+            .append_conversation_event(
+                id,
+                json!({"type":"message","id":"m","role":"assistant","text":"abc"}),
+            )
+            .unwrap();
+        let events = store.conversation(id).unwrap().events;
+        assert_eq!(seqs(&events), [1, 4]);
+        assert_eq!(events[0]["text"], "");
+        drop(store);
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// The latest page, then older pages by cursor, cover the history once;
+    /// the latest page carries the state its window would otherwise miss.
+    #[test]
+    fn history_reads_in_pages_with_the_current_state_on_the_latest() {
+        let store = Store::open(":memory:").unwrap();
+        let id = chat(&store);
         store
             .append_conversation_event(id, json!({"type":"ready"}))
             .unwrap();
-        store
-            .append_conversation_event(id, json!({"type":"turn","status":"running"}))
-            .unwrap();
         store.append_conversation_event(id,json!({"type":"approval","id":"pending","title":"Native approval","text":"Exact fixture request","choices":["accept","decline"]})).unwrap();
-        for _ in 0..2001 {
-            store.append_conversation_event(id,json!({"type":"tool","id":"progress","name":"Fixture progress","status":"running"})).unwrap();
+        for n in 0..250 {
+            store
+                .append_conversation_event(
+                    id,
+                    json!({"type":"tool","id":format!("t{n}"),"name":"Bash","status":"completed"}),
+                )
+                .unwrap();
         }
-        let snapshot = store.conversation(id).unwrap();
-        assert!(snapshot.truncated);
-        assert_eq!(snapshot.events.len(), 2003);
-        assert_eq!(snapshot.events[0]["type"], "ready");
-        assert_eq!(snapshot.events[1]["status"], "running");
-        assert_eq!(snapshot.events[2]["id"], "pending");
+        let latest = store.conversation_page(id, None, 100).unwrap();
+        // The last 100, with the ready and the pending approval ahead of them.
+        assert_eq!(latest.events.len(), 102);
+        assert_eq!(latest.events[0]["type"], "ready");
+        assert_eq!(latest.events[1]["id"], "pending");
+        assert_eq!(seqs(&latest.events[2..]), (153..=252).collect::<Vec<_>>());
+        assert_eq!(latest.older, Some(153));
+        let middle = store.conversation_page(id, latest.older, 100).unwrap();
+        assert_eq!(seqs(&middle.events), (53..=152).collect::<Vec<_>>());
+        assert_eq!(middle.older, Some(53));
+        let first = store.conversation_page(id, middle.older, 100).unwrap();
+        assert_eq!(seqs(&first.events), (1..=52).collect::<Vec<_>>());
+        assert_eq!(first.older, None);
+        // A resolved approval is no longer carried.
         store
             .append_conversation_event(id, json!({"type":"approval_resolved","id":"pending"}))
             .unwrap();
-        assert!(
-            !store
-                .conversation(id)
-                .unwrap()
-                .events
-                .iter()
-                .any(|event| event["type"] == "approval")
-        );
+        let latest = store.conversation_page(id, None, 100).unwrap();
+        assert!(!latest.events.iter().any(|e| e["type"] == "approval"));
+        // What follows a view's last event, unless there is more than it can take.
+        let after = store.conversation_after(id, 250, 10).unwrap().unwrap();
+        assert_eq!(seqs(&after), [251, 252, 253]);
+        assert_eq!(store.conversation_after(id, 100, 10).unwrap(), None);
+        assert_eq!(store.conversation_after(id, 253, 10).unwrap(), Some(vec![]));
+        assert_eq!(store.conversation_after(id, 254, 10).unwrap(), None);
+    }
+
+    #[test]
+    fn pending_approvals_and_receipts() {
+        let store = Store::open(":memory:").unwrap();
+        let id = chat(&store);
         let prompt = "prompt never duplicated into a receipt";
         store.submit_chat_message(id, "receipt", prompt).unwrap();
         let hash: String = store
