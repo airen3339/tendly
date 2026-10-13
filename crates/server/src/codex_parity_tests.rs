@@ -457,6 +457,40 @@ async fn steering_the_running_turn() {
     .await;
 }
 
+/// A steer sent before Codex has said which turn is running waits for the id
+/// (`early`), then joins that turn.
+#[tokio::test]
+async fn steering_before_the_turn_has_an_id() {
+    both(
+        "steer-early",
+        &[],
+        &[
+            Send(json!({"type":"message","id":"slow-a","content":"slow"})),
+            Send(json!({"type":"steer","id":"slow-b","content":"also this"})),
+            Wait(|e| turn(e, "slow-a", "completed")),
+        ],
+    )
+    .await;
+}
+
+/// An interrupt sent before the turn has an id is held until it has one, and
+/// then stops that turn.
+#[tokio::test]
+async fn interrupting_before_the_turn_has_an_id() {
+    both(
+        "interrupt-early",
+        &[],
+        &[
+            Send(json!({"type":"message","id":"slow-a","content":"slow"})),
+            Send(json!({"type":"interrupt"})),
+            Wait(|e| turn(e, "slow-a", "interrupted")),
+            Send(json!({"type":"message","id":"after","content":"simple"})),
+            Wait(|e| turn(e, "after", "completed")),
+        ],
+    )
+    .await;
+}
+
 #[tokio::test]
 async fn a_turn_that_refuses_steering_passes_it_on() {
     both(
@@ -558,4 +592,34 @@ async fn an_unusable_launch_option() {
     .await;
     assert_eq!(rust, bridge);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// An adapter dropped without `shutdown` still ends its conversation and the
+/// app-server it started.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_dropped_adapter_stops_its_app_server() {
+    let dir = scenario_dir("dropped-rust");
+    let log = dir.join("native.jsonl");
+    let mut adapter = CodexAdapter::new(&environment(&log), &[]);
+    adapter.start(&init(&dir, &[])).await.expect("start");
+    let mut pid = None;
+    for _ in 0..50 {
+        pid = adapter.pid();
+        if pid.is_some() {
+            break;
+        }
+        let _ = tokio::time::timeout(Duration::from_millis(100), adapter.next_event()).await;
+    }
+    let pid = pid.expect("a running app-server") as libc::pid_t;
+    drop(adapter);
+    let alive = || unsafe { libc::kill(pid, 0) } == 0;
+    for _ in 0..50 {
+        if !alive() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(!alive(), "the app-server outlived its dropped adapter");
 }

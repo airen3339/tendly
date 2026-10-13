@@ -42,6 +42,13 @@ for await(const line of createInterface({input:process.stdin})) {
       send({id:message.id,result:{turnId:activeTurn}});mode='';completed();continue;
     }
     if(message.method==='turn/interrupt'){send({id:message.id,result:{}});native('turn/completed',{threadId:thread,turn:{id:activeTurn,status:'interrupted'}});continue;}
+    // `slow` answers turn/start late, so whatever the client is asked meanwhile
+    // arrives before it knows the turn's id; the turn then waits like `hold`.
+    if(message.method==='turn/start'&&message.params.input[0].text==='slow'){
+      turn++;activeTurn='turn-'+turn;mode='slow';const id=message.id,current=activeTurn,item='slow-'+turn;
+      setTimeout(()=>{send({id,result:{turn:{id:current,status:'inProgress'}}});native('turn/started',{threadId:thread,turn:{id:current}});native('item/started',{threadId:thread,turnId:current,item:{id:item,type:'commandExecution',command:'fixture wait',status:'inProgress'}});},300);
+      continue;
+    }
     if(message.method==='turn/start'){
       turn++;activeTurn='turn-'+turn;mode=message.params.input[0].text;send({id:message.id,result:{turn:{id:activeTurn,status:'inProgress'}}});native('turn/started',{threadId:thread,turn:{id:activeTurn}});
       if(mode==='hold'||mode==='review'){native('item/started',{threadId:thread,turnId:activeTurn,item:{id:'hold-'+turn,type:'commandExecution',command:'fixture wait',status:'inProgress'}});continue;}

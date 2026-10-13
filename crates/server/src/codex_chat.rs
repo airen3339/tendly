@@ -545,7 +545,9 @@ enum Responder {
 struct Approval {
     id: String,
     responder: Responder,
-    deadline: Instant,
+    /// When it times out: once, like the bridge's timer. A timeout whose answer
+    /// could not be sent leaves the approval open but never fires again.
+    deadline: Option<Instant>,
     choices: Vec<String>,
 }
 
@@ -591,6 +593,66 @@ struct Conversation {
 }
 
 impl Conversation {
+    /// A conversation not yet started: `env` applied over this server's
+    /// environment and `env_remove` taken out of it, as the bridge's child
+    /// process had.
+    fn new(
+        env: &std::collections::BTreeMap<String, String>,
+        env_remove: &[String],
+        events_tx: mpsc::UnboundedSender<Value>,
+        inputs: mpsc::UnboundedSender<Input>,
+        pid: Arc<std::sync::Mutex<Option<u32>>>,
+    ) -> Self {
+        let mut environment: IndexMap<String, String> = std::env::vars().collect();
+        for (key, value) in env {
+            environment.insert(key.clone(), value.clone());
+        }
+        for key in env_remove
+            .iter()
+            .cloned()
+            .chain(crate::bridge::agentdock_secrets())
+        {
+            environment.shift_remove(&key);
+        }
+        Conversation {
+            events: events_tx,
+            secrets: secrets_of(environment.into_iter()),
+            cwd: String::new(),
+            program: String::new(),
+            env: env.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+            env_remove: env_remove.to_vec(),
+            launch: None,
+            inputs,
+            writer: None,
+            queued: Arc::new(AtomicUsize::new(0)),
+            group: OwnedGroup::new(None),
+            child: None,
+            pid: pid.clone(),
+            sequence: 0,
+            pending: HashMap::new(),
+            seen: HashMap::new(),
+            approvals: IndexMap::new(),
+            turns: Vec::new(),
+            active: None,
+            deferred: Vec::new(),
+            tools: IndexMap::new(),
+            ready: false,
+            closed: false,
+            port_closed: false,
+            initializing: false,
+            initialized: false,
+            finished: false,
+            native_session_id: None,
+            permission_mode: None,
+            models: None,
+            default_model: None,
+            effort: None,
+            approval_policy: None,
+            sandbox_policy: None,
+            sandbox_overridden: false,
+            base_sandbox: None,
+        }
+    }
     // -- emitting --
 
     /// `emit` in chat.mjs: redacted, and refused when the line is too long.
@@ -980,7 +1042,7 @@ impl Conversation {
             Approval {
                 id: id.clone(),
                 responder,
-                deadline: Instant::now() + APPROVAL_TIMEOUT,
+                deadline: Some(Instant::now() + APPROVAL_TIMEOUT),
                 choices,
             },
         );
@@ -2115,7 +2177,7 @@ impl Conversation {
         self.pending
             .values()
             .map(|p| p.deadline)
-            .chain(self.approvals.values().map(|a| a.deadline))
+            .chain(self.approvals.values().filter_map(|a| a.deadline))
             .min()
     }
     fn expire(&mut self, now: Instant) {
@@ -2143,10 +2205,13 @@ impl Conversation {
         let expired: Vec<String> = self
             .approvals
             .iter()
-            .filter(|(_, a)| a.deadline <= now)
+            .filter(|(_, a)| a.deadline.is_some_and(|deadline| deadline <= now))
             .map(|(key, _)| key.clone())
             .collect();
         for key in expired {
+            if let Some(approval) = self.approvals.get_mut(&key) {
+                approval.deadline = None;
+            }
             let cancel = self
                 .approvals
                 .get(&key)
@@ -2306,56 +2371,9 @@ impl CodexAdapter {
     pub fn new(env: &std::collections::BTreeMap<String, String>, env_remove: &[String]) -> Self {
         let (events_tx, events) = mpsc::unbounded_channel();
         let (inputs, inputs_rx) = mpsc::unbounded_channel();
-        let mut environment: IndexMap<String, String> = std::env::vars().collect();
-        for (key, value) in env {
-            environment.insert(key.clone(), value.clone());
-        }
-        for key in env_remove
-            .iter()
-            .cloned()
-            .chain(crate::bridge::agentdock_secrets())
-        {
-            environment.shift_remove(&key);
-        }
         let pid = Arc::new(std::sync::Mutex::new(None));
-        let conversation = Conversation {
-            events: events_tx,
-            secrets: secrets_of(environment.into_iter()),
-            cwd: String::new(),
-            program: String::new(),
-            env: env.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
-            env_remove: env_remove.to_vec(),
-            launch: None,
-            inputs: inputs.clone(),
-            writer: None,
-            queued: Arc::new(AtomicUsize::new(0)),
-            group: OwnedGroup::new(None),
-            child: None,
-            pid: pid.clone(),
-            sequence: 0,
-            pending: HashMap::new(),
-            seen: HashMap::new(),
-            approvals: IndexMap::new(),
-            turns: Vec::new(),
-            active: None,
-            deferred: Vec::new(),
-            tools: IndexMap::new(),
-            ready: false,
-            closed: false,
-            port_closed: false,
-            initializing: false,
-            initialized: false,
-            finished: false,
-            native_session_id: None,
-            permission_mode: None,
-            models: None,
-            default_model: None,
-            effort: None,
-            approval_policy: None,
-            sandbox_policy: None,
-            sandbox_overridden: false,
-            base_sandbox: None,
-        };
+        let conversation =
+            Conversation::new(env, env_remove, events_tx, inputs.clone(), pid.clone());
         let task = tokio::spawn(run(conversation, inputs_rx));
         Self {
             inputs,
@@ -2429,9 +2447,65 @@ impl ClientAdapter for CodexAdapter {
     }
 }
 
+/// An adapter dropped without `shutdown` -- a start that failed after it was
+/// made, or a supervisor that panicked -- still ends its conversation. The
+/// task holds a sender of its own, so its input channel never closes by
+/// itself; without this the task, and the Codex process group it owns, would
+/// outlive the conversation.
+impl Drop for CodexAdapter {
+    fn drop(&mut self) {
+        if self.task.is_some() {
+            let _ = self.inputs.send(Input::Shutdown);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A timeout whose answer cannot be sent is reported once, like the
+    /// bridge's one-shot timer, instead of firing again on every loop.
+    #[test]
+    fn an_approval_times_out_once_even_when_its_answer_cannot_be_sent() {
+        let (events_tx, mut events) = mpsc::unbounded_channel();
+        let (inputs, _inputs_rx) = mpsc::unbounded_channel();
+        let mut conversation = Conversation::new(
+            &Default::default(),
+            &[],
+            events_tx,
+            inputs,
+            Arc::new(std::sync::Mutex::new(None)),
+        );
+        // No writer: the answer to Codex cannot be sent.
+        conversation.approvals.insert(
+            "request".into(),
+            Approval {
+                id: "approval".into(),
+                responder: Responder::Decision {
+                    id: json!("request"),
+                },
+                deadline: Some(Instant::now()),
+                choices: vec!["decline".into()],
+            },
+        );
+        conversation.expire(Instant::now());
+        let mut first = Vec::new();
+        while let Ok(event) = events.try_recv() {
+            first.push(event);
+        }
+        assert!(
+            first
+                .iter()
+                .any(|e| e["message"] == "Native approval timed out and was cancelled."),
+            "{first:?}"
+        );
+        assert_eq!(conversation.next_deadline(), None);
+        conversation.expire(Instant::now() + Duration::from_secs(1));
+        assert!(events.try_recv().is_err(), "the timeout fired again");
+        // Still open: the user can answer it.
+        assert!(conversation.approvals.contains_key("request"));
+    }
 
     #[test]
     fn clipping_matches_the_bridge() {
