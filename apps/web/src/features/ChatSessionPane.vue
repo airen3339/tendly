@@ -32,7 +32,7 @@ import { occurrences, parseSearchResult, rowForHit, stepHit, type SearchHit as C
 import { useVirtualizer } from '@tanstack/vue-virtual';
 import { filterModels, mergeModels, resolveModel, offeredModels } from './model-choices';
 import { openLightbox } from './image-lightbox';
-import { compactCount, descendants, dockRoots, inDock, isLive, lastLine, runningSubagents, stalledFor, toolRuns, toolRunNames, toolRunStatus, toolsById, type ToolRun } from './tool-runs';
+import { cachedPercent, compactCount, descendants, dockRoots, inDock, isLive, lastLine, runningSubagents, stalledFor, toolRuns, toolRunNames, toolRunStatus, toolsById, type ToolRun } from './tool-runs';
 import { mentionQuery, applyMention } from './file-mentions';
 import { createFileSearch } from './file-search';
 import type { SearchHit } from './file-search';
@@ -358,10 +358,10 @@ function statsLine(stats: ToolStats) {
  * every card would only be noise. */
 const NOTABLE_RESULT = 1000;
 const sizeWorthShowing = (tool: ToolItem) => (tool.result_tokens ?? 0) >= NOTABLE_RESULT;
-/** "↑ 23.4k · ↓ 1.2k · 缓存 91%": read, written, and how much of the read was cached. */
+/** "↑ 23.4k · ↓ 1.2k · 缓存 99.8%": read, written, and how much of the read was cached. */
 function turnUsageLine(spent: TurnUsage) {
   const parts = [`↑ ${compactCount(spent.input ?? 0)}`, `↓ ${compactCount(spent.output ?? 0)}`];
-  if (spent.input && spent.cached) parts.push(t('{percent}% cached', { percent: Math.round(spent.cached / spent.input * 100) }));
+  if (spent.input && spent.cached) parts.push(t('{percent}% cached', { percent: cachedPercent(spent.input, spent.cached) }));
   return parts.join(' · ');
 }
 function turnUsageTitle(spent: TurnUsage) {

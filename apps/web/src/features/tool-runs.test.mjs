@@ -54,3 +54,12 @@ test('each running subagent not inside another running one gets a dock row', asy
   assert.deepEqual(runningSubagents([ended]), []);
   assert.equal(stalledFor({ ...ended, at: 0 }, 10 * 60_000), undefined);
 });
+
+test('the cached share shows a decimal, and 100.0 only when all of it was cached', async () => {
+  const { cachedPercent } = await import('./tool-runs.ts');
+  assert.equal(cachedPercent(14_327_235, 14_305_498), '99.8');
+  assert.equal(cachedPercent(10_000, 9_996), '99.9', 'cut down, never rounded up to 100.0');
+  assert.equal(cachedPercent(500, 500), '100.0');
+  assert.equal(cachedPercent(1000, 0), '0.0');
+  assert.equal(cachedPercent(0, 0), '0.0');
+});

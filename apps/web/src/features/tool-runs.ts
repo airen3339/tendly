@@ -97,3 +97,12 @@ export function compactCount(value: number) {
   if (value < 1_000_000) return `${(value / 1000).toFixed(value < 10_000 ? 1 : 0).replace(/\.0$/, '')}k`;
   return `${(value / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`;
 }
+
+/** How much of a turn's input came from the prompt cache, to one decimal.
+ * An agent rereads its whole context on every call, so this sits above 99%;
+ * rounded it read 100% every turn. Cut down rather than rounded, so 100.0
+ * means all of it. */
+export function cachedPercent(input: number, cached: number) {
+  if (!(input > 0)) return '0.0';
+  return (Math.floor(Math.min(cached / input, 1) * 1000) / 10).toFixed(1);
+}
