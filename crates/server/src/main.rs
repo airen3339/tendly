@@ -29,6 +29,7 @@ mod mcp;
 mod media;
 mod model_catalog;
 mod model_limits;
+mod native_chat;
 mod native_config;
 mod native_history;
 mod paths;

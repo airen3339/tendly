@@ -2,12 +2,11 @@
 //!
 //! Each scenario runs twice against the same synthetic app-server
 //! (`packages/native-bridge/fixtures/chat-cli.mjs`): once through `node
-//! chat.mjs` (BridgeAdapter) and once through CodexAdapter. Both must produce
+//! chat.mjs` (BridgeAdapter) and once through the Rust Codex adapter. Both must produce
 //! the same events, after the server's own validation, and send Codex the same
 //! messages. Approval ids are random, so they are compared by order of
 //! appearance; the scenario's directory is compared as a placeholder.
 use crate::chat_adapter::{BridgeAdapter, ChatCommand, ChatInit, ClientAdapter, dispatch};
-use crate::codex_chat::CodexAdapter;
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, path::PathBuf, process::Stdio, time::Duration};
 
@@ -237,7 +236,7 @@ async fn both(name: &str, args: &[&str], steps: &[Step]) {
     let rust = {
         let dir = scenario_dir(&format!("{name}-rust"));
         let log = dir.join("native.jsonl");
-        let adapter = CodexAdapter::new(&environment(&log), &[]);
+        let adapter = crate::codex_chat::adapter(&environment(&log), &[]);
         let run = drive(adapter, init(&dir, args), steps, &log).await;
         let result = comparable(run, &dir.to_string_lossy());
         let _ = std::fs::remove_dir_all(&dir);
@@ -558,7 +557,11 @@ async fn a_client_that_cannot_start() {
         missing(&dir),
     )
     .await;
-    let rust = unlaunchable(CodexAdapter::new(&BTreeMap::new(), &[]), missing(&dir)).await;
+    let rust = unlaunchable(
+        crate::codex_chat::adapter(&BTreeMap::new(), &[]),
+        missing(&dir),
+    )
+    .await;
     assert_eq!(rust, bridge);
     assert!(
         bridge
@@ -586,7 +589,7 @@ async fn an_unusable_launch_option() {
     )
     .await;
     let rust = unlaunchable(
-        CodexAdapter::new(&BTreeMap::new(), &[]),
+        crate::codex_chat::adapter(&BTreeMap::new(), &[]),
         init(&dir, &["--full-auto"]),
     )
     .await;
@@ -601,7 +604,7 @@ async fn an_unusable_launch_option() {
 async fn a_dropped_adapter_stops_its_app_server() {
     let dir = scenario_dir("dropped-rust");
     let log = dir.join("native.jsonl");
-    let mut adapter = CodexAdapter::new(&environment(&log), &[]);
+    let mut adapter = crate::codex_chat::adapter(&environment(&log), &[]);
     adapter.start(&init(&dir, &[])).await.expect("start");
     let mut pid = None;
     for _ in 0..50 {
