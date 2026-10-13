@@ -32,6 +32,7 @@ import { occurrences, parseSearchResult, rowForHit, stepHit, type SearchHit as C
 import type { Virtualizer } from '@tanstack/vue-virtual';
 import VirtualRows from './VirtualRows.vue';
 import { estimateRowHeight, rowHeights } from './row-heights';
+import { followsAfterScroll, PERSON_WINDOW_MS, UPWARD_KEYS } from './scroll-follow';
 import { filterModels, mergeModels, resolveModel, offeredModels } from './model-choices';
 import { openLightbox } from './image-lightbox';
 import { cachedPercent, compactCount, descendants, dockRoots, inDock, isLive, lastLine, runningSubagents, stalledFor, toolRuns, toolRunNames, toolRunStatus, toolsById, type ToolRun } from './tool-runs';
@@ -780,7 +781,23 @@ const booting = computed(() => !isPreview.value && supported.value && structured
 const statusLabel = computed(() => isPreview.value ? 'Read-only UI preview' : booting.value ? 'Starting {provider}…' : loading.value ? 'Loading conversation…' : view.value.awaitingApproval ? 'Waiting for your approval' : view.value.turn === 'running' ? 'Agent is working' : streamState.value === 'error' || streamState.value === 'disconnected' ? 'View disconnected' : mode.value === 'structured' ? 'Ready for your next idea' : 'Native client session');
 let generation = 0, readController: AbortController | undefined, stream: ReturnType<typeof createSessionStream> | undefined, stopBatch = () => {};
 
-function atBottom() { const el = viewport.value; followBottom.value = !el || el.scrollHeight - el.scrollTop - el.clientHeight < 90; }
+// Whether the view keeps following the newest output (scroll-follow.ts): a
+// person scrolling up stops it at once, coming back near the bottom resumes it.
+let lastScrollTop = 0, personAt = 0;
+function byPerson() { personAt = performance.now(); }
+function atBottom() {
+  const el = viewport.value;
+  if (!el) { followBottom.value = true; return; }
+  const movedUp = el.scrollTop < lastScrollTop - 1; lastScrollTop = el.scrollTop;
+  followBottom.value = followsAfterScroll({ following: followBottom.value, movedUp, byPerson: performance.now() - personAt < PERSON_WINDOW_MS, gap: el.scrollHeight - el.scrollTop - el.clientHeight });
+}
+// Each is decided before the scroll it causes lands, so a reply streaming in
+// cannot pull the view back down in between.
+function timelineWheel(event: WheelEvent) { byPerson(); if (event.deltaY < 0) followBottom.value = false; }
+let touchY: number | undefined;
+function timelineTouchStart(event: TouchEvent) { byPerson(); touchY = event.touches[0]?.clientY; }
+function timelineTouchMove(event: TouchEvent) { byPerson(); const y = event.touches[0]?.clientY; if (touchY !== undefined && y !== undefined && y > touchY + 4) followBottom.value = false; }
+function timelineKeydown(event: KeyboardEvent) { if (event.metaKey || event.ctrlKey || event.altKey) return; byPerson(); if (UPWARD_KEYS.has(event.key)) followBottom.value = false; }
 /** Whether the person is selecting text in the conversation: following new output would pull it away. */
 function selectingInTimeline(el: HTMLElement) { const selection = window.getSelection(); return !!selection && !selection.isCollapsed && !!selection.anchorNode && el.contains(selection.anchorNode); }
 // Asked once a frame while a reply streams: the selection is only looked at,
@@ -1293,7 +1310,7 @@ function keydown(event: KeyboardEvent) {
     <div v-if="session.native_source_id" class="chat-notice">{{ t('Native history resumes in the client; earlier transcript is not yet displayed here.') }}</div>
     <div v-if="confirmEnd&&!isPreview" class="chat-end-confirm" role="alertdialog" :aria-label="t('End session')"><p>{{ t('End this session? Its background process will stop; history remains.') }}</p><div><button :disabled="actionBusy" @click="endSession">{{ t('End session') }}</button><button :disabled="actionBusy" @click="confirmEnd=false">{{ t('Keep connected') }}</button></div></div>
     <div v-if="searchOpen" class="chat-search" role="search"><Icon name="search" :size="14" class="chat-search-icon"/><input ref="searchInput" v-model="searchQuery" class="chat-search-input" type="text" enterkeyhint="search" autocomplete="off" spellcheck="false" maxlength="200" :placeholder="t('Search this conversation')" :aria-label="t('Search this conversation')" @keydown="searchKeydown" /><span v-if="searchCount" class="chat-search-count" role="status">{{ searchCount }}</span><span class="chat-search-divider" aria-hidden="true"/><button type="button" class="chat-search-button" :aria-label="t('Previous match')" :title="t('Previous match')" :disabled="!searchHits.length" @click="stepSearch(-1)"><Icon name="chevron" :size="14" class="chat-search-up"/></button><button type="button" class="chat-search-button" :aria-label="t('Next match')" :title="t('Next match')" :disabled="!searchHits.length" @click="stepSearch(1)"><Icon name="chevron" :size="14" class="chat-search-down"/></button><button type="button" class="chat-search-button" :aria-label="t('Close search')" :title="t('Close search')" @click="closeSearch"><Icon name="close" :size="13"/></button><p v-if="searchNotice" class="chat-search-notice" role="status">{{ t(searchNotice) }}</p></div>
-    <div ref="viewport" tabindex="-1" :class="['chat-timeline',{'is-empty':!view.items.length}]" role="log" :aria-label="t('Conversation messages')" aria-live="polite" :aria-busy="view.turn==='running'" @contextmenu="openTimelineMenu" @scroll="atBottom">
+    <div ref="viewport" tabindex="-1" :class="['chat-timeline',{'is-empty':!view.items.length}]" @wheel.passive="timelineWheel" @touchstart.passive="timelineTouchStart" @touchmove.passive="timelineTouchMove" @keydown="timelineKeydown" @pointerdown="byPerson" role="log" :aria-label="t('Conversation messages')" aria-live="polite" :aria-busy="view.turn==='running'" @contextmenu="openTimelineMenu" @scroll="atBottom">
       <p v-if="truncated" class="chat-history-notice">{{ t('Earlier display history was trimmed. Native history remains managed by the official client.') }}</p>
       <div v-if="!view.items.length" class="chat-welcome"><span class="chat-welcome-mark"><ProviderIcon :provider="session.provider" :size="32" /></span><h3>{{ t('What shall we build?') }}</h3><p>{{ t('A real conversation with your native agent, with room for tools, changes and your next idea.') }}</p><span class="chat-context-chip" :title="activeProfile?(activeProfile.native_config?t('Uses the sign-in and settings in {path}',{path:activeProfile.native_config.config_dir}):undefined):t('A fresh, empty client home: no host sign-in or settings, so it may ask you to log in.')"><ProviderIcon :provider="session.provider" :size="12"/>{{ endpointName }}</span><Transition name="chat-boot" :duration="240"><p v-if="booting" class="chat-boot" role="status"><span class="chat-boot-bar"><i/></span>{{ t('Starting {provider}… models and commands arrive with it.',{provider:providerLabel(session.provider)}) }}</p></Transition><div v-if="startersAvailable" class="chat-starters"><button v-for="(starter,index) in STARTERS" :key="starter.title" type="button" :style="{'--starter-delay':index*60+'ms'}" @click="useStarter(starter.prompt)"><span class="chat-starter-icon" :data-tone="starter.icon"><Icon :name="starter.icon" :size="16"/></span><span><strong>{{ t(starter.title) }}</strong><small>{{ t(starter.note) }}</small></span></button></div><p v-if="chatNote" class="chat-trust-note">{{ t(chatNote) }}</p></div>
       <div v-if="older!==undefined" ref="olderSentinel" class="chat-history-older" role="status">{{ loadingOlder ? t('Loading earlier messages…') : '' }}</div>
