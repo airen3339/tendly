@@ -6,9 +6,11 @@ import { clientLabel } from "./clients";
 import Icon from "./Icon.vue";
 import CopyButton from "./CopyButton.vue";
 import MenuFlyout from "./MenuFlyout.vue";
+import { useMobile } from "./mobile";
 const props = defineProps<{ session: Session; keepBusy?: boolean; closeMenu?: () => void }>();
 const emit = defineEmits<{ rename: []; environment: []; keep: []; info: [] }>();
 const { t } = useI18n();
+const mobile = useMobile();
 const hasNativeId = () => !!props.session.provider_session_id && props.session.provider !== 'terminal';
 function showRunInfo() { props.closeMenu?.(); emit("info"); }
 function act(action: "rename" | "environment" | "keep") {
@@ -23,7 +25,11 @@ function act(action: "rename" | "environment" | "keep") {
   <button class="session-environment-action" role="menuitem" @click="act('environment')"><Icon name="settings" :size="14" />{{ t('Session environment') }}</button>
   <button v-if="isEphemeralSession(session)" class="session-keep-action" role="menuitem" :disabled="keepBusy" :aria-busy="keepBusy" @click="act('keep')"><Icon name="check" :size="14" />{{ t(keepBusy ? 'Saving…' : 'Keep this session') }}</button>
   <!-- Two copies of the same session, so one row: the menu had grown a line per thing to copy. -->
-  <MenuFlyout v-if="resumeCommand(session) || hasNativeId()" :label="t('Copy')" icon="clipboard" :width="210">
+  <template v-if="mobile">
+    <CopyButton v-if="resumeCommand(session)" :text="resumeCommand(session)!" label="Copy resume command" menu-item />
+    <CopyButton v-if="session.provider_session_id && session.provider !== 'terminal'" :text="session.provider_session_id" :label="t('Copy {client} session ID', { client: clientLabel(session.provider) })" menu-item />
+  </template>
+  <MenuFlyout v-else-if="resumeCommand(session) || hasNativeId()" :label="t('Copy')" icon="clipboard" :width="210">
     <CopyButton v-if="resumeCommand(session)" :text="resumeCommand(session)!" label="Resume command" menu-item />
     <CopyButton v-if="session.provider_session_id && session.provider !== 'terminal'" :text="session.provider_session_id" :label="t('{client} session ID', { client: clientLabel(session.provider) })" menu-item />
   </MenuFlyout>

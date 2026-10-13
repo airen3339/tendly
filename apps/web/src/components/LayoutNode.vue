@@ -373,14 +373,16 @@ onBeforeUnmount(() => { cleanupResize?.(); window.removeEventListener('resize', 
 .dock-pane.is-located { border-color:var(--ok);box-shadow:inset 0 0 0 1px #46b29d,0 0 0 1px #b6e3dd60;animation:dock-locate 1.4s ease-out; }.dock-pane.is-located .dock-tab.is-active { background:var(--accent-soft); }
 @keyframes dock-locate { from { box-shadow:inset 0 0 0 3px #70cabb,0 0 0 1px #b6e3dd60; } to { box-shadow:inset 0 0 0 1px #46b29d,0 0 0 1px #b6e3dd60; } }
 @media(prefers-reduced-motion:reduce) { .dock-pane.is-located { animation:none; } }
-.dock-header { display:flex;align-items:center;gap:3px;min-width:0;height:33px;min-height:33px;padding:0 5px 0 0;background:var(--sunken);border-bottom:1px solid var(--fill-hover); }
+.dock-header { display:flex;align-items:center;gap:3px;min-width:0;height:38px;min-height:38px;padding:0 5px 0 0;background:var(--sunken);border-bottom:1px solid var(--fill-hover); }
 .dock-tabs { display:flex;align-items:stretch;flex:1;min-width:0;height:100%;overflow-x:auto; }
 /* Tabs are reached by clicking, not by dragging a bar, so this one only has to
    show that more exist. A full-width scrollbar would take a quarter of the strip. */
 .dock-tabs::-webkit-scrollbar { height: 5px; }
 .dock-tabs::-webkit-scrollbar-thumb { border-width: 1px; }
-.dock-tab { display:flex;align-items:center;gap:5px;max-width:180px;min-width:72px;flex-shrink:0;padding:0 6px 0 8px;color:var(--muted);font-size:var(--text-xs);cursor:grab;border-bottom:2px solid transparent;outline:none;user-select:none; }
-.dock-tab.is-active { max-width:260px;color:var(--ink);background:var(--surface);border-bottom-color:var(--focus); }
+/* The transparent top border balances the indicator below, so the tab's content
+   sits on the strip's true middle rather than 1px above it. */
+.dock-tab { display:flex;align-items:center;gap:6px;max-width:220px;min-width:96px;flex-shrink:0;padding:0 6px 0 11px;color:var(--muted);font-size:var(--text-sm);cursor:grab;border-top:2px solid transparent;border-bottom:2px solid transparent;outline:none;user-select:none; }
+.dock-tab.is-active { max-width:300px;color:var(--ink);background:var(--surface);border-bottom-color:var(--focus); }
 .dock-tab:focus-visible { box-shadow:inset 0 0 0 2px #53b9b0; }
 .dock-tab-title { min-width:48px;flex:0 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600; }
 .dock-tab-branch { display:inline-flex;align-items:center;gap:3px;max-width:96px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:0 1 auto;font-size:var(--text-xs);border-radius:var(--radius-xs);padding:1px 4px;background:var(--fill);color:var(--ink-soft); }
@@ -395,10 +397,10 @@ onBeforeUnmount(() => { cleanupResize?.(); window.removeEventListener('resize', 
 .dock-tab:not(.is-active):not(:hover):not(:focus-within) .dock-tab-close { opacity:0; }
 @media(pointer:coarse) { .dock-tab:not(.is-active) .dock-tab-close { opacity:1; } }
 .dock-actions { display:flex;align-items:center;gap:1px;flex-shrink:0; }
-.dock-action { display:grid;place-items:center;width:24px;height:25px;padding:0;border:0;border-radius:var(--radius-sm);background:transparent;color:var(--ink-soft);cursor:pointer;font-size:var(--text-lg);list-style:none; }
+.dock-action { display:grid;place-items:center;width:26px;height:28px;padding:0;border:0;border-radius:var(--radius-sm);background:transparent;color:var(--ink-soft);cursor:pointer;font-size:var(--text-lg);list-style:none; }
 .dock-action:hover,.dock-action:focus-visible { background:var(--accent-soft);color:var(--accent-ink);outline:none; }
 .dock-action::-webkit-details-marker { display:none; }
-.dock-add-menu { position:static; }.dock-menu-items { position:absolute;right:6px;top:37px;z-index:10;min-width:154px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-md);padding:5px;box-shadow:var(--shadow-lg); }
+.dock-add-menu { position:static; }.dock-menu-items { position:absolute;right:6px;top:42px;z-index:10;min-width:154px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-md);padding:5px;box-shadow:var(--shadow-lg); }
 .dock-menu-items button, .dock-menu-items :deep(.menu-flyout-trigger) { display:flex;align-items:center;gap:9px;width:100%;border:0;border-radius:var(--radius-sm);padding:8px;background:transparent;color:var(--ink-soft);text-align:left;font-size:var(--text-sm);cursor:pointer; }.dock-menu-items button:hover, .dock-menu-items :deep(.menu-flyout-trigger):hover, .dock-menu-items :deep(.menu-flyout-trigger[aria-expanded="true"]) { background:var(--ok-soft);color:var(--accent-ink); }
 .dock-adaptive { color:var(--faint);font-size:var(--text-sm);padding:0 3px; }
 .dock-content { display:flex;flex-direction:column;flex:1;min-width:0;min-height:0;overflow:hidden; }
