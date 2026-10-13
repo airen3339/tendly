@@ -10,7 +10,9 @@ import { backLabel } from "./page-back";
  * own. Esc goes back, unless something inside (a menu, a dialog, a field's own
  * Esc) has already used it.
  */
-defineProps<{ title: string; subtitle?: string }>();
+// `namedAbove`: on a phone the top bar already shows this title, so the page
+// does not say it a second time.
+defineProps<{ title: string; subtitle?: string; namedAbove?: boolean }>();
 const emit = defineEmits<{ back: [] }>();
 const { t } = useI18n();
 const page = ref<HTMLElement>();
@@ -31,7 +33,7 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKey));
   <section ref="page" class="page-shell" tabindex="-1" :aria-label="title">
     <header class="page-header">
       <button type="button" class="page-back" :title="back + ' · Esc'" @click="emit('back')"><Icon name="back" :size="16" /><span>{{ back }}</span></button>
-      <div class="page-heading"><h1>{{ title }}</h1><p v-if="subtitle">{{ subtitle }}</p></div>
+      <div class="page-heading" :class="{ 'named-above': namedAbove }"><h1>{{ title }}</h1><p v-if="subtitle">{{ subtitle }}</p></div>
       <div class="page-actions"><slot name="actions" /></div>
     </header>
     <div class="page-body"><slot /></div>
@@ -56,6 +58,8 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKey));
   .page-back span{display:none}
   .page-heading{flex-basis:calc(100% - 48px)}
   .page-heading h1{font-size:var(--text-xl)}
+  .page-heading.named-above h1{display:none}
+  .page-heading.named-above{flex-basis:0}
   .page-body{padding:var(--space-2) var(--space-3) var(--space-4)}
 }
 @media (prefers-reduced-motion:reduce){.page-shell{animation:none}}

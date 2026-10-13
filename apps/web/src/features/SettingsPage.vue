@@ -51,7 +51,7 @@ function select(next: SettingsSection) { if (next !== section.value) emit('navig
 </script>
 
 <template>
-  <PageShell :title="t('Settings')" @back="emit('back')">
+  <PageShell named-above :title="t('Settings')" @back="emit('back')">
     <div class="settings-layout">
       <nav class="settings-nav" :aria-label="t('Settings sections')">
         <button v-for="entry in SECTIONS" :key="entry.id" type="button" :class="['settings-nav-item',{selected:section===entry.id}]" :aria-current="section===entry.id?'page':undefined" @click="select(entry.id)">

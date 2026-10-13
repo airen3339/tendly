@@ -182,7 +182,7 @@ const insights = computed(() => {
 </script>
 
 <template>
-  <PageShell :title="t('Usage')" :subtitle="t('Tokens and cost for Claude Code and Codex, read from this host\'s own client logs.')" @back="emit('back')">
+  <PageShell named-above :title="t('Usage')" :subtitle="t('Tokens and cost for Claude Code and Codex, read from this host\'s own client logs.')" @back="emit('back')">
     <template #actions><button class="secondary-button" :disabled="loading" @click="load"><Icon name="refresh" :size="14" />{{ t('Refresh') }}</button></template>
     <div class="usage">
       <p v-if="unsupported" class="inline-notice">{{ t('This backend does not report usage. Update AgentDock on the host to see it.') }}</p>

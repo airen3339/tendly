@@ -42,6 +42,8 @@ export interface Session {
   /** A worktree of the workspace's repository this session runs in; absent means the workspace itself. */
   checkout_path?: string | null;
   checkout_branch?: string | null;
+  /** The last thing the user said here, one short line, for telling sessions apart in a list. */
+  preview?: string | null;
   error: string | null;
 }
 

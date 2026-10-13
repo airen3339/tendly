@@ -522,8 +522,13 @@ svg { flex-shrink: 0; vertical-align: middle; }
 .app-shell.is-mobile .mobile-session-actions { display: block; flex: none; width: 40px; height: 40px; }
 .app-shell.is-mobile .top-actions { gap: 0; margin-left: 0; }
 .app-shell.is-mobile .top-actions>.icon-button { display: none; }
-.app-shell.is-mobile .top-actions>.new-session-top { width: 44px; height: 44px; padding: 0; border: 0; border-radius: var(--radius-lg); background: none; box-shadow: none; color: var(--ink); }
-.app-shell.is-mobile .top-actions>.new-session-top>span { display: none; }
+/* Descendant, not child: the button now sits inside the split control, and a
+   child selector left the phone the desktop's small teal button, against the
+   screen edge. */
+.app-shell.is-mobile .top-actions .new-session-top { width: 44px; height: 44px; min-height: 44px; padding: 0; border: 0; border-radius: var(--radius-lg); background: none; box-shadow: none; color: var(--ink); }
+.app-shell.is-mobile .top-actions .new-session-top>span { display: none; }
+.app-shell.is-mobile .topbar { padding-right: 6px; }
+.app-shell.is-mobile .topbar-search { width: 44px; height: 44px; border: 0; background: none; color: var(--ink); }
 .app-shell.is-mobile .main-workspace { padding: 0; }
 .app-shell.is-mobile .main-workspace>.app-error, .app-shell.is-mobile .main-workspace>.canvas-compat-notice, .app-shell.is-mobile .main-workspace>.confirmation-bar { margin: 8px 10px; font-size: var(--text-md); }
 .app-shell.is-mobile .pane-workspace-bar { display: none; }

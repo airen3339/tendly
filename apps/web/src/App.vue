@@ -385,6 +385,21 @@ async function revealSession(id: string) {
   await nextTick();
   await workspaceSidebar.value?.revealSession(id);
 }
+// The phone's drawer opens on the session in view, not wherever its list was
+// last left: among many alike-named rows, the current one is the anchor.
+watch(sidebarOpen, async open => {
+  const id = selectedSessionId.value;
+  if (!open || !mobile.value || !id) return;
+  // Archived and temporary sessions live in the library, not the drawer's
+  // groups; revealing one would leave the drawer for that page.
+  const session = sessions.value.find(item => item.id === id);
+  if (!session || isSessionArchived(session) || isEphemeralSession(session)) return;
+  await nextTick();
+  const row = () => document.querySelector<HTMLElement>(`.workspace-groups [data-sidebar-session-id="${CSS.escape(id)}"]`);
+  // Its workspace may be folded: unfold it first, then centre the row.
+  if (!row()) await workspaceSidebar.value?.revealSession(id);
+  row()?.scrollIntoView({ block: "center" });
+});
 /** What just happened, as a toast that goes away by itself; `sessionNotice` keeps the last one for the record. */
 function notice(message: string, values?: Record<string, number>, action?: ToastAction) {
   sessionNotice.value = message; sessionNoticeValues.value = values;

@@ -32,6 +32,35 @@ fn derived_title(text: &str) -> Option<String> {
     Some(title).filter(|value| !value.is_empty())
 }
 
+/// One line of what the user said, for a session list: the attachment header
+/// AgentDock writes above a message is dropped, whitespace is folded, and the
+/// line is cut by characters so CJK keeps its share of the width.
+pub fn preview_line(text: &str) -> Option<String> {
+    let mut lines = text.lines().peekable();
+    if lines.peek().is_some_and(|line| {
+        line.starts_with("Attached file") && line.ends_with("in this workspace:")
+    }) {
+        lines.next();
+        while lines
+            .peek()
+            .is_some_and(|line| line.starts_with("- ") || line.trim().is_empty())
+        {
+            lines.next();
+        }
+    }
+    let body = lines
+        .collect::<Vec<_>>()
+        .join(" ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut line: String = body.chars().take(80).collect();
+    if body.chars().count() > 80 {
+        line.push('…');
+    }
+    Some(line).filter(|value| !value.is_empty())
+}
+
 pub struct StoredConversation {
     pub events: Vec<Value>,
     pub truncated: bool,
@@ -315,6 +344,17 @@ pub(super) fn append(
     // The first thing asked names the session. Only a title this code wrote
     // itself is replaced, so a rename stays put, and only the first message
     // counts, so the name does not follow the conversation around.
+    // Every message the user sends is the session's latest word, for lists.
+    if kind == "message"
+        && event["role"].as_str() == Some("user")
+        && let Some(text) = event["text"].as_str()
+    {
+        let raw: String = text.chars().take(400).collect();
+        tx.execute(
+            "UPDATE sessions SET preview=?1 WHERE id=?2",
+            params![raw, id.to_string()],
+        )?;
+    }
     if kind == "message"
         && event["role"].as_str() == Some("user")
         && let Some(title) = event["text"].as_str().and_then(derived_title)
@@ -420,6 +460,63 @@ pub(super) fn append(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_preview_is_what_was_said_without_the_attachment_header() {
+        assert_eq!(
+            preview_line(
+                "Attached files in this workspace:\n- a.png\n- b.png\n\n  look at\n these "
+            )
+            .as_deref(),
+            Some("look at these")
+        );
+        assert_eq!(
+            preview_line("Attached file in this workspace:\n- a.png"),
+            None
+        );
+        assert_eq!(preview_line(&"字".repeat(90)).unwrap().chars().count(), 81);
+    }
+
+    #[test]
+    fn every_message_the_user_sends_becomes_the_sessions_preview() {
+        let path = std::env::temp_dir().join(format!("agentdock-preview-{}.db", Uuid::new_v4()));
+        let store = Store::open(&path).unwrap();
+        let workspace = store.create_workspace("Fixture", "/fixture").unwrap();
+        let session = store
+            .create_session(workspace.id, ProviderKind::ClaudeCode, "Claude Code")
+            .unwrap();
+        assert_eq!(
+            store.get_session(session.id).unwrap().unwrap().preview,
+            None
+        );
+        for text in [
+            "first question",
+            "Attached file in this workspace:\n- shot.png\n\nwhy is this red",
+        ] {
+            store
+                .append_conversation_event(
+                    session.id,
+                    json!({"type":"message","id":text,"role":"user","text":text}),
+                )
+                .unwrap();
+        }
+        // The agent's reply does not move it.
+        store
+            .append_conversation_event(
+                session.id,
+                json!({"type":"message","id":"a","role":"assistant","text":"because"}),
+            )
+            .unwrap();
+        assert_eq!(
+            store
+                .get_session(session.id)
+                .unwrap()
+                .unwrap()
+                .preview
+                .as_deref(),
+            Some("why is this red")
+        );
+        let _ = std::fs::remove_file(path);
+    }
     #[test]
     fn transcript_receipts_and_sequence_survive_reopen_and_restart_does_not_replay_messages() {
         let path =

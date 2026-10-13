@@ -100,7 +100,7 @@ function relative(at?: string | null) {
 </script>
 
 <template>
-  <PageShell :title="t('All sessions')" :subtitle="t('{count} sessions', { count: sessions.length })" @back="emit('back')">
+  <PageShell named-above :title="t('All sessions')" :subtitle="t('{count} sessions', { count: sessions.length })" @back="emit('back')">
     <template #actions><button class="secondary-button" :disabled="sessionsLoading" @click="emit('refreshSessions')"><Icon name="refresh" :size="14" />{{ t('Refresh') }}</button></template>
     <div class="sessions-page">
       <div class="sessions-toolbar">
@@ -142,7 +142,7 @@ function relative(at?: string | null) {
           <span role="cell"><input type="checkbox" :checked="checkedSet.has(entry.session.id)" :aria-label="t('Select {session}', { session: entry.session.title })" @click="check(entry.session, $event)" /></span>
           <button role="cell" type="button" class="sessions-title" @click="emit('openSession', entry.session)">
             <ProviderIcon :provider="entry.session.provider" :size="15" />
-            <span><strong>{{ entry.session.title }}</strong><small>{{ entry.session.provider === 'terminal' ? t('Terminal') : providerLabel(entry.session.provider) }}<template v-if="isEphemeralSession(entry.session)"> · {{ t('Temporary') }}</template><template v-if="isSessionArchived(entry.session)"> · {{ t('Archived') }}</template></small></span>
+            <span><strong>{{ entry.session.title }}</strong><small>{{ entry.session.provider === 'terminal' ? t('Terminal') : providerLabel(entry.session.provider) }}<template v-if="isEphemeralSession(entry.session)"> · {{ t('Temporary') }}</template><template v-if="isSessionArchived(entry.session)"> · {{ t('Archived') }}</template></small><small v-if="entry.session.preview" class="session-row-preview">{{ entry.session.preview }}</small></span>
           </button>
           <span role="cell" class="sessions-muted">{{ entry.workspace?.name ?? '—' }}</span>
           <span role="cell"><span :class="['status-pill', entry.session.status]"><i />{{ t(entry.session.status) }}</span></span>
@@ -209,4 +209,5 @@ function relative(at?: string | null) {
   .sessions-row{min-height:60px}
   .sessions-filters select{flex:1 1 140px;max-width:none;height:40px}
 }
+.session-row-preview{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}
 </style>

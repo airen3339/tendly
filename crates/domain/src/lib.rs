@@ -265,6 +265,10 @@ pub struct Session {
     /// The branch that checkout was on when it was chosen, for labels.
     #[serde(default)]
     pub checkout_branch: Option<String>,
+    /// The last thing the user said here, one short line, so sessions that
+    /// share a default name can be told apart in a list.
+    #[serde(default)]
+    pub preview: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]

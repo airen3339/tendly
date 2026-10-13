@@ -202,3 +202,13 @@ test('Claude Code, Codex and pi share identity actions in the sidebar, including
   assert.ok(!/Copy [^"<]* session ID/.test(html), 'a new session has no native ID to copy');
   assert.ok(!html.includes('menu-flyout-label">Copy<'), 'nor a conversation to resume, so no copy row');
 });
+
+test('a row says what was last asked there, and archives in one step', async () => {
+  const { html } = await render(SessionRow, { session: session('claude_code', { title: 'Claude Code', preview: 'why is the build red' }), archiveSupported: true });
+  assert.ok(html.includes('why is the build red'), 'the last thing said tells alike-named rows apart');
+  assert.ok(html.includes('session-archive-quick'), 'archive sits on the row, not inside its menu');
+  assert.ok(html.includes('session-swipe-action'), 'and is what a swipe reveals on a phone');
+  const { html: bare } = await render(SessionRow, { session: session('claude_code', { title: 'Claude Code' }) });
+  assert.ok(!bare.includes('workspace-session-preview'), 'nothing said yet means no second line');
+  assert.ok(!bare.includes('session-archive-quick'), 'and no archive where the server cannot');
+});
