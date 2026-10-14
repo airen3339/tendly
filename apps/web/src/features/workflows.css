@@ -178,6 +178,13 @@
   .terminal-keys-row { gap: 3px; }
   .terminal-keys button, .terminal-keys button.key-text { flex: 1 1 0; min-width: 24px; width: auto; padding: 0; }
 }
+/* Back down to the newest output after reading up through a long answer. It
+   floats above the on-screen keys, whose height depends on how many rows are open. */
+.terminal-latest { position: absolute; left: 50%; bottom: 12px; z-index: 3; display: flex; align-items: center; gap: 4px; height: 30px; padding: 0 12px 0 9px; transform: translateX(-50%); border: 1px solid var(--line); border-radius: 999px; background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: blur(6px); box-shadow: var(--shadow-md); color: var(--ink-soft); font: 500 var(--text-xs)/1 var(--font-body); }
+.terminal-latest svg { transform: rotate(90deg); }
+.terminal-latest.above-keys { bottom: 66px; }
+.terminal-latest.above-more { bottom: 108px; }
+.native-terminal.dark .terminal-latest { border-color: var(--term-line); background: color-mix(in srgb, var(--term-raised) 92%, transparent); color: var(--term-ink); box-shadow: 0 3px 14px #0008; }
 .terminal-paste { position: absolute; left: 9px; right: 9px; bottom: 52px; z-index: 4; display: flex; flex-direction: column; gap: 8px; padding: 10px; border-radius: var(--radius-lg); border: 1px solid var(--line); background: var(--surface); box-shadow: var(--shadow-lg); }
 /* 16px keeps iOS from zooming the page when the field takes focus. */
 .terminal-paste>textarea { min-height: 88px; max-height: 40vh; resize: none; padding: 9px 10px; border: 1px solid var(--line); border-radius: var(--radius-md); font: var(--input-text)/1.4 var(--mono); color: var(--ink-soft); background: var(--surface); }
@@ -194,6 +201,13 @@
    there is, and the last ones are drawn below the visible area. A margin is
    outside the box it measures, so the row count stays honest. */
 .terminal-host { flex: 1; min-height: 0; min-width: 0; padding: 0 8px; margin: 5px 0; overflow: hidden; }
+/* A drag on the terminal is scrolled by TerminalPane itself. Left to the
+   browser, the first few pixels went to the page before the script could claim
+   them, so pulling down at the top of the scrollback reloaded the page and the
+   viewport's own native scroll fought the script's. Sideways swipes between
+   panes are script-driven too, so taking the gesture from the browser loses nothing. */
+.terminal-host, .terminal-host * { touch-action: none; }
+.native-terminal, .terminal-host .xterm-viewport { overscroll-behavior: none; }
 /* The on-screen keys float over this corner, so the rows stop above them: the
    bottom row is the prompt, and a prompt behind a button is unreadable. */
 @media (any-pointer: coarse) { .terminal-host { margin-bottom: 48px; } }

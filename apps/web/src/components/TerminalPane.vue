@@ -10,6 +10,7 @@ import { onPageReturn } from "../features/page-return";
 import type { SessionStreamState } from "../features/session-stream";
 import { arrowSequence, ctrlSequence, ENTER_SEQUENCE, ESCAPE_SEQUENCE, isTap, repeatArrow, selectionPresses, shiftSequence, tabSequence, type ArrowKey } from "../features/terminal-keys";
 import { swipeAxis } from "../features/pane-swipe";
+import { addSample, flingStep, releaseVelocity, type TouchSample } from "../features/terminal-scroll";
 import { terminalDark as dark } from "../features/theme";
 import { filesFrom, imageCaveat, isImage, pasteText, uploadName, uploadProblem, uploadToSession } from "../features/terminal-uploads";
 import { showToast } from "../features/toasts";
@@ -44,6 +45,8 @@ const ctrlArmed = ref(false);
 const shiftArmed = ref(false);
 /** The less used keys fold behind ⋯ so the everyday ones fit one phone-wide row. */
 const moreKeys = ref(false);
+/** Whether the view is scrolled back from the newest output, which offers a way back down. */
+const scrolledBack = ref(false);
 /**
  * Text waiting to be pasted, when the clipboard could not be read directly.
  * `undefined` means the paste field is closed.
@@ -295,12 +298,16 @@ function gestureEnd(event: PointerEvent) {
  * again. A vertical drag is turned into what a wheel would have done: the
  * scrollback moves in the ordinary buffer, and a program that owns the screen
  * (the alternate buffer, or one that asked for mouse reports) is handed wheel
- * steps to scroll itself. Sideways drags are left to the pane swipe.
+ * steps to scroll itself. Sideways drags are left to the pane swipe. A flick
+ * keeps coasting after the finger lifts, and the next touch stops it.
  */
-let touchScroll: { x: number; y: number; axis?: "x" | "y"; carry: number } | undefined;
+let touchScroll: { x: number; y: number; axis?: "x" | "y"; carry: number; samples: TouchSample[] } | undefined;
+let fling: { frame: number; velocity: number; carry: number; at: number; x: number; y: number } | undefined;
+function stopFling() { if (fling) cancelAnimationFrame(fling.frame); fling = undefined; }
 function touchScrollStart(event: TouchEvent) {
+  stopFling();
   const touch = event.touches[0];
-  touchScroll = event.touches.length === 1 && touch ? { x: touch.clientX, y: touch.clientY, carry: 0 } : undefined;
+  touchScroll = event.touches.length === 1 && touch ? { x: touch.clientX, y: touch.clientY, carry: 0, samples: [{ y: touch.clientY, at: event.timeStamp }] } : undefined;
 }
 function touchScrollMove(event: TouchEvent) {
   const current = touchScroll, touch = event.touches[0];
@@ -311,20 +318,51 @@ function touchScrollMove(event: TouchEvent) {
     if (current.axis !== "y") return;
   }
   event.preventDefault();
-  const screen = host.value.querySelector<HTMLElement>(".xterm-screen");
-  const rowHeight = (screen?.getBoundingClientRect().height ?? 0) / terminal.rows;
-  if (!screen || !(rowHeight > 0)) return;
+  current.samples = addSample(current.samples, { y: touch.clientY, at: event.timeStamp });
   // A finger moving up brings later lines into view, as a page does.
-  current.carry += current.y - touch.clientY; current.y = touch.clientY;
-  const lines = Math.trunc(current.carry / rowHeight);
-  if (!lines) return;
-  current.carry -= lines * rowHeight;
-  if (terminal.buffer.active.type === "normal" && terminal.modes.mouseTrackingMode === "none") { terminal.scrollLines(lines); return; }
+  current.carry = scrollByPixels(current.carry + current.y - touch.clientY, touch.clientX, touch.clientY);
+  current.y = touch.clientY;
+}
+function touchScrollEnd(event: TouchEvent) {
+  const current = touchScroll;
+  touchScroll = undefined;
+  if (current?.axis !== "y" || event.touches.length) return;
+  const velocity = releaseVelocity(current.samples, event.timeStamp);
+  if (!velocity) return;
+  fling = { frame: 0, velocity, carry: current.carry, at: performance.now(), x: current.x, y: current.y };
+  fling.frame = requestAnimationFrame(coast);
+}
+function coast(now: number) {
+  const current = fling;
+  if (!current || !terminal) { fling = undefined; return; }
+  const step = flingStep(current.velocity, now - current.at);
+  current.at = now; current.velocity = step.velocity;
+  current.carry = scrollByPixels(current.carry + step.distance, current.x, current.y);
+  // Coasting into either end of the scrollback stops there rather than pressing on.
+  const buffer = terminal.buffer.active;
+  const atEnd = buffer.type === "normal" && terminal.modes.mouseTrackingMode === "none" && (current.velocity > 0 ? buffer.viewportY >= buffer.baseY : buffer.viewportY <= 0);
+  if (!current.velocity || atEnd) { fling = undefined; return; }
+  current.frame = requestAnimationFrame(coast);
+}
+/** Scrolls by whole rows of `pixels` and returns the part of a row left over. */
+function scrollByPixels(pixels: number, clientX: number, clientY: number): number {
+  const screen = host.value?.querySelector<HTMLElement>(".xterm-screen");
+  const rowHeight = terminal && screen ? screen.getBoundingClientRect().height / terminal.rows : 0;
+  if (!terminal || !screen || !(rowHeight > 0)) return 0;
+  const lines = Math.trunc(pixels / rowHeight);
+  if (!lines) return pixels;
+  if (terminal.buffer.active.type === "normal" && terminal.modes.mouseTrackingMode === "none") { terminal.scrollLines(lines); updateScrolledBack(); return pixels - lines * rowHeight; }
   // One wheel notch per line, so xterm.js reports or translates each exactly as it would a real one.
   for (let step = 0; step < Math.abs(lines); step++) {
-    screen.dispatchEvent(new WheelEvent("wheel", { deltaY: Math.sign(lines), deltaMode: WheelEvent.DOM_DELTA_LINE, clientX: touch.clientX, clientY: touch.clientY, bubbles: true, cancelable: true }));
+    screen.dispatchEvent(new WheelEvent("wheel", { deltaY: Math.sign(lines), deltaMode: WheelEvent.DOM_DELTA_LINE, clientX, clientY, bubbles: true, cancelable: true }));
   }
+  return pixels - lines * rowHeight;
 }
+function updateScrolledBack() {
+  const buffer = terminal?.buffer.active;
+  scrolledBack.value = !!buffer && buffer.type === "normal" && buffer.viewportY < buffer.baseY;
+}
+function scrollToLatest() { stopFling(); terminal?.scrollToBottom(); updateScrolledBack(); }
 
 function streamUrl(sessionId: string) {
   const url = new URL(`/api/sessions/${encodeURIComponent(sessionId)}/pty/ws`, window.location.href);
@@ -376,6 +414,7 @@ function initializeTerminal() {
     if (ctrlArmed.value) { ctrlArmed.value = false; data = ctrlSequence(data); }
     stream.send(new TextEncoder().encode(data));
   }));
+  subscriptions.push(terminal.onScroll(updateScrolledBack), terminal.onWriteParsed(updateScrolledBack));
   subscriptions.push(terminal.onBinary(data => { stream.send(Uint8Array.from(data, value => value.charCodeAt(0) & 255)); }));
   observer = new ResizeObserver(resize); observer.observe(host.value);
 }
@@ -396,7 +435,7 @@ function useWebgl(target: Terminal) {
   } catch { /* No WebGL here; the DOM renderer stays. */ }
 }
 function cleanupTerminal() {
-  cancelAnimationFrame(resizeFrame);
+  cancelAnimationFrame(resizeFrame); stopFling(); scrolledBack.value = false;
   observer?.disconnect(); observer = undefined;
   for (const subscription of subscriptions.splice(0)) try { subscription.dispose(); } catch { /* Best-effort cleanup after partial initialization. */ }
   try { terminal?.dispose(); } catch { /* A broken renderer should remain retryable. */ }
@@ -443,7 +482,8 @@ onUnmounted(() => { for (const entry of uploads.value) { entry.abort?.(); if (en
       </div>
     </div>
     <div v-if="notice" :class="state === 'error' ? 'inline-error' : 'inline-notice'" :role="state === 'error' ? 'alert' : 'status'">{{ nativeNotice ? notice : t(notice) }}</div>
-    <div ref="host" class="terminal-host" :aria-label="t('Native session {id}', { id: sessionId })" @pointerdown="gestureStart" @pointerup="gestureEnd" @pointercancel="gesture = undefined" @touchstart="touchScrollStart" @touchmove="touchScrollMove" />
+    <div ref="host" class="terminal-host" :aria-label="t('Native session {id}', { id: sessionId })" @pointerdown="gestureStart" @pointerup="gestureEnd" @pointercancel="gesture = undefined" @touchstart="touchScrollStart" @touchmove="touchScrollMove" @touchend="touchScrollEnd" @touchcancel="touchScroll = undefined" />
+    <button v-if="scrolledBack" type="button" :class="['terminal-latest', { 'above-keys': touchDevice, 'above-more': touchDevice && moreKeys }]" :aria-label="t('Jump to latest output')" :title="t('Jump to latest output')" @pointerdown="keepFocus" @click="scrollToLatest"><Icon name="chevron" :size="14" /><span>{{ t('Latest') }}</span></button>
     <div v-if="touchDevice" class="terminal-keys" role="group" :aria-label="t('Terminal keys')">
       <div v-if="moreKeys" class="terminal-keys-row">
         <button type="button" class="key-labeled" :aria-label="t('Paste')" :title="t('Paste')" @click="moreKeys = false; pressPaste()"><Icon name="clipboard" :size="16" /><span>{{ t('Paste') }}</span></button>

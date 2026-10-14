@@ -373,6 +373,8 @@ export const zhCN: Readonly<Record<string, string>> = {
   "Keyboard": "键盘",
   "Tap a row to select it": "点击选择行",
   "Select rows": "选行",
+  "Jump to latest output": "回到最新输出",
+  "Latest": "最新",
   "Open this session in a terminal": "在终端中打开此会话",
   "For interactive commands such as /config, which the conversation view cannot display": "用于 /config 这类全交互命令，对话视图无法显示它们",
   "Structured conversation requires an updated backend. Your native session is unchanged.": "结构化对话需要更新后端，原生会话不会因此改变。",
