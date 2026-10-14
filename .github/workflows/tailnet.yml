@@ -100,9 +100,8 @@ jobs:
           # This machine still needs nothing.
           test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:28789/api/workspaces)" = 200
           curl -fsS http://127.0.0.1:28789/api/tailnet/login-code | jq -e '.svg | contains("<svg")'
-          if [ "$(echo "$status" | jq -r .verified)" != true ]; then
-            echo "::warning::The gateway could not reach its own address (verified=false); the checks above reached it with --resolve"
-          fi
+          # The settings page shows a warning unless the gateway reached itself.
+          test "$(echo "$status" | jq -r .verified)" = true
           echo "TARGET=$(echo "$status" | jq -r .target)" >> "$GITHUB_ENV"
 
       - name: Stop takes the address down

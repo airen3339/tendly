@@ -655,9 +655,14 @@ impl Tailnet {
         if self.inner.verifying.swap(true, Ordering::AcqRel) {
             return;
         }
+        let ip = self
+            .current()
+            .machine
+            .as_ref()
+            .and_then(|machine| machine.ip.as_deref()?.parse().ok());
         let this = self.clone();
         tokio::spawn(async move {
-            let verified = reachable(&name, || this.serves(&name)).await;
+            let verified = reachable(&name, ip, || this.serves(&name)).await;
             this.inner.verifying.store(false, Ordering::Release);
             let Some(verified) = verified else { return };
             let mut current = this.current();
@@ -838,11 +843,20 @@ fn read_saved(state_dir: &Path) -> Saved {
 /// Whether this machine reaches its own published address within
 /// [`VERIFY_WINDOW`]. Until the certificate is issued the handshake fails, so
 /// it keeps trying; `None` when `still` says the answer no longer matters.
-async fn reachable(name: &str, still: impl Fn() -> bool) -> Option<bool> {
-    let Ok(client) = reqwest::Client::builder()
-        .timeout(Duration::from_secs(15))
-        .build()
-    else {
+///
+/// With the machine's tailnet address it connects there directly: what is in
+/// question is the publication and its certificate, which is still checked
+/// against the name, not whether this machine's own DNS knows MagicDNS.
+async fn reachable(
+    name: &str,
+    ip: Option<std::net::IpAddr>,
+    still: impl Fn() -> bool,
+) -> Option<bool> {
+    let mut builder = reqwest::Client::builder().timeout(Duration::from_secs(15));
+    if let Some(ip) = ip {
+        builder = builder.resolve(name, std::net::SocketAddr::new(ip, HTTPS_PORT));
+    }
+    let Ok(client) = builder.build() else {
         return Some(false);
     };
     let health = format!("{}api/health", url(name));
