@@ -167,6 +167,8 @@ mod tests {
             .collect::<rusqlite::Result<_>>()
             .unwrap();
         assert_eq!(keys, ["env:TENDLY_SECRET_WORK", "plain"]);
+        // Windows will not delete a database that is still open.
+        drop(db);
 
         // Once moved there is nothing left to do.
         assert_eq!(from_agentdock(&home, &state).unwrap(), None);
