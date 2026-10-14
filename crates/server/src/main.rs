@@ -39,7 +39,6 @@ mod pi_chat;
 mod preferences;
 mod price_list;
 mod providers;
-mod rename;
 mod resources;
 mod resume;
 mod secrets;
@@ -537,10 +536,6 @@ are preserved."#;
 /// carries a log tail arrived as one unreadable line. A supervisor also needs
 /// the non-zero status to tell a failed start from a successful one.
 fn main() {
-    if let Err(error) = move_agentdock_state() {
-        eprintln!("{error}");
-        std::process::exit(1);
-    }
     // The configuration file is read before the runtime is built, because
     // seeding the environment from it is only sound while this is the only
     // thread — and a runtime is what ends that.
@@ -566,35 +561,6 @@ fn main() {
     if update::restart_requested() {
         std::process::exit(update::RESTART_EXIT_CODE);
     }
-}
-
-/// Bring `~/.agentdock` over on the first start after the rename (`rename`).
-/// Not for `--version` or `--help`: an update asks the new binary its version
-/// while the old gateway still runs from that directory.
-fn move_agentdock_state() -> std::result::Result<(), String> {
-    let informational = env::args()
-        .skip(1)
-        .any(|argument| matches!(argument.as_str(), "--version" | "-V" | "--help" | "-h"));
-    if informational
-        || env::var_os("TENDLY_STATE_DIR").is_some()
-        || env::var_os("TENDLY_HOME").is_some()
-    {
-        return Ok(());
-    }
-    let Some(home) = env::var_os("HOME")
-        .or_else(|| env::var_os("USERPROFILE"))
-        .map(PathBuf::from)
-    else {
-        return Ok(());
-    };
-    if let Some(old) = rename::from_agentdock(&home, &home.join(".tendly"))? {
-        eprintln!(
-            "Moved AgentDock's state from {} to {}.",
-            old.display(),
-            home.join(".tendly").display()
-        );
-    }
-    Ok(())
 }
 
 /// Let the file say what the environment has not.

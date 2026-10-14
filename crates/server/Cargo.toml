@@ -9,7 +9,6 @@ tendly-domain.workspace = true
 tendly-persistence.workspace = true
 tendly-runtime.workspace = true
 axum.workspace = true
-rusqlite.workspace = true
 chrono.workspace = true
 futures-util.workspace = true
 libc.workspace = true

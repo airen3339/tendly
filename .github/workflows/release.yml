@@ -176,18 +176,6 @@ jobs:
           done
           echo "processed $(echo "$packages" | wc -l | tr -d " ") packages at ${VERSION} ${DRY_RUN}"
 
-      # Tendly was published as @wnzzer/agentdock until 0.1.74. Marking those
-      # packages is idempotent, so it simply runs on every release; it can go
-      # once nobody could still be holding one.
-      - name: Point the old package names here
-        if: steps.version.outputs.dry_run == ''
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          set -euo pipefail
-          for pkg in agentdock agentdock-darwin-arm64 agentdock-darwin-x64 agentdock-linux-x64 agentdock-linux-arm64 agentdock-win32-x64; do
-            npm deprecate "@wnzzer/${pkg}" "Renamed to @wnzzer/${pkg/agentdock/tendly}" </dev/null
-          done
 
 
   publish:
