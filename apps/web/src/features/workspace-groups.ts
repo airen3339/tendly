@@ -8,11 +8,17 @@ export interface WorkspaceGroupPreferences {
   pinned: string[];
   /** Only explicit user choices; absent keys retain the selected/active default. */
   expanded: Record<string, boolean>;
+  /** Workspaces whose "Earlier" fold is open. Absent in what older versions stored. */
+  olderExpanded: Record<string, boolean>;
 }
 
 export interface WorkspaceGroup {
   workspace: Workspace;
   sessions: Session[];
+  /** `sessions` split by when each was last in use: the recent ones are listed,
+   * the older ones wait behind a fold. Searching never folds anything away. */
+  recentSessions: Session[];
+  olderSessions: Session[];
   totalSessions: number;
   activeCount: number;
   /** Sessions waiting on you: an approval or a question. */
@@ -28,13 +34,26 @@ export interface WorkspaceGroupOptions {
   preferences?: WorkspaceGroupPreferences;
   /** Search expansion is temporary and must not overwrite the normal layout. */
   searchExpanded?: Record<string, boolean>;
+  /** The session open on the canvas stays in view however long it has been idle. */
+  selectedSessionId?: string;
+  /** A session not used for this many days moves behind its workspace's "Earlier" fold; 0 never folds. */
+  recentDays?: number;
+  /** For tests; defaults to the current time. */
+  now?: number;
 }
 
 export function emptyWorkspaceGroupPreferences(): WorkspaceGroupPreferences {
-  return { version: 1, pinned: [], expanded: Object.create(null) as Record<string, boolean> };
+  return { version: 1, pinned: [], expanded: Object.create(null) as Record<string, boolean>, olderExpanded: Object.create(null) as Record<string, boolean> };
 }
 
 const active = (session: Session) => ["starting", "running", "waiting"].includes(session.status);
+
+/** Running, temporary or selected sessions are always recent; so is one whose time cannot be read. */
+function isRecent(session: Session, cutoff: number, selectedSessionId?: string): boolean {
+  if (active(session) || session.ephemeral === true || session.id === selectedSessionId) return true;
+  const at = Date.parse(session.updated_at || session.created_at);
+  return !Number.isFinite(at) || at >= cutoff;
+}
 
 /** Two levels only: known workspaces and their own sessions. Search stays entirely local. */
 export function groupWorkspaces(workspaces: readonly Workspace[], sessions: readonly Session[], options: WorkspaceGroupOptions = {}): WorkspaceGroup[] {
@@ -53,6 +72,8 @@ export function groupWorkspaces(workspaces: readonly Workspace[], sessions: read
     group.push(session);
     grouped.set(session.workspace_id, group);
   }
+  const recentDays = options.recentDays ?? 3;
+  const cutoff = recentDays > 0 ? (options.now ?? Date.now()) - recentDays * 86_400_000 : -Infinity;
   const pinned = new Map(preferences.pinned.map((id, index) => [id, index]));
   return workspaces.map((workspace, index) => {
     const allSessions = grouped.get(workspace.id) ?? [];
@@ -70,7 +91,9 @@ export function groupWorkspaces(workspaces: readonly Workspace[], sessions: read
     const normalExpanded = Object.hasOwn(preferences.expanded, workspace.id) ? preferences.expanded[workspace.id] : defaultExpanded;
     const expanded = query ? (options.searchExpanded && Object.hasOwn(options.searchExpanded, workspace.id) ? options.searchExpanded[workspace.id] : true) : normalExpanded;
     const score = Math.min(workspaceScore ?? Infinity, matches[0]?.score ?? Infinity);
-    const group: WorkspaceGroup = { workspace, sessions: visibleSessions, totalSessions: allSessions.length, activeCount, waitingCount, pinned: pinned.has(workspace.id), expanded, matchesWorkspace };
+    const recentSessions = query ? visibleSessions : visibleSessions.filter(session => isRecent(session, cutoff, options.selectedSessionId));
+    const olderSessions = query ? [] : visibleSessions.filter(session => !isRecent(session, cutoff, options.selectedSessionId));
+    const group: WorkspaceGroup = { workspace, sessions: visibleSessions, recentSessions, olderSessions, totalSessions: allSessions.length, activeCount, waitingCount, pinned: pinned.has(workspace.id), expanded, matchesWorkspace };
     return { group, index, score };
   }).filter(item => !query || item.group.matchesWorkspace || item.group.sessions.length)
     .sort((a, b) => Number(b.group.pinned) - Number(a.group.pinned)
@@ -89,7 +112,7 @@ export function workspaceSessionPane(session: Session): PaneNode {
 type PreferenceStorage = Pick<Storage, "getItem" | "setItem">;
 const memory = new Map<string, WorkspaceGroupPreferences>();
 const validId = (value: unknown): value is string => typeof value === "string" && value.length > 0 && value.length <= 256 && !value.includes("\0");
-const copyPreferences = (value: WorkspaceGroupPreferences): WorkspaceGroupPreferences => ({ version: 1, pinned: [...value.pinned], expanded: Object.assign(Object.create(null), value.expanded) });
+const copyPreferences = (value: WorkspaceGroupPreferences): WorkspaceGroupPreferences => ({ version: 1, pinned: [...value.pinned], expanded: Object.assign(Object.create(null), value.expanded), olderExpanded: Object.assign(Object.create(null), value.olderExpanded) });
 
 export function parseWorkspaceGroupPreferences(value: unknown): WorkspaceGroupPreferences {
   const result = emptyWorkspaceGroupPreferences();
@@ -97,8 +120,10 @@ export function parseWorkspaceGroupPreferences(value: unknown): WorkspaceGroupPr
   const record = value as Record<string, unknown>;
   if (record.version !== 1) return result;
   if (Array.isArray(record.pinned)) result.pinned = [...new Set(record.pinned.filter(validId))].slice(0, 2000);
-  if (record.expanded && typeof record.expanded === "object" && !Array.isArray(record.expanded)) {
-    for (const [id, expanded] of Object.entries(record.expanded).slice(0, 2000)) if (validId(id) && typeof expanded === "boolean") result.expanded[id] = expanded;
+  for (const field of ["expanded", "olderExpanded"] as const) {
+    const value = record[field];
+    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+    for (const [id, expanded] of Object.entries(value).slice(0, 2000)) if (validId(id) && typeof expanded === "boolean") result[field][id] = expanded;
   }
   return result;
 }

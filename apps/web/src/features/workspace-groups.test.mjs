@@ -81,12 +81,14 @@ test('preferences validate version, IDs and booleans instead of trusting browser
   assert.deepEqual(Object.entries(preferences.expanded), [['alpha', false], ['beta', true]]);
   assert.deepEqual(parseWorkspaceGroupPreferences({ version: 99, pinned: ['alpha'] }).pinned, []);
   assert.equal(Object.getPrototypeOf(preferences.expanded), null);
+  assert.deepEqual(Object.entries(preferences.olderExpanded), [], 'what older versions stored has no Earlier folds open');
+  assert.deepEqual(Object.entries(parseWorkspaceGroupPreferences({ version: 1, olderExpanded: { alpha: true, beta: 'yes' } }).olderExpanded), [['alpha', true]]);
 });
 
 test('pinned/expanded choices persist by deployment key without storing session text or host paths', () => {
   const writes = new Map();const storage = { getItem: key => writes.get(key), setItem: (key, value) => writes.set(key, value) };
   const key = workspaceGroupStorageKey('workspace-groups-test-host-one');
-  const preferences = emptyWorkspaceGroupPreferences();preferences.pinned = ['alpha'];preferences.expanded.beta = false;
+  const preferences = emptyWorkspaceGroupPreferences();preferences.pinned = ['alpha'];preferences.expanded.beta = false;preferences.olderExpanded.alpha = true;
   saveWorkspaceGroupPreferences(key, preferences, storage);
   assert.deepEqual(loadWorkspaceGroupPreferences(key, storage), preferences);
   preferences.pinned.push('later-edit');
@@ -103,4 +105,29 @@ test('unavailable and malformed browser storage falls back to memory across comp
   assert.equal(loadWorkspaceGroupPreferences(key, storage).expanded.alpha, false);
   const broken = loadWorkspaceGroupPreferences(workspaceGroupStorageKey('workspace-groups-test-corrupt'), { getItem: () => '{broken', setItem() {} });
   assert.deepEqual(broken.pinned, []);
+});
+
+test('sessions idle past the chosen days (3 by default) fold behind Earlier unless running, temporary, selected or searched', () => {
+  const now = Date.parse('2026-10-13T12:00:00Z');
+  const at = (days) => new Date(now - days * 86_400_000).toISOString();
+  const aged = (id, days, status = 'stopped', extra = {}) => ({ ...session(id, 'alpha', id, status), updated_at: at(days), created_at: at(days), ...extra });
+  const list = [aged('fresh', 1), aged('stale', 30), aged('busy', 30, 'running'), aged('scratch', 30, 'stopped', { ephemeral: true }), aged('open', 30), aged('undated', 0, 'stopped', { updated_at: 'now', created_at: 'now' })];
+  const [group] = groupWorkspaces(workspaces, list, { now, selectedSessionId: 'open' });
+  assert.deepEqual(group.recentSessions.map(item => item.id), ['fresh', 'busy', 'scratch', 'open', 'undated']);
+  assert.deepEqual(group.olderSessions.map(item => item.id), ['stale']);
+  assert.equal(group.sessions.length, 6);
+  const [searched] = groupWorkspaces(workspaces, list, { now, query: 'stale' });
+  assert.ok(searched.recentSessions.some(item => item.id === 'stale'));
+  assert.deepEqual(searched.olderSessions, []);
+});
+
+test('the fold window follows the chosen days, and 0 never folds', () => {
+  const now = Date.parse('2026-10-13T12:00:00Z');
+  const aged = (id, days) => ({ ...session(id, 'alpha', id), updated_at: new Date(now - days * 86_400_000).toISOString() });
+  const list = [aged('two', 2), aged('five', 5), aged('forty', 40)];
+  const older = options => groupWorkspaces(workspaces, list, { now, ...options })[0].olderSessions.map(item => item.id);
+  assert.deepEqual(older({}), ['five', 'forty']);
+  assert.deepEqual(older({ recentDays: 7 }), ['forty']);
+  assert.deepEqual(older({ recentDays: 1 }), ['two', 'five', 'forty']);
+  assert.deepEqual(older({ recentDays: 0 }), []);
 });

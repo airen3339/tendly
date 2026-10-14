@@ -87,7 +87,7 @@ test('shared editor keeps invalid rows visible, escapes literals, and shows vali
 test('sidebar keeps compact session actions separate from opening a stopped session',async()=>{
   i18n.setLocale('en');
   const workspace={id:fixture.workspace_id,name:'Fixture',root_path:'/fixture',created_at:fixture.created_at};
-  const {html}=await render(Sidebar,{workspaces:[workspace],sessions:[fixture],selectedWorkspaceId:workspace.id});
+  const {html}=await render(Sidebar,{workspaces:[workspace],sessions:[fixture],selectedWorkspaceId:workspace.id,selectedSessionId:fixture.id});
   assert.ok(html.includes('aria-label="Session actions for Fixture session"'));
   assert.match(html,/<button\b[^>]*session-more-button[^>]*aria-expanded="false"/);
   // The row keeps only what it needs: locating in the canvas is a menu item

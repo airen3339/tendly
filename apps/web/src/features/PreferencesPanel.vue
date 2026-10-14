@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { setTerminalThemePreference, setThemePreference, terminalThemePreference, themePreference, type TerminalThemePreference, type ThemePreference } from './theme';
+import { RECENT_DAY_CHOICES, recentDays, setRecentDays, type RecentDays } from './recent-sessions';
 import { CHAT_FONTS, INTERFACE_FONTS, PALETTES, TEXT_SCALES, chatFont, interfaceFont, palette, setChatFont, setInterfaceFont, setPalette, setTextScale, textScale, type ChatFont, type InterfaceFont, type Palette, type TextScale } from './appearance';
 import { desktopNotifications, notificationSupport, setDesktopNotifications } from './attention';
 import type { EndpointProfile } from '@agentdock/protocol';
@@ -102,6 +103,10 @@ async function revokeGrants() { try { hostGrants.value = await request('/host/gr
       <label class="preference-row">
         <span><strong>{{ t('Desktop notifications') }}</strong><small>{{ t(notificationNote) }}</small></span>
         <select :value="desktopNotifications ? 'on' : 'off'" :disabled="!notificationsPossible" :aria-label="t('Desktop notifications')" @change="toggleNotifications(($event.target as HTMLSelectElement).value === 'on')"><option value="off">{{ t('Off') }}</option><option value="on">{{ t('On') }}</option></select>
+      </label>
+      <label class="preference-row">
+        <span><strong>{{ t('Fold idle sessions') }}</strong><small>{{ t('Sessions not used for this long move under Earlier in the sidebar. For this browser.') }}</small></span>
+        <select :value="recentDays" :aria-label="t('Fold idle sessions')" @change="setRecentDays(Number(($event.target as HTMLSelectElement).value) as RecentDays)"><option v-for="days in RECENT_DAY_CHOICES" :key="days" :value="days">{{ days ? t(days === 1 ? 'After 1 day' : 'After {n} days', { n: days }) : t('Never') }}</option></select>
       </label>
       <div v-if="hostGrants.length" class="preference-row">
         <span><strong>{{ t('Temporary file access') }}</strong><small>{{ t('Read-only, for the file preview, until AgentDock restarts.') }}</small><code v-for="item in hostGrants" :key="item.path" class="grant-path">{{ item.path }}{{ item.directory ? '/' : '' }}</code></span>
