@@ -37,17 +37,16 @@ pub fn from_agentdock(home: &Path, state: &Path) -> Result<Option<PathBuf>, Stri
     if state.exists() || !old.is_dir() {
         return Ok(None);
     }
-    if let Some(pid) = fs::read_to_string(old.join("agentdock.pid"))
-        .ok()
-        .and_then(|text| text.trim().parse::<u32>().ok())
-        && tendly_runtime::process::alive(pid)
-    {
-        return Err(format!(
-            "AgentDock is still running (pid {pid}) from {}. Stop it with `agentdock stop`, then start Tendly again; its state moves to {} on that start.",
+    // Every AgentDock server holds this lock while it runs, however it was
+    // started; a pid file exists only for the background mode, so it missed a
+    // gateway run by systemd. Held through the move, so none can start midway.
+    let _running = hold_server_lock(&old).map_err(|_| {
+        format!(
+            "AgentDock is still running from {}. Stop it first (`agentdock stop`, or the service that runs it, e.g. `sudo systemctl stop agentdock`), then start Tendly again; its state moves to {} on that start.",
             old.display(),
             state.display()
-        ));
-    }
+        )
+    })?;
     fs::rename(&old, state).map_err(|error| {
         format!(
             "Could not move {} to {}: {error}",
@@ -80,6 +79,21 @@ pub fn from_agentdock(home: &Path, state: &Path) -> Result<Option<PathBuf>, Stri
             .map_err(|error| format!("Could not update {}: {error}", database.display()))?;
     }
     Ok(Some(old))
+}
+
+/// The lock an AgentDock server holds on its state directory, or an error when
+/// one is holding it now.
+fn hold_server_lock(old: &Path) -> std::io::Result<Option<fs::File>> {
+    let path = old.join("server.lock");
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let file = fs::OpenOptions::new().read(true).write(true).open(path)?;
+    file.try_lock().map_err(|error| match error {
+        fs::TryLockError::WouldBlock => std::io::Error::from(std::io::ErrorKind::WouldBlock),
+        fs::TryLockError::Error(error) => error,
+    })?;
+    Ok(Some(file))
 }
 
 /// Every text value naming an `AGENTDOCK_` variable, renamed: a profile's
@@ -189,14 +203,20 @@ mod tests {
     fn a_running_agentdock_is_not_moved_from_under() {
         let home = std::env::temp_dir().join(format!("tendly-rename-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(home.join(OLD_DIR)).unwrap();
-        fs::write(
-            home.join(OLD_DIR).join("agentdock.pid"),
-            std::process::id().to_string(),
-        )
-        .unwrap();
+        // What a running AgentDock holds, whether started in the background or
+        // by a service manager with no pid file.
+        let lock = fs::File::create(home.join(OLD_DIR).join("server.lock")).unwrap();
+        lock.try_lock().unwrap();
         let error = from_agentdock(&home, &home.join(".tendly")).unwrap_err();
-        assert!(error.contains("agentdock stop"), "{error}");
+        assert!(error.contains("systemctl stop agentdock"), "{error}");
         assert!(home.join(OLD_DIR).is_dir());
+        lock.unlock().unwrap();
+        drop(lock);
+        assert!(
+            from_agentdock(&home, &home.join(".tendly"))
+                .unwrap()
+                .is_some()
+        );
         fs::remove_dir_all(home).unwrap();
     }
 }
