@@ -1,9 +1,9 @@
-//! What agents are doing to AgentDock, as the person sees it.
+//! What agents are doing to Tendly, as the person sees it.
 //!
 //! A tool call that changes something the person should decide on waits here
 //! for an answer from the browser: a card with what would change, and a key
 //! field when the change needs a key, so the key goes from the person straight
-//! to AgentDock and never through the agent. Everything else an agent changes
+//! to Tendly and never through the agent. Everything else an agent changes
 //! is reported as a notice, with an undo where one makes sense.
 //!
 //! These routes are deliberately not under `/api/agent/`, which is the only
@@ -143,7 +143,7 @@ impl Activity {
     ) -> Result<Answer, ApiError> {
         if !self.watched() {
             return Err(ApiError::conflict(
-                "No AgentDock window is open to confirm this. Ask the person to open AgentDock, then try again.",
+                "No Tendly window is open to confirm this. Ask the person to open Tendly, then try again.",
             ));
         }
         let id = Uuid::new_v4();
@@ -228,7 +228,7 @@ impl Activity {
     pub fn show(&self, who: Value, target: Value) -> Result<(), ApiError> {
         if !self.watched() {
             return Err(ApiError::conflict(
-                "No AgentDock window is open to show this in.",
+                "No Tendly window is open to show this in.",
             ));
         }
         let _ = self

@@ -12,7 +12,7 @@ import { useI18n } from '../i18n';
 import { formatBytes, formatDuration, formatRate, levelFor, pushSample, sparkPath } from './system-format';
 
 /**
- * The machine AgentDock runs on: what it is, how busy it is, and how much room
+ * The machine Tendly runs on: what it is, how busy it is, and how much room
  * is left. It polls while the page is open and visible, and keeps a short
  * history here in the browser so each figure shows which way it is heading.
  */
@@ -140,7 +140,7 @@ const subtitle = computed(() => {
 <template>
   <PageShell :title="detail?.host.hostname || t('This host')" :subtitle="subtitle" @back="emit('back')">
     <div class="system-page">
-      <p v-if="unsupported" class="inline-notice">{{ t('This backend does not report system details. Update AgentDock on the host to see them.') }}</p>
+      <p v-if="unsupported" class="inline-notice">{{ t('This backend does not report system details. Update Tendly on the host to see them.') }}</p>
       <p v-else-if="error" class="inline-error" role="alert">{{ error }}</p>
       <template v-if="off">
         <p class="inline-notice system-off">
@@ -153,7 +153,7 @@ const subtitle = computed(() => {
       <template v-if="detail">
         <div class="system-facts">
           <span><Icon name="clock" :size="14" />{{ t('Up {time}', { time: formatDuration(detail.host.uptime_seconds) }) }}</span>
-          <span><Icon name="spark" :size="14" />AgentDock {{ detail.host.agentdock_version }} · {{ t('running {time}', { time: formatDuration(detail.host.agentdock_uptime_seconds) }) }}</span>
+          <span><Icon name="spark" :size="14" />Tendly {{ detail.host.agentdock_version }} · {{ t('running {time}', { time: formatDuration(detail.host.agentdock_uptime_seconds) }) }}</span>
           <span v-if="detail.cpu.brand"><Icon name="gauge" :size="14" />{{ detail.cpu.brand }}<template v-if="detail.cpu.frequency_mhz && !clocks"> · {{ (detail.cpu.frequency_mhz / 1000).toFixed(1) }} GHz</template></span>
           <span v-if="clocks" :title="t('Clock while running, over the last moment')"><Icon name="gauge" :size="14" />{{ clocks }}</span>
         </div>
@@ -239,7 +239,7 @@ const subtitle = computed(() => {
           </section>
 
           <section class="system-card">
-            <h2>{{ t('AgentDock sessions') }}</h2>
+            <h2>{{ t('Tendly sessions') }}</h2>
             <p v-if="!sessionRows.length" class="muted">{{ t('No session is running.') }}</p>
             <table v-else class="table">
               <thead><tr><th>{{ t('Session') }}</th><th>CPU</th><th>{{ t('Memory') }}</th></tr></thead>

@@ -155,7 +155,7 @@ pub async fn refresh_labels(
 /// The directory a session's client starts in.
 ///
 /// A recorded checkout is used only while it is still a worktree of the
-/// workspace's repository: a worktree removed or re-pointed outside AgentDock
+/// workspace's repository: a worktree removed or re-pointed outside Tendly
 /// fails the start with a reason instead of silently running somewhere else.
 pub async fn session_cwd(state: &AppState, session: &Session) -> Result<PathBuf> {
     let repo = root(state, session.workspace_id).await?;

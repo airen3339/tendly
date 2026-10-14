@@ -28,6 +28,6 @@ test('a session that starts waiting is announced once, unless it is the one in f
 });
 
 test('the page title counts the sessions waiting on you', () => {
-  assert.equal(attentionTitle('AgentDock', 0), 'AgentDock');
-  assert.equal(attentionTitle('AgentDock', 2), '(2) AgentDock');
+  assert.equal(attentionTitle('Tendly', 0), 'Tendly');
+  assert.equal(attentionTitle('Tendly', 2), '(2) Tendly');
 });

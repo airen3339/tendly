@@ -32,7 +32,7 @@ export function normalizeClaudeLimits(payload, mappingBasis = 'status_line_windo
     };
   };
   const fiveHour = window(limits.five_hour), weekly = window(limits.seven_day), spend = window(limits.spend_limit);
-  // Older AgentDock servers only know the status_line_window enum. OAuth
+  // Older Tendly servers only know the status_line_window enum. OAuth
   // provenance is carried by usage.source, so omitting the new enum keeps a hot
   // old server able to deserialize a result while it still owns live sessions.
   if (mappingBasis !== 'oauth_usage') {
@@ -97,7 +97,7 @@ async function readClaudeOAuthCredential(job) {
   // macOS Claude Code stores the claudeAiOauth object in the official Keychain.
   // The value is consumed in memory only; it is never returned by the bridge.
   // Only the default native home may use the shared Keychain item. An isolated
-  // AgentDock account must not accidentally authenticate as the host account.
+  // Tendly account must not accidentally authenticate as the host account.
   const defaultHome = join(homedir(), '.claude');
   if (process.platform === 'darwin' && !job.config_env && resolve(job.config_dir) === resolve(defaultHome)) {
     const raw = await quietCommand('security', ['find-generic-password', '-s', 'Claude Code-credentials', '-w'], job.config_dir);

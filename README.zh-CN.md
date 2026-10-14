@@ -1,14 +1,14 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/banner-dark.png">
-    <img src="docs/assets/banner-light.png" alt="AgentDock：在你自己的机器上，用一张画布驾驭官方 Claude Code 与 Codex CLI。" width="100%">
+    <img src="docs/assets/banner-light.png" alt="Tendly：在你自己的机器上，用一张画布驾驭官方 Claude Code 与 Codex CLI。" width="100%">
   </picture>
 </p>
 
 <p align="center">
-  <a href="https://github.com/wnzzer/agentdock/actions/workflows/check.yml"><img src="https://img.shields.io/github/actions/workflow/status/wnzzer/agentdock/check.yml?branch=main&style=flat-square&label=CI&color=0f7f70" alt="CI 状态"></a>
-  <a href="https://github.com/wnzzer/agentdock/releases"><img src="https://img.shields.io/github/v/release/wnzzer/agentdock?style=flat-square&label=release&color=0f7f70" alt="最新版本"></a>
-  <a href="https://www.npmjs.com/package/@wnzzer/agentdock"><img src="https://img.shields.io/npm/v/%40wnzzer%2Fagentdock?style=flat-square&label=npm&color=0f7f70" alt="npm 版本"></a>
+  <a href="https://github.com/wnzzer/tendly/actions/workflows/check.yml"><img src="https://img.shields.io/github/actions/workflow/status/wnzzer/tendly/check.yml?branch=main&style=flat-square&label=CI&color=0f7f70" alt="CI 状态"></a>
+  <a href="https://github.com/wnzzer/tendly/releases"><img src="https://img.shields.io/github/v/release/wnzzer/tendly?style=flat-square&label=release&color=0f7f70" alt="最新版本"></a>
+  <a href="https://www.npmjs.com/package/@wnzzer/tendly"><img src="https://img.shields.io/npm/v/%40wnzzer%2Ftendly?style=flat-square&label=npm&color=0f7f70" alt="npm 版本"></a>
   <img src="https://img.shields.io/badge/node-%E2%89%A5%2024-0f7f70?style=flat-square" alt="Node.js 24 及以上">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-7760b5?style=flat-square" alt="平台：macOS、Linux 和 Windows">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-7760b5?style=flat-square" alt="许可证：MIT"></a>
@@ -24,12 +24,12 @@
 
 <br>
 
-AgentDock 是官方 **Claude Code** 与 **Codex** CLI 的浏览器工作台。它运行在代码所在的机器上，把 Agent 会话、文件、Git diff 和终端放进一块可分屏、可停靠的画布，任何浏览器（包括手机）都能访问。
+Tendly 是官方 **Claude Code** 与 **Codex** CLI 的浏览器工作台。它运行在代码所在的机器上，把 Agent 会话、文件、Git diff 和终端放进一块可分屏、可停靠的画布，任何浏览器（包括手机）都能访问。
 
 它本身不包含 Agent：Codex 通过官方 `app-server` 驱动，Claude Code 通过 `stream-json` 驱动，登录、模型、hooks、`CLAUDE.md` 和权限确认都保持原生。
 
 <p align="center">
-  <img src="docs/assets/screenshot-canvas.zh-CN.png" alt="AgentDock 画布：两个 Agent 会话并排，右下是 Git 变更与 diff。" width="100%">
+  <img src="docs/assets/screenshot-canvas.zh-CN.png" alt="Tendly 画布：两个 Agent 会话并排，右下是 Git 变更与 diff。" width="100%">
 </p>
 
 ## 特色功能
@@ -70,7 +70,7 @@ AgentDock 是官方 **Claude Code** 与 **Codex** CLI 的浏览器工作台。�
 <p align="center">
   <img src="docs/assets/screenshot-steer.zh-CN.png" alt="进行中的一轮里被引导的消息，以及打开的发送菜单。" width="70%">
   &nbsp;
-  <img src="docs/assets/screenshot-mobile.zh-CN.png" alt="手机上的 AgentDock：分屏折叠成标签页与输入框。" width="26%">
+  <img src="docs/assets/screenshot-mobile.zh-CN.png" alt="手机上的 Tendly：分屏折叠成标签页与输入框。" width="26%">
 </p>
 <p align="center">
   <sub>左：引导消息加入进行中的一轮，发送菜单已打开。右：同一张画布在手机上的样子。</sub>
@@ -110,8 +110,8 @@ AgentDock 是官方 **Claude Code** 与 **Codex** CLI 的浏览器工作台。�
 需要 Node.js 24+，并在同一台机器上安装 [Claude Code](https://www.npmjs.com/package/@anthropic-ai/claude-code) 和/或 [Codex](https://www.npmjs.com/package/@openai/codex)。
 
 ```bash
-npm install -g @wnzzer/agentdock
-agentdock          # 后台启动 → http://127.0.0.1:28789/
+npm install -g @wnzzer/tendly
+tendly             # 后台启动 → http://127.0.0.1:28789/
 ```
 
 然后**选择工作区**（宿主机上任意目录），在 *设置 → 官方账号 → 引入现有配置* 中复用已有登录，再**新建会话**或**加载已有会话**。
@@ -120,15 +120,25 @@ agentdock          # 后台启动 → http://127.0.0.1:28789/
 
 | 命令 | 说明 |
 | --- | --- |
-| `agentdock` / `agentdock --lan` | 后台启动，仅本机或所有网卡 |
-| `agentdock status` · `logs` | 访问地址、访问 token 与服务日志 |
-| `agentdock restart` · `stop` | 重启或停止后台服务 |
-| `agentdock update` · `--check` | 安装 npm 上的最新版（或只检查）；页面「设置 → 更新」效果相同 |
-| `agentdock serve` | 前台运行，用于 systemd 等进程管理器 |
+| `tendly` / `tendly --lan` | 后台启动，仅本机或所有网卡 |
+| `tendly status` · `logs` | 访问地址、访问 token 与服务日志 |
+| `tendly restart` · `stop` | 重启或停止后台服务 |
+| `tendly update` · `--check` | 安装 npm 上的最新版（或只检查）；页面「设置 → 更新」效果相同 |
+| `tendly serve` | 前台运行，用于 systemd 等进程管理器 |
+
+### 从 AgentDock 迁移
+
+Tendly 在 0.1.75 之前叫 AgentDock。数据完全不受影响：会话、设置、访问令牌和保存的密钥都还在 `~/.agentdock`，Tendly 会继续使用它，`AGENTDOCK_*` 环境变量也照常生效。换到新包：
+
+```bash
+npm uninstall -g @wnzzer/agentdock && npm install -g @wnzzer/tendly
+```
+
+在此之前，旧包仍会正常更新，并且已经可以用 `tendly` 和 `agentdock` 两个命令。
 
 ## 配置与远程访问
 
-状态保存在 `~/.agentdock/`（SQLite、设置、日志），没有任何遥测。设置读取自 `~/.agentdock/config.toml`，同名 `AGENTDOCK_*` 环境变量优先：
+状态保存在 `~/.tendly/`（改名前创建的则继续用 `~/.agentdock/`；SQLite、设置、日志），没有任何遥测。设置读取自其中的 `config.toml`，同名 `AGENTDOCK_*` 环境变量优先：
 
 ```toml
 lan = true                  # 等同于 --lan
@@ -140,15 +150,15 @@ allowed-origins = ["https://dock.example.com"]
 从其他设备访问时优先使用 **SSH 端口转发**（`ssh -L 28789:127.0.0.1:28789 user@server`）。`--lan` 是明文 HTTP，只适合可信网络；**HTTPS 反向代理**需要保留 `Host` 和 WebSocket 升级。详见[配置](docs/configuration.md)与[远程访问](docs/security.md#private-remote-access)。
 
 > [!WARNING]
-> AgentDock 只面向**单个受信任用户**。能访问它的人就拥有你这个用户的全部权限，且 `claude` / `codex` **不在沙箱中运行**。在 localhost 之外开放前，请先阅读[安全与边界](docs/security.md)。
+> Tendly 只面向**单个受信任用户**。能访问它的人就拥有你这个用户的全部权限，且 `claude` / `codex` **不在沙箱中运行**。在 localhost 之外开放前，请先阅读[安全与边界](docs/security.md)。
 
 ## 工作原理
 
 ```mermaid
 flowchart LR
   browser["<b>浏览器</b><br/>Vue 3 画布<br/>会话 · 文件 · Git · 终端"]
-  server["<b>agentdock-server</b> · Rust<br/>工作区 · 文件 · Git<br/>鉴权 · PTY 进程监管"]
-  db[("SQLite<br/>~/.agentdock")]
+  server["<b>tendly-server</b> · Rust<br/>工作区 · 文件 · Git<br/>鉴权 · PTY 进程监管"]
+  db[("SQLite<br/>~/.tendly")]
   bridge["<b>原生桥接</b> · Node<br/>JSONL"]
   claude["claude<br/>stream-json"]
   codex["codex<br/>app-server"]
@@ -182,4 +192,4 @@ pnpm run check && cargo test --workspace
 
 ## 许可证
 
-[MIT](LICENSE)。第三方内容见[第三方声明](docs/third-party-notices.md)。Claude Code 和 Codex 分别是 Anthropic 和 OpenAI 的产品。AgentDock 是独立项目，与这两家公司没有隶属或背书关系。
+[MIT](LICENSE)。第三方内容见[第三方声明](docs/third-party-notices.md)。Claude Code 和 Codex 分别是 Anthropic 和 OpenAI 的产品。Tendly 是独立项目，与这两家公司没有隶属或背书关系。

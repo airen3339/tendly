@@ -44,7 +44,7 @@ pub fn running(state_dir: &Path) -> Option<i32> {
 /// Re-execute this binary as a detached `serve`.
 pub fn start(state_dir: &Path, address: SocketAddr) -> Result<i32, Box<dyn std::error::Error>> {
     if let Some(pid) = running(state_dir) {
-        return Err(format!("AgentDock is already running (pid {pid})").into());
+        return Err(format!("Tendly is already running (pid {pid})").into());
     }
     let pid = spawn_detached(state_dir, &env::current_exe()?, "serve", address)?;
     fs::write(pid_file(state_dir), pid.to_string())?;
@@ -54,7 +54,7 @@ pub fn start(state_dir: &Path, address: SocketAddr) -> Result<i32, Box<dyn std::
 /// Have `program restart` replace this gateway from outside it.
 ///
 /// A process cannot wait for itself to stop, so the restart after an update is
-/// a detached helper: it stops this gateway the way `agentdock restart` would,
+/// a detached helper: it stops this gateway the way `tendly restart` would,
 /// then starts whatever binary now sits at `program`. The helper records the
 /// new gateway's pid itself; its own pid is not worth keeping.
 pub fn relaunch(
@@ -151,7 +151,7 @@ pub fn stop(
         }
         std::thread::sleep(Duration::from_millis(100));
     }
-    Err(format!("AgentDock (pid {pid}) did not stop within {timeout:?}").into())
+    Err(format!("Tendly (pid {pid}) did not stop within {timeout:?}").into())
 }
 
 /// An address the health check can actually connect to.

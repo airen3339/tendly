@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * What agents ask of AgentDock, and what they changed (server activity.rs).
+ * What agents ask of Tendly, and what they changed (server activity.rs).
  *
  * A request is a card that waits for the person: what would change, and a key
  * field when the change needs one, so a key goes from here straight to the
@@ -33,7 +33,7 @@ let socket: WebSocket | undefined, retry: ReturnType<typeof setTimeout> | undefi
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
 
 function who(entry: Who) {
-  return entry.kind === "session" ? entry.title || t("A session") : t("An agent outside AgentDock");
+  return entry.kind === "session" ? entry.title || t("A session") : t("An agent outside Tendly");
 }
 function dismiss(id: string) {
   notices.value = notices.value.filter(notice => notice.id !== id);
@@ -103,7 +103,7 @@ async function undo(notice: Notice) {
       <p v-for="note in item.notes" :key="note" class="agent-note">{{ t(note) }}</p>
       <label v-if="item.key" class="agent-key">{{ t(item.key.label) }}
         <input v-model="keys[item.id]" type="password" autocomplete="new-password" spellcheck="false" :placeholder="t('Paste the key here')" @keydown.enter.prevent="answer(item, true)" />
-        <small>{{ t('Saved in AgentDock only. The agent never sees it.') }}</small>
+        <small>{{ t('Saved in Tendly only. The agent never sees it.') }}</small>
       </label>
       <p v-if="errors[item.id]" class="agent-error" role="alert">{{ errors[item.id] }}</p>
       <footer>

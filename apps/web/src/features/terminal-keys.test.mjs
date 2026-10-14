@@ -113,7 +113,7 @@ test('ctrl is a one-shot modifier on what the soft keyboard types', () => {
 
 test('paste reads the clipboard where it may and falls back to a field where it may not', () => {
   const source = readFileSync(new URL('../components/TerminalPane.vue', import.meta.url), 'utf8');
-  // The Clipboard API exists only in a secure context, and AgentDock is often
+  // The Clipboard API exists only in a secure context, and Tendly is often
   // reached over plain http on a private network; there the person pastes
   // into an ordinary field, which every mobile browser supports.
   assert.match(source, /navigator\.clipboard\?\.readText/);

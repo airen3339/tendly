@@ -186,7 +186,7 @@ fn relative_string(root: &Path, path: &Path) -> String {
 }
 
 pub(crate) fn is_protected_path(relative: &Path) -> bool {
-    // AgentDock must never mutate repository metadata, credentials, or
+    // Tendly must never mutate repository metadata, credentials, or
     // provider configuration.  These names are intentionally conservative.
     const PROTECTED: &[&str] = &[
         ".git",
@@ -379,7 +379,7 @@ pub fn resolve_host_file(
     let root = roots
         .iter()
         .find(|root| target.starts_with(root))
-        .ok_or_else(|| IoError::new(403, "path is outside the folders AgentDock may browse"))?;
+        .ok_or_else(|| IoError::new(403, "path is outside the folders Tendly may browse"))?;
     let rel = target.strip_prefix(root).unwrap_or(&target);
     if is_protected_path(rel) {
         return Err(IoError::new(403, "protected path"));
@@ -1334,8 +1334,8 @@ pub async fn git_commit(root: &Path, message: &str, amend: bool) -> Result<Strin
 }
 
 /// Directory attachments land in, relative to the workspace root. Deliberately
-/// not `.agentdock`: that name is reserved for AgentDock's own server state, and
-/// a workspace may be the AgentDock checkout itself.
+/// not `.agentdock`: that name is reserved for Tendly's own server state, and
+/// a workspace may be the Tendly checkout itself.
 pub const ATTACHMENT_DIR: &str = ".agentdock-files";
 pub const MAX_ATTACHMENT_BYTES: u64 = 50 * 1024 * 1024;
 /// Files pasted or dropped into a terminal, under the attachment directory.
@@ -1970,7 +1970,7 @@ mod tests {
             for args in [
                 vec!["init"],
                 vec!["config", "user.email", "agentdock@example.com"],
-                vec!["config", "user.name", "AgentDock"],
+                vec!["config", "user.name", "Tendly"],
                 // Git for Windows commonly defaults this on, which rewrites the
                 // fixtures' line endings on checkout.
                 vec!["config", "core.autocrlf", "false"],

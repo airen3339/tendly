@@ -72,11 +72,11 @@ jobs:
         run: |
           set -euo pipefail
           version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
-          name="agentdock-${version}-${{ matrix.target }}"
+          name="tendly-${version}-${{ matrix.target }}"
           mkdir -p "dist/${name}"
           # Windows runs a file by its extension; build-packages expects the .exe.
-          binary=agentdock-server
-          case "${{ matrix.target }}" in *windows*) binary=agentdock-server.exe ;; esac
+          binary=tendly-server
+          case "${{ matrix.target }}" in *windows*) binary=tendly-server.exe ;; esac
           cp "target/${{ matrix.target }}/release/${binary}" "dist/${name}/"
           cp README.md "dist/${name}/"
           cd dist
@@ -162,13 +162,29 @@ jobs:
               continue
             fi
             echo "+ publishing ${name}@${VERSION}"
-            # ./ is load-bearing: "dist-npm/agentdock-darwin-arm64" matches npm's
+            # ./ is load-bearing: "dist-npm/tendly-darwin-arm64" matches npm's
             # owner/repo GitHub shorthand, so a bare path is fetched over ssh
             # instead of published, failing with a public-key error about a
             # repository nobody named.
             npm publish "./dist-npm/${pkg}" --access public $DRY_RUN </dev/null
           done
           echo "processed $(echo "$packages" | wc -l | tr -d " ") packages at ${VERSION} ${DRY_RUN}"
+
+      # The old name stays installable so its installs keep updating, but npm
+      # tells whoever installs it where the project went. Its platform packages
+      # are no longer published at all. Repeating this every release is
+      # harmless and covers a release that failed before getting here.
+      - name: Deprecate the old name
+        if: steps.version.outputs.dry_run == ''
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          moved="AgentDock is now Tendly: npm uninstall -g @wnzzer/agentdock && npm install -g @wnzzer/tendly"
+          npm deprecate "@wnzzer/agentdock" "$moved" </dev/null
+          for key in darwin-arm64 darwin-x64 linux-x64 linux-arm64 win32-x64; do
+            npm deprecate "@wnzzer/agentdock-${key}" "Replaced by @wnzzer/tendly-${key}" </dev/null
+          done
 
   publish:
     needs: build

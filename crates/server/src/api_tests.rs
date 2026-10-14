@@ -53,7 +53,7 @@ impl Fixture {
         fs::create_dir_all(path.join("repo")).unwrap();
         for args in [
             vec!["init", "-q"],
-            vec!["config", "user.name", "AgentDock test"],
+            vec!["config", "user.name", "Tendly test"],
             vec!["config", "user.email", "test@agentdock.invalid"],
             vec!["config", "core.autocrlf", "false"],
         ] {
@@ -458,7 +458,7 @@ async fn workspace_file_git_layout_workflow() {
     );
 }
 
-/// A launch's arguments without the ones that give it AgentDock's own tools
+/// A launch's arguments without the ones that give it Tendly's own tools
 /// (agent::equip), for tests about everything else a launch carries.
 fn without_agentdock(args: &[String]) -> Vec<String> {
     let mut kept = Vec::new();
@@ -573,7 +573,7 @@ async fn every_client_launch_carries_agentdock_tools_unless_turned_off() {
     assert_eq!(without_agentdock(&spec.args), spec.args);
 }
 
-/// A request to the agent tools the way `agentdock mcp` makes one.
+/// A request to the agent tools the way `tendly mcp` makes one.
 async fn agent_request(
     app: Router,
     method: &str,
@@ -848,7 +848,7 @@ async fn an_agent_endpoint_waits_for_the_person_and_its_key_never_passes_through
         result["content"][0]["text"]
             .as_str()
             .unwrap()
-            .contains("No AgentDock window")
+            .contains("No Tendly window")
     );
 
     let mut events = f.state.activity.subscribe();
@@ -2488,7 +2488,7 @@ async fn imported_native_profiles_create_new_sessions_without_copying_or_overrid
             );
             assert_eq!(spec.cwd, cwd);
             // Only the configuration directory, besides the session's own
-            // AgentDock identity (agent.rs), which every launch carries.
+            // Tendly identity (agent.rs), which every launch carries.
             let own: Vec<_> = spec
                 .env
                 .keys()
@@ -3599,7 +3599,7 @@ async fn claude_usage_capture_is_a_launch_overlay_that_preserves_an_existing_sta
     assert!(command.contains("statusline-capture.mjs"));
     assert_eq!(overlay["statusLine"]["type"], "command");
     // The overlay is the only key, so nothing else about the session's settings
-    // is asserted or overridden by AgentDock.
+    // is asserted or overridden by Tendly.
     assert_eq!(overlay.as_object().unwrap().len(), 1);
     // No status line of their own yet, so there is nothing to delegate to.
     assert!(!environment.contains_key("AGENTDOCK_STATUSLINE_DELEGATE"));

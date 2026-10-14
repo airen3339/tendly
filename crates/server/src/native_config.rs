@@ -135,7 +135,7 @@ pub fn build(
 fn quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
-/// Whether the operator allowed AgentDock to add its usage capture to the
+/// Whether the operator allowed Tendly to add its usage capture to the
 /// status line of Claude sessions it launches. Off unless explicitly enabled.
 pub fn usage_capture_enabled() -> bool {
     env::var("AGENTDOCK_CLAUDE_USAGE_CAPTURE")
@@ -162,7 +162,7 @@ pub fn claude_config_home(config_env: Option<&str>) -> Option<PathBuf> {
 /// The overlay is passed per launch through `--settings`, so no settings file
 /// belonging to the user is modified. A status line the account already
 /// configured is forwarded the same payload and its output is passed through,
-/// so starting a session from AgentDock does not change what the status line
+/// so starting a session from Tendly does not change what the status line
 /// looks like.
 ///
 /// It is still an override of the account's own configuration, so it is opt-in:
@@ -211,7 +211,7 @@ pub fn launch_environment(
     if let Some(value) = config_env {
         environment.insert(key.into(), value.into());
     }
-    // Preserve the host's native environment and config precedence. AgentDock's
+    // Preserve the host's native environment and config precedence. Tendly's
     // own secret references/access token never become native client overrides.
     // Shell aliases/functions and interactive shell startup files are not loaded.
     let mut remove: Vec<String> = crate::bridge::agentdock_secrets()

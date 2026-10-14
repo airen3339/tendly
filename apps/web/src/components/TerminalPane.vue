@@ -143,7 +143,7 @@ function pressSlash() { sendKeys("/"); }
  * Paste from the clipboard.
  *
  * The Clipboard API is available only in a secure context, and a phone often
- * reaches AgentDock over plain http on a private network. Where it cannot be
+ * reaches Tendly over plain http on a private network. Where it cannot be
  * read -- or the browser refuses -- an ordinary field opens instead, which
  * every mobile browser can paste into with a long press.
  */
@@ -362,7 +362,7 @@ function initializeTerminal() {
     cursorBlink: true, fontSize: 12, lineHeight: 1.22, scrollback: 5000,
     // A Nerd Font the viewer already has wins; the bundled symbols fill in the
     // prompt icons for everyone else, phones included.
-    fontFamily: '"SFMono-Regular", Consolas, "Liberation Mono", "Symbols Nerd Font Mono", "AgentDock Symbols", monospace',
+    fontFamily: '"SFMono-Regular", Consolas, "Liberation Mono", "Symbols Nerd Font Mono", "Tendly Symbols", monospace',
     theme: terminalTheme(),
   });
   fit = new FitAddon(); terminal.loadAddon(fit); terminal.open(host.value);

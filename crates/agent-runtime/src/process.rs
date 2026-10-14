@@ -187,7 +187,7 @@ impl Drop for OwnedGroup {
 /// Stop a detached child from inheriting this process's own standard handles.
 ///
 /// Windows hands every inheritable handle to a child, not only the three it is
-/// given, so a gateway started from `agentdock start | tee log` held that pipe
+/// given, so a gateway started from `tendly start | tee log` held that pipe
 /// open for its whole life and the pipeline never ended. The child's stdio is
 /// always set explicitly, so the parent's copies are never what it should use.
 pub fn keep_standard_handles_private() {

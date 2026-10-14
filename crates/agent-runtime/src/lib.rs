@@ -1,4 +1,4 @@
-//! Process and PTY runtime used by AgentDock.
+//! Process and PTY runtime used by Tendly.
 //!
 //! The runtime deliberately does not understand Claude Code or Codex output. It
 //! owns a child process and exposes its terminal as a reconnectable event stream.

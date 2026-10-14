@@ -24,7 +24,7 @@ export function validateChatInput(message, first=false) {
     if(message.effort!==undefined&&(typeof message.effort!=='string'||!/^[a-z]{1,16}$/.test(message.effort)))throw Error('Invalid reasoning effort.');
     if(message.model===undefined&&message.effort===undefined)throw Error('Choose a model or a thinking depth.');
   }else if(message.type==='permission'){
-    // AgentDock's own vocabulary, translated per client. `danger` is the one
+    // Tendly's own vocabulary, translated per client. `danger` is the one
     // that stops asking; it is named for what it costs rather than for what it
     // saves, so nobody selects it by mistake.
     if(!['ask','plan','accept_edits','danger'].includes(message.mode))throw Error('Unsupported permission mode.');

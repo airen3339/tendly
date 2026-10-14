@@ -1,8 +1,8 @@
 //! Native client discovery and optional npm installation.
 //!
-//! AgentDock drives the user's installed Claude Code and Codex clients, so the
+//! Tendly drives the user's installed Claude Code and Codex clients, so the
 //! first question for a new host is simply whether they are there. When one is
-//! missing AgentDock can install it from npm into its own state directory. That
+//! missing Tendly can install it from npm into its own state directory. That
 //! copy is a fallback, never an override: a client already on `PATH` keeps
 //! winning, so installing here cannot silently change which binary a session
 //! has been using.
@@ -31,7 +31,7 @@ pub enum ProgramSource {
     Override,
     /// Found on the server's `PATH`.
     Path,
-    /// Installed by AgentDock into its state directory.
+    /// Installed by Tendly into its state directory.
     Managed,
     /// Nothing found; the command name is kept so errors stay recognisable.
     Missing,

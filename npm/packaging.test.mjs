@@ -16,10 +16,10 @@ async function build(version, targets) {
   const tarballs = path.join(dir, 'tarballs');
   await mkdir(tarballs, { recursive: true });
   for (const triple of targets) {
-    const name = `agentdock-${version}-${triple}`;
+    const name = `tendly-${version}-${triple}`;
     const staged = path.join(dir, 'stage', name);
     await mkdir(staged, { recursive: true });
-    const binary = triple.includes('windows') ? 'agentdock-server.exe' : 'agentdock-server';
+    const binary = triple.includes('windows') ? 'tendly-server.exe' : 'tendly-server';
     await writeFile(path.join(staged, binary), `#!/bin/sh\necho ${triple}\n`);
     await writeFile(path.join(staged, 'README.md'), '');
     // Relative paths: GNU tar reads the `C:` of a Windows path as a remote host.
@@ -38,7 +38,7 @@ test('the shim and the build script agree on the set of platforms', async () => 
   const shim = await read('shim.cjs');
   const builder = await read('build-packages.mjs');
 
-  const shimKeys = [...shim.matchAll(/'([a-z0-9]+-[a-z0-9]+)':\s*'@wnzzer\/agentdock-([a-z0-9-]+)'/g)];
+  const shimKeys = [...shim.matchAll(/'([a-z0-9]+-[a-z0-9]+)':\s*'@wnzzer\/tendly-([a-z0-9-]+)'/g)];
   assert.ok(shimKeys.length >= 4, 'shim declares a platform table');
   for (const [, key, pkgSuffix] of shimKeys) {
     assert.equal(key, pkgSuffix, `shim maps ${key} to a package named for a different platform`);
@@ -65,16 +65,19 @@ test('a built release installs as one coherent set', async (t) => {
   t.after(() => rm(dir, { recursive: true, force: true }));
 
   const manifest = async (pkg) => JSON.parse(await readFile(path.join(out, pkg, 'package.json'), 'utf8'));
-  const main = await manifest('agentdock');
+  const main = await manifest('tendly');
+  const legacy = await manifest('agentdock');
   const order = (await readFile(path.join(out, 'publish-order.txt'), 'utf8')).trim().split('\n');
 
   // An optional dependency npm cannot find is skipped in silence, so a name or
   // version that does not match a package actually built degrades into the
   // "is not installed" path for every user rather than failing the publish.
   const built = (await readdir(out, { withFileTypes: true }))
-    .filter((entry) => entry.isDirectory() && entry.name !== 'agentdock')
+    .filter((entry) => entry.isDirectory() && entry.name !== 'tendly' && entry.name !== 'agentdock')
     .map((entry) => `@wnzzer/${entry.name}`);
   assert.deepEqual(new Set(Object.keys(main.optionalDependencies)), new Set(built));
+  // The old name installs the very same binaries, so its installs keep updating.
+  assert.deepEqual(legacy.optionalDependencies, main.optionalDependencies);
   for (const [name, range] of Object.entries(main.optionalDependencies)) {
     assert.equal(range, version, `${name} must be pinned exactly, not to a range`);
   }
@@ -88,7 +91,7 @@ test('a built release installs as one coherent set', async (t) => {
     ['linux', 'arm64'],
     ['win32', 'x64'],
   ]) {
-    const pkg = await manifest(`agentdock-${platform}-${arch}`);
+    const pkg = await manifest(`tendly-${platform}-${arch}`);
     assert.deepEqual(pkg.os, [platform]);
     assert.deepEqual(pkg.cpu, [arch]);
     assert.equal(pkg.version, version);
@@ -97,34 +100,36 @@ test('a built release installs as one coherent set', async (t) => {
   }
 
   // The registry must know every dependency before the package that names them.
-  assert.equal(order.at(-1), 'agentdock', 'the main package publishes last');
+  assert.deepEqual(order.slice(-2), ['tendly', 'agentdock'], 'the main packages publish last');
   assert.equal(new Set(order).size, order.length, 'no package is published twice');
-  assert.equal(order.length, built.length + 1);
+  assert.equal(order.length, built.length + 2);
 
   // The binary embeds the web bundle, which embeds MIT-licensed brand vectors.
   // Publishing is redistribution, and that licence requires the notice to come
   // along; shipping only our own LICENSE would leave the obligation unmet.
-  for (const pkg of ['agentdock', 'agentdock-darwin-arm64']) {
+  for (const pkg of ['tendly', 'agentdock', 'tendly-darwin-arm64']) {
     const files = await readdir(path.join(out, pkg));
     assert.ok(files.includes('THIRD-PARTY-NOTICES.md'), `${pkg} omits the third-party notice`);
     assert.ok(files.includes('LICENSE'));
     assert.deepEqual(
       (await manifest(pkg)).files.filter((entry) => entry.endsWith('.md') || entry === 'LICENSE').sort(),
-      pkg === 'agentdock' ? ['LICENSE', 'README.md', 'THIRD-PARTY-NOTICES.md'] : ['LICENSE', 'THIRD-PARTY-NOTICES.md'],
+      pkg.includes('-') ? ['LICENSE', 'THIRD-PARTY-NOTICES.md'] : ['LICENSE', 'README.md', 'THIRD-PARTY-NOTICES.md'],
       `${pkg} would not actually publish the files on disk`,
     );
   }
 
   // An un-executable binary installs fine and fails at first use.
-  const mode = await stat(path.join(out, 'agentdock-darwin-arm64', 'bin', 'agentdock-server'));
+  const mode = await stat(path.join(out, 'tendly-darwin-arm64', 'bin', 'tendly-server'));
   // Windows has no execute bit to check; there the file runs by its extension,
   // so its package must carry the .exe name the shim asks for.
   if (process.platform !== 'win32') assert.equal(mode.mode & 0o111, 0o111, 'the binary must be executable for all');
-  await stat(path.join(out, 'agentdock-win32-x64', 'bin', 'agentdock-server.exe'));
+  await stat(path.join(out, 'tendly-win32-x64', 'bin', 'tendly-server.exe'));
 
   // The path the shim computes from the resolved manifest.
   assert.ok((await read('shim.cjs')).includes("path.join(path.dirname(manifest), 'bin', BINARY)"));
-  assert.equal(main.bin.agentdock, 'bin/agentdock.js');
+  assert.deepEqual(main.bin, { tendly: 'bin/tendly.js' });
+  // Both commands under the old name, so what the program prints still runs.
+  assert.deepEqual(legacy.bin, { agentdock: 'bin/tendly.js', tendly: 'bin/tendly.js' });
 });
 
 // npm inherits stdin. A loop fed by `done < list` hands it the remaining
@@ -137,7 +142,7 @@ test('the publish loop does not feed the package list to npm on stdin', async ()
   assert.doesNotMatch(step, /done\s*<\s*dist-npm\/publish-order\.txt/, 'list is piped into the loop');
   assert.match(step, /packages=\$\(cat dist-npm\/publish-order\.txt\)/, 'list must be read before looping');
   // npm reads an argument shaped like owner/repo as a GitHub shorthand, so
-  // `npm publish dist-npm/agentdock-darwin-arm64` fetches over ssh and dies on
+  // `npm publish dist-npm/tendly-darwin-arm64` fetches over ssh and dies on
   // a public key rather than publishing the directory sitting right there.
   assert.match(step, /npm publish "\.\/dist-npm\//, 'the publish path needs a ./ prefix to stay a path');
   // A dry run skips authentication entirely, so the credential is the one part

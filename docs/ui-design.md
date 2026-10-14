@@ -1,16 +1,16 @@
-# AgentDock UI 视觉方案
+# Tendly UI 视觉方案
 
 ## 1. 设计关键词
 
 专业、安静、清晰、有生命感。
 
-AgentDock 不做“霓虹赛博风”的炫技界面，而是以明亮、克制的工作台为基底，用少量青绿色表示运行状态，用紫色表示 Agent 智能能力，用橙色表示需要用户注意的操作。
+Tendly 不做“霓虹赛博风”的炫技界面，而是以明亮、克制的工作台为基底，用少量青绿色表示运行状态，用紫色表示 Agent 智能能力，用橙色表示需要用户注意的操作。
 
 ## 2. 整体布局
 
 ```text
 ┌────────────────────────────────────────────────────────────────────┐
-│ AgentDock · workspace       ● Connected   branch main   ⌘K  avatar │  Topbar
+│ Tendly · workspace       ● Connected   branch main   ⌘K  avatar │  Topbar
 ├──────────────┬──────────────────────────────┬─────────────────────┤
 │              │                              │                     │
 │  Workspace   │  Agent session / Editor      │  Inspector / Preview │
@@ -78,7 +78,7 @@ AgentDock 不做“霓虹赛博风”的炫技界面，而是以明亮、克制�
 
 ## 5.1 Workspace canvas
 
-Workspace canvas 是 AgentDock 的核心交互，不采用固定 IDE 三栏作为唯一布局：
+Workspace canvas 是 Tendly 的核心交互，不采用固定 IDE 三栏作为唯一布局：
 
 - 左侧 session 列表中的 Agent 可拖入任意 pane。
 - 每个 pane 有独立标题、状态、最大化和关闭操作。

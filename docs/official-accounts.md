@@ -8,7 +8,7 @@
 
 ```text
 <state-dir>/accounts/<account-id>/
-├── account.json                 # AgentDock 身份与 profile 关联
+├── account.json                 # Tendly 身份与 profile 关联
 ├── config.toml                  # Codex 原生配置；使用文件式凭证存储
 ├── auth.json                    # 如存在，由官方 Codex 客户端管理
 ├── .credentials.json            # 如存在，由原生客户端管理
@@ -23,7 +23,7 @@ Unix 上目录为 0700，受管理 manifest、配置、凭证和 reset 元数据
 
 - 浏览器和设备码登录走官方 `account/login/start`；页面显示官方 URL／设备码，登录结果由原生客户端写入自己的凭证存储。远程 Linux 上应选择合适的设备码或官方支持的回调/转发方式，不能假定浏览器机器的 localhost 就是服务器。
 - 取消登录对应官方 `account/login/cancel`，仅取消该尝试；不批量结束用户 Agent 会话。
-- 状态与显式 token 刷新走 `account/read`，其中 `refreshToken` 交给官方客户端处理。AgentDock 不解析 `auth.json`、交换 token 或返回 token 值。
+- 状态与显式 token 刷新走 `account/read`，其中 `refreshToken` 交给官方客户端处理。Tendly 不解析 `auth.json`、交换 token 或返回 token 值。
 - 注销走官方 `account/logout`，需要明确确认；不是删除账号目录、清空其他账号或结束所有会话。
 - Codex 额度通过官方 `account/rateLimits/read` 获取。Claude 的额度通过用户主动点击后的官方 OAuth usage 查询获取。账户或客户端可能不提供某些窗口、套餐或重置时间；未知保持 unknown/null，不能显示成“0%”“0 剩余”或伪造套餐。
 
@@ -50,7 +50,7 @@ Unix 上目录为 0700，受管理 manifest、配置、凭证和 reset 元数据
 
 账号页不托管 Claude 订阅 OAuth 登录，也不替代官方客户端刷新 token。用户仍通过官方 Claude Code 完成本地配置/登录。
 
-点击“查询用量”时，AgentDock 会从官方客户端的 native store（macOS Keychain `Claude Code-credentials`，或 Linux/兼容环境的官方 `.credentials.json`）在服务端内存中取得 OAuth access token，并请求官方 `GET https://api.anthropic.com/api/oauth/usage`。该请求参考 [CPA Usage Keeper](https://github.com/Willxup/cpa-usage-keeper) 使用的 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 逻辑：解析 `five_hour`、`seven_day`、模型窗口的 `utilization` 和 `resets_at`。只有用户点击时触发，不轮询、不把 token 写进数据库/日志/浏览器；凭证找不到或官方接口不可用时明确显示原因。
+点击“查询用量”时，Tendly 会从官方客户端的 native store（macOS Keychain `Claude Code-credentials`，或 Linux/兼容环境的官方 `.credentials.json`）在服务端内存中取得 OAuth access token，并请求官方 `GET https://api.anthropic.com/api/oauth/usage`。该请求参考 [CPA Usage Keeper](https://github.com/Willxup/cpa-usage-keeper) 使用的 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 逻辑：解析 `five_hour`、`seven_day`、模型窗口的 `utilization` 和 `resets_at`。只有用户点击时触发，不轮询、不把 token 写进数据库/日志/浏览器；凭证找不到或官方接口不可用时明确显示原因。
 
 Claude 的 quota reset 仍不提供。CPA/CLIProxyAPI 的 `reset-quota` 主要清理其代理路由的 cooldown，不等于重置 Anthropic 订阅额度，不能直接当作 Claude 官方额度重置。
 
@@ -60,7 +60,7 @@ Anthropic 官方说明：未经批准，不允许第三方开发者为产品提�
 
 - 先确认没有该账号的活跃会话、登录或维护任务，再进行手工文件维护。不要为测试功能自动终止用户会话。
 - 私密备份应同时考虑 SQLite 的 profile/session 关联和对应账号目录；数据库使用一致性备份，账号文件另做受限权限、必要时加密的备份。不要只复制 manifest 后假设登录状态也已恢复。
-- `auth.json`、`.credentials.json` 的格式和迁移由官方客户端负责。AgentDock 没有原始密钥导入/导出 API，不将凭证文件内容转换成自研认证格式。
+- `auth.json`、`.credentials.json` 的格式和迁移由官方客户端负责。Tendly 没有原始密钥导入/导出 API，不将凭证文件内容转换成自研认证格式。
 - 已运行的老服务不会因刷新前端自动获得 `official_accounts` 等 capability。现有 5173/8787 四个用户会话保持运行；新能力使用独立预览状态与端口验证。
 - fixture 验证覆盖协议、隔离、取消、维护互斥和 reset 幂等边界，不等于真实 OAuth 登录、真实 credit 消费、付费模型回合或真实手机设备验收。具体证据由 [mvp-status.md](mvp-status.md) 记录。
 

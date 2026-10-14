@@ -109,7 +109,7 @@ async function revokeGrants() { try { hostGrants.value = await request('/host/gr
         <select :value="recentDays" :aria-label="t('Fold idle sessions')" @change="setRecentDays(Number(($event.target as HTMLSelectElement).value) as RecentDays)"><option v-for="days in RECENT_DAY_CHOICES" :key="days" :value="days">{{ days ? t(days === 1 ? 'After 1 day' : 'After {n} days', { n: days }) : t('Never') }}</option></select>
       </label>
       <div v-if="hostGrants.length" class="preference-row">
-        <span><strong>{{ t('Temporary file access') }}</strong><small>{{ t('Read-only, for the file preview, until AgentDock restarts.') }}</small><code v-for="item in hostGrants" :key="item.path" class="grant-path">{{ item.path }}{{ item.directory ? '/' : '' }}</code></span>
+        <span><strong>{{ t('Temporary file access') }}</strong><small>{{ t('Read-only, for the file preview, until Tendly restarts.') }}</small><code v-for="item in hostGrants" :key="item.path" class="grant-path">{{ item.path }}{{ item.directory ? '/' : '' }}</code></span>
         <button type="button" class="small-button danger" @click="revokeGrants">{{ t('Revoke all') }}</button>
       </div>
     </article>
@@ -177,12 +177,12 @@ async function revokeGrants() { try { hostGrants.value = await request('/host/gr
         </label>
         <p v-if="preferences[provider].permission==='danger'" class="preference-note danger">{{ t('New sessions will run tools without asking. Only choose this for directories you trust completely.') }}</p>
       </article>
-      <!-- What AgentDock itself does on this host, beside the clients' defaults. -->
+      <!-- What Tendly itself does on this host, beside the clients' defaults. -->
       <article class="preference-card">
-        <header><span class="preference-mark general"><Icon name="spark" :size="17"/></span><strong>AgentDock</strong></header>
+        <header><span class="preference-mark general"><Icon name="spark" :size="17"/></span><strong>Tendly</strong></header>
         <label class="preference-row">
-          <span><strong>{{ t('AgentDock tools for agents') }}</strong><small>{{ t('Claude Code and Codex sessions can look at AgentDock and, once you confirm here, change it: endpoints, defaults, workspaces. Takes effect when a session next starts.') }}</small></span>
-          <input type="checkbox" class="preference-switch" role="switch" :checked="preferences.agent_tools !== false" :disabled="saving" :aria-label="t('AgentDock tools for agents')" @change="setSwitch('agent_tools', ($event.target as HTMLInputElement).checked)" />
+          <span><strong>{{ t('Tendly tools for agents') }}</strong><small>{{ t('Claude Code and Codex sessions can look at Tendly and, once you confirm here, change it: endpoints, defaults, workspaces. Takes effect when a session next starts.') }}</small></span>
+          <input type="checkbox" class="preference-switch" role="switch" :checked="preferences.agent_tools !== false" :disabled="saving" :aria-label="t('Tendly tools for agents')" @change="setSwitch('agent_tools', ($event.target as HTMLInputElement).checked)" />
         </label>
         <template v-if="backendCapabilities.resourceMonitoring">
         <label class="preference-row">

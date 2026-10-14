@@ -1,5 +1,5 @@
 {
-  "name": "agentdock",
+  "name": "tendly",
   "private": true,
   "license": "MIT",
   "packageManager": "pnpm@10.30.3",
@@ -12,15 +12,15 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "pnpm --filter agentdock run --parallel \"/^dev:(server|web)$/\"",
-    "dev:server": "cargo run -p agentdock-server",
+    "dev": "pnpm --filter tendly run --parallel \"/^dev:(server|web)$/\"",
+    "dev:server": "cargo run -p agentdock-server --bin tendly-server",
     "dev:web": "pnpm --dir apps/web dev",
     "build:web": "pnpm --dir apps/web build",
     "typecheck:web": "pnpm --dir apps/web typecheck",
     "typecheck:bridge": "pnpm --dir packages/native-bridge typecheck",
     "test": "node --no-experimental-webstorage --import tsx --test --test-timeout=30000 \"apps/web/src/**/*.test.mjs\" \"packages/native-bridge/**/*.test.mjs\" \"npm/**/*.test.mjs\" \"scripts/**/*.test.mjs\"",
     "check": "pnpm typecheck:web && pnpm typecheck:bridge && pnpm test",
-    "init": "cargo run -p agentdock-server -- init"
+    "init": "cargo run -p agentdock-server --bin tendly-server -- init"
   },
   "devDependencies": {
     "tsx": "4.23.13"

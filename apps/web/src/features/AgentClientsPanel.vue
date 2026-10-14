@@ -63,7 +63,7 @@ const versionLabel = (client: ClientView) => client.version?.replace(/\s*\([^)]*
 function sourceLabel(client: ClientView) {
   return client.source === 'override' ? t('Server override')
     : client.source === 'path' ? t('Found on host PATH')
-    : client.source === 'managed' ? t('Installed by AgentDock')
+    : client.source === 'managed' ? t('Installed by Tendly')
     : t('Not found');
 }
 onMounted(() => { void load(); });
@@ -89,14 +89,14 @@ onBeforeUnmount(() => { disposed = true; controller?.abort(); });
           </div>
           <span :class="['client-state',client.installed?'installed':'missing']">{{ t(client.installed?'Installed':'Not installed') }}</span>
         </header>
-        <p v-if="client.managed_path&&client.shadowed" class="clients-quiet">{{ t('AgentDock has its own copy, but the host PATH copy wins. Installing again will not change which client sessions run.') }}</p>
+        <p v-if="client.managed_path&&client.shadowed" class="clients-quiet">{{ t('Tendly has its own copy, but the host PATH copy wins. Installing again will not change which client sessions run.') }}</p>
         <div v-if="confirming===client.provider" class="client-confirm" role="group" :aria-label="t('Install {name} from npm?', { name: providerLabel(client.provider) })">
           <strong>{{ t('Install {name} from npm?', { name: providerLabel(client.provider) }) }}</strong>
-          <p>{{ t('This downloads {package} from the npm registry and runs its install scripts on this host. It installs into AgentDock\'s own directory, not globally, and never replaces a client already on PATH.', { package: client.npm_package }) }}</p>
+          <p>{{ t('This downloads {package} from the npm registry and runs its install scripts on this host. It installs into Tendly\'s own directory, not globally, and never replaces a client already on PATH.', { package: client.npm_package }) }}</p>
           <div class="client-confirm-actions"><button type="button" class="small-button" :disabled="!!busy" @click="confirming=undefined">{{ t('Cancel') }}</button><button type="button" class="small-button primary" :disabled="!!busy" @click="install(client)">{{ t(busy===client.provider?'Installing…':'Install now') }}</button></div>
         </div>
         <div v-else-if="client.install_available" class="client-actions">
-          <button type="button" class="client-link" :disabled="!!busy" @click="confirming=client.provider;notice=''">{{ t(client.installed?'Install or update AgentDock copy…':'Install from npm…') }}</button>
+          <button type="button" class="client-link" :disabled="!!busy" @click="confirming=client.provider;notice=''">{{ t(client.installed?'Install or update Tendly copy…':'Install from npm…') }}</button>
         </div>
       </article>
     </template>

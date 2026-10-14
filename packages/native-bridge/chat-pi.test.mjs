@@ -45,7 +45,7 @@ test('pi: a message streams its reply, tools and usage, and the turn settles',()
   const settings=await wait(event=>event.type==='settings'&&event.models);
   assert.deepEqual(settings.models.map(model=>model.id),['agentdock/qwen-local','kunlun/zai-org/GLM-5.3']);
   assert.deepEqual(settings.models[1].efforts,['low','medium','high']);
-  assert.equal(settings.model,'agentdock/qwen-local');assert.equal(settings.effort,undefined,"Pi's `off` is no depth, not one AgentDock rejects");assert.equal(settings.permission_modes,undefined,'no approval modes');
+  assert.equal(settings.model,'agentdock/qwen-local');assert.equal(settings.effort,undefined,"Pi's `off` is no depth, not one Tendly rejects");assert.equal(settings.permission_modes,undefined,'no approval modes');
   assert.ok(!(await sent()).some(command=>command.type==='prompt'),'opening a session sends no prompt');
   send({type:'message',id:'one',content:'hello'});
   await wait(event=>event.type==='turn'&&event.id==='one'&&event.status==='completed');

@@ -17,7 +17,7 @@ export function parseEnvironmentRows(rows: EnvironmentRow[]): { environment: Env
     if (!/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(key)) { errors.add("Use a valid environment variable name."); continue; }
     if (seen.has(key)) errors.add("Environment variable names must be unique.");
     seen.add(key);
-    if (RESERVED.has(upper) || upper.startsWith("AGENTDOCK_")) errors.add("Account directories, workspace identity and AgentDock internal variables cannot be overridden.");
+    if (RESERVED.has(upper) || upper.startsWith("AGENTDOCK_")) errors.add("Account directories, workspace identity and Tendly internal variables cannot be overridden.");
     if (row.kind === "unset") entries.push([key, { kind: "unset" }]);
     else if (row.kind === "main_model") entries.push([key, { kind: "main_model" }]);
     else if (row.kind === "main_model_context") entries.push([key, { kind: "main_model_context" }]);

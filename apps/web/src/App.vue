@@ -731,7 +731,7 @@ async function refreshResources() {
   const registryRevision = workspaceRegistryRevision;
   try {
     const health = await request<BackendHealth>("/health");
-    if (!health.ok) throw new ApiError("AgentDock health check failed", 503);
+    if (!health.ok) throw new ApiError("Tendly health check failed", 503);
     const previousSharedStorage = backendCapabilities.sharedCanvas;
     setBackendCapabilities(health); apiOnline.value = true;
     platform.value = health.platform; instanceLabel.value = health.instance_label; serverVersion.value = health.version;
@@ -817,7 +817,7 @@ onUnmounted(() => window.removeEventListener("keydown", onGlobalKey));
  * notification in the background, and a count in the page title.
  */
 watch(sessions, list => trackSessions(list, { focusedSessionId: selectedSessionId.value, open: openSession, t }));
-const baseTitle = typeof document === "undefined" ? "AgentDock" : document.title;
+const baseTitle = typeof document === "undefined" ? "Tendly" : document.title;
 watch(() => waitingIds.value.length, count => { if (typeof document !== "undefined") document.title = attentionTitle(baseTitle, count); }, { immediate: true });
 /**
  * A link to one session (/session/:id) opens it on the canvas once sessions
@@ -918,11 +918,11 @@ onUnmounted(() => { if (pendingLayout) cacheLayout(pendingLayout, true); dispose
 <template>
   <div :class="['app-shell', { 'explorer-hidden': !explorerOpen || !explorerWorkspace, 'sidebar-collapsed': sidebarCollapsed, 'is-mobile': mobile }]">
     <header class="topbar">
-      <div class="brand"><button v-if="mobile && backTarget" class="icon-button mobile-menu mobile-back" :aria-label="t('Back')" @click="goBack"><Icon name="chevron" :size="22" /></button><button v-else class="icon-button mobile-menu" :aria-label="t('Toggle workspace navigation')" @click="sidebarOpen = !sidebarOpen"><Icon name="menu" /></button><button class="icon-button sidebar-toggle" :class="{selected:!sidebarCollapsed}" :aria-pressed="!sidebarCollapsed" :aria-label="t(sidebarCollapsed?'Expand workspace panel':'Collapse workspace panel')" :title="t(sidebarCollapsed?'Expand workspace panel':'Collapse workspace panel')" @click="toggleSidebar"><Icon name="panelLeft"/></button><span class="brand-mark"><span /></span><strong :title="serverVersion?t('AgentDock {version}',{version:serverVersion}):undefined">AgentDock<span v-if="instanceLabel" class="brand-version">{{ instanceLabel }}</span></strong></div>
+      <div class="brand"><button v-if="mobile && backTarget" class="icon-button mobile-menu mobile-back" :aria-label="t('Back')" @click="goBack"><Icon name="chevron" :size="22" /></button><button v-else class="icon-button mobile-menu" :aria-label="t('Toggle workspace navigation')" @click="sidebarOpen = !sidebarOpen"><Icon name="menu" /></button><button class="icon-button sidebar-toggle" :class="{selected:!sidebarCollapsed}" :aria-pressed="!sidebarCollapsed" :aria-label="t(sidebarCollapsed?'Expand workspace panel':'Collapse workspace panel')" :title="t(sidebarCollapsed?'Expand workspace panel':'Collapse workspace panel')" @click="toggleSidebar"><Icon name="panelLeft"/></button><span class="brand-mark"><span /></span><strong :title="serverVersion?t('Tendly {version}',{version:serverVersion}):undefined">Tendly<span v-if="instanceLabel" class="brand-version">{{ instanceLabel }}</span></strong></div>
       <span v-if="mobile && page" class="mobile-title mobile-page-title"><strong>{{ t(page === "settings" ? "Settings" : page === "sessions" ? "All sessions" : page === "usage" ? "Usage" : "System") }}</strong></span>
       <button v-else-if="mobile && canvasReady" class="mobile-title" type="button" :aria-label="t('Switch view')" @click="switcherOpen = true">
         <TabIcon v-if="focusedPane" :kind="focusedPane.kind" :metadata="focusedPane.metadata" :session-providers="sessionProviders" :size="16" />
-        <span class="mobile-title-copy"><strong>{{ focusedPane ? paneTitle(focusedPane) : (contextWorkspace?.name || 'AgentDock') }}</strong><small v-if="focusedPane && paneDetail(focusedPane)">{{ paneDetail(focusedPane) }}</small></span>
+        <span class="mobile-title-copy"><strong>{{ focusedPane ? paneTitle(focusedPane) : (contextWorkspace?.name || 'Tendly') }}</strong><small v-if="focusedPane && paneDetail(focusedPane)">{{ paneDetail(focusedPane) }}</small></span>
         <span v-if="openPanes.length > 1" class="mobile-title-count">{{ openPanes.length }}</span><Icon name="chevron" :size="14" class="mobile-title-chevron" />
       </button>
       <span v-if="mobile && focusedPane?.metadata?.session_id" v-show="!page" class="mobile-session-actions" :id="`session-actions-${focusedPane.id}`" />

@@ -33,7 +33,7 @@ fn derived_title(text: &str) -> Option<String> {
 }
 
 /// One line of what the user said, for a session list: the attachment header
-/// AgentDock writes above a message is dropped, whitespace is folded, and the
+/// Tendly writes above a message is dropped, whitespace is folded, and the
 /// line is cut by characters so CJK keeps its share of the width.
 pub fn preview_line(text: &str) -> Option<String> {
     let mut lines = text.lines().peekable();

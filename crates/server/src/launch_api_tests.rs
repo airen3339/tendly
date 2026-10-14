@@ -168,7 +168,7 @@ async fn terminal_launch_pins_snapshot_revision_credentials_and_flags_for_every_
             _ => unreachable!(),
         }
         // Continuing a continuation resolves to the same original home, not a
-        // new directory under the intermediate terminal's AgentDock id.
+        // new directory under the intermediate terminal's Tendly id.
         let nested = reopen(&f, &terminal).await;
         assert_eq!(nested.resume_source_id, Some(source.id));
         assert_eq!(nested.resume_configuration_revision, Some(1));

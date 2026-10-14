@@ -11,7 +11,7 @@ body = """
 ### {{ group | striptags | trim }}
 {% for commit in commits %}
 - {{ commit.message | split(pat="\n") | first | trim | upper_first }} \
-([{{ commit.id | truncate(length=7, end="") }}](https://github.com/wnzzer/agentdock/commit/{{ commit.id }}))
+([{{ commit.id | truncate(length=7, end="") }}](https://github.com/wnzzer/tendly/commit/{{ commit.id }}))
 {%- for line in commit.message | split(pat="\n") | slice(start=1) %}
 {%- if line is starting_with("- ") or line is starting_with("  ") %}
   {{ line }}
@@ -20,7 +20,7 @@ body = """
 {%- endfor %}
 {% endfor %}
 {% if previous.version %}
-**Full changelog**: https://github.com/wnzzer/agentdock/compare/{{ previous.version }}...{{ version }}
+**Full changelog**: https://github.com/wnzzer/tendly/compare/{{ previous.version }}...{{ version }}
 {% endif %}
 """
 # Off: it strips every line, which flattens the sub-items.

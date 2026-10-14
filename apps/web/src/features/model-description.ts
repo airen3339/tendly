@@ -1,7 +1,7 @@
 /**
  * Translating what a client says about its own models.
  *
- * These lines are written by Claude Code and Codex rather than by AgentDock:
+ * These lines are written by Claude Code and Codex rather than by Tendly:
  * they name models, quote prices, and change with the client's version, so
  * there is no fixed set of them to put in a dictionary. What is fixed are the
  * phrases between the separators — "Efficient for routine tasks" is the same

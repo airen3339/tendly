@@ -10,7 +10,7 @@ import { AGENT_CLIENTS, isAgentClient } from "./clients";
  */
 export interface ProviderPreference { endpoint_profile_id?: string | null; effort?: string | null; permission?: string | null }
 /**
- * `agent_tools`: whether sessions get AgentDock's own tools.
+ * `agent_tools`: whether sessions get Tendly's own tools.
  * `resource_monitoring`: whether the host's resources are read at all, for
  * the status bar, the system page and the recorded history. Absent means on
  * for both.

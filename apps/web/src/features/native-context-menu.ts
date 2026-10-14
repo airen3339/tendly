@@ -1,6 +1,6 @@
 /**
- * Right-click in AgentDock's own chrome -- headers, the sidebar, the status
- * bar, buttons, empty canvas -- belongs to AgentDock, not to the browser's
+ * Right-click in Tendly's own chrome -- headers, the sidebar, the status
+ * bar, buttons, empty canvas -- belongs to Tendly, not to the browser's
  * page menu ("Back", "Reload", "Save as…"), which only ever does something
  * wrong there. Places with a menu of their own open it and stop here.
  *

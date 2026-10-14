@@ -2,7 +2,7 @@
 
 ## 目标
 
-AgentDock 的端点设置不应该是全局单例。每个 Agent session 在启动时绑定一个 `EndpointProfile`，并保存一份不可变的 effective config snapshot。
+Tendly 的端点设置不应该是全局单例。每个 Agent session 在启动时绑定一个 `EndpointProfile`，并保存一份不可变的 effective config snapshot。
 
 ```text
 EndpointProfile
@@ -41,16 +41,16 @@ CodexAdapter       -> temporary CODEX_HOME + config.toml / -c overrides
 ## 会话隔离策略
 
 1. 用户在启动会话时选择 `Provider + Endpoint Profile + Model`。
-2. AgentDock 将 profile 解析成 effective snapshot，写入 session metadata。
+2. Tendly 将 profile 解析成 effective snapshot，写入 session metadata。
 3. 启动子进程时只注入当前 session 的环境和临时配置目录。
 4. 不修改宿主机全局 `~/.claude` 或 `~/.codex/config.toml`。
 5. profile 修改只影响新会话；已有会话需要明确“重启并应用”。
 
 ## Provider 原生权限
 
-AgentDock 不重新实现 Claude Code 或 Codex 的工具授权、确认、sandbox 和 trust 语义。启动 session 时由对应 adapter 透传 provider 支持的参数和配置；运行中将 CLI 的确认提示作为事件或 PTY 输出展示，并把用户的确认/拒绝输入回传给原生 CLI。
+Tendly 不重新实现 Claude Code 或 Codex 的工具授权、确认、sandbox 和 trust 语义。启动 session 时由对应 adapter 透传 provider 支持的参数和配置；运行中将 CLI 的确认提示作为事件或 PTY 输出展示，并把用户的确认/拒绝输入回传给原生 CLI。
 
-诸如跳过权限检查的危险启动选项不应被 AgentDock 默默启用；可以作为明确标记的透传选项显示，但不能被产品默认策略替换。AgentDock 自己只负责非语义性的宿主机边界：工作目录、进程组、资源限制、凭证注入和生命周期。
+诸如跳过权限检查的危险启动选项不应被 Tendly 默默启用；可以作为明确标记的透传选项显示，但不能被产品默认策略替换。Tendly 自己只负责非语义性的宿主机边界：工作目录、进程组、资源限制、凭证注入和生命周期。
 
 Codex 建议每个 session 使用独立的 `CODEX_HOME`；Claude Code 也使用 session-scoped env/settings 文件，避免并发会话互相覆盖。
 
@@ -70,7 +70,7 @@ Codex 建议每个 session 使用独立的 `CODEX_HOME`；Claude Code 也使用 
 - L2：协议兼容网关，支持基础对话、工具调用和流式输出。
 - L3：仅文本兼容或自定义网关，显示能力缺失，不承诺完整 Agent 行为。
 
-AgentDock 应在启动前做 capability probe，并明确告诉用户当前 endpoint 是否支持 tools、vision、streaming、structured output 和长上下文。
+Tendly 应在启动前做 capability probe，并明确告诉用户当前 endpoint 是否支持 tools、vision、streaming、structured output 和长上下文。
 
 ## 成本与风险
 

@@ -2,7 +2,7 @@
 //!
 //! Every bridge script (chat, accounts, history, file search) runs the same
 //! way: under the configured JavaScript runtime, in a process group of its own,
-//! with piped stdio, and without AgentDock's own secrets in its environment.
+//! with piped stdio, and without Tendly's own secrets in its environment.
 //! Keeping that in one place is what keeps the four from drifting apart, and
 //! [`is_agentdock_secret`] is the one definition every launch path filters by.
 use agentdock_runtime::process;
@@ -13,14 +13,14 @@ use std::{
     process::Stdio,
 };
 
-/// A variable that holds AgentDock's own credentials: endpoint secrets
+/// A variable that holds Tendly's own credentials: endpoint secrets
 /// referenced as `env:AGENTDOCK_SECRET_*`, and the gateway's access token.
 /// These never reach a bridge, a native client or a terminal.
 pub fn is_agentdock_secret(key: &str) -> bool {
     key.starts_with("AGENTDOCK_SECRET_") || key == "AGENTDOCK_TOKEN"
 }
 
-/// The names of AgentDock's secrets present in this process's environment.
+/// The names of Tendly's secrets present in this process's environment.
 pub fn agentdock_secrets() -> impl Iterator<Item = String> {
     env::vars_os()
         .filter_map(|(key, _)| key.into_string().ok())
@@ -47,7 +47,7 @@ fn choose_runtime(primary: Option<OsString>, legacy: Option<OsString>) -> OsStri
 /// before the script. Its stdin and stdout are piped and stderr discarded, it
 /// is killed if dropped, it leads a process group of its own (so the caller
 /// can stop it and everything it starts with an [`process::OwnedGroup`]), and
-/// AgentDock's secrets are removed from its environment.
+/// Tendly's secrets are removed from its environment.
 pub fn node_command(node_options: &[&str], script: impl AsRef<OsStr>) -> tokio::process::Command {
     let mut command = tokio::process::Command::new(js_runtime());
     command

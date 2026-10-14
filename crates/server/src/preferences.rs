@@ -30,7 +30,7 @@ pub struct Preferences {
     /// parse, as an unknown field did when the clients were fields.
     #[serde(flatten)]
     pub clients: BTreeMap<ProviderKind, ProviderPreference>,
-    /// Whether sessions get AgentDock's own tools (agent.rs). On unless
+    /// Whether sessions get Tendly's own tools (agent.rs). On unless
     /// turned off: `None` is the default, not a choice to disable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_tools: Option<bool>,

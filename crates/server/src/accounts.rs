@@ -179,7 +179,7 @@ struct AccountRecord {
     provider: ProviderKind,
     profile_id: Uuid,
     /// Optional live reference to an existing native client home. The account
-    /// directory still stores only AgentDock metadata; credentials stay in
+    /// directory still stores only Tendly metadata; credentials stay in
     /// this referenced directory and are never copied.
     #[serde(default)]
     native_config: Option<NativeConfigReference>,
@@ -225,7 +225,7 @@ pub struct Capabilities {
     pub quota: bool,
     pub reset_quota: bool,
     pub logout: bool,
-    /// A user-triggered usage check exists without making AgentDock the OAuth
+    /// A user-triggered usage check exists without making Tendly the OAuth
     /// owner. Claude usage is read from the official native credential context
     /// or the optional local status-line capture, never polled automatically.
     #[serde(default)]
@@ -284,7 +284,7 @@ pub struct UsageView {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
     /// Present when the provider asked us to wait before querying again. It is
-    /// a hint for the page, never a timer AgentDock acts on by itself.
+    /// a hint for the page, never a timer Tendly acts on by itself.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retry_after_seconds: Option<u64>,
     /// Set when a transient failure kept the figures from the previous check
@@ -694,7 +694,7 @@ fn initial_view(state: &AppState, record: &AccountRecord) -> Result<AccountView>
             .as_ref()
             .map(|reference| reference.source_id.clone()),
         storage_path: directory.to_string_lossy().into_owned(),
-        // An account AgentDock created owns its directory; one that references a
+        // An account Tendly created owns its directory; one that references a
         // configuration the host already had does not.
         shared_configuration: record.native_config.is_some(),
         proxy_url: record.proxy_url.clone(),
@@ -717,7 +717,7 @@ fn initial_view(state: &AppState, record: &AccountRecord) -> Result<AccountView>
         usage: None,
     })
 }
-/// A successful usage reading, kept in AgentDock's own account directory. The
+/// A successful usage reading, kept in Tendly's own account directory. The
 /// provider allows very few checks, so re-reading this costs nothing and lets
 /// the page show figures without spending an allowance. It is never written
 /// into the native client's configuration directory.
@@ -1132,7 +1132,7 @@ mod tests {
         assert_eq!(pin(&f.state, &reference.source_id).unwrap().1, reference);
         assert_eq!(list(State(f.state.clone())).await.unwrap().0.len(), 1);
         // No token read is needed to use/validate this reference, even if the
-        // native client's credential format is opaque to AgentDock.
+        // native client's credential format is opaque to Tendly.
         write_new(
             &path.join("auth.json"),
             b"opaque fixture credentials - intentionally not JSON",
@@ -1263,7 +1263,7 @@ mod tests {
         );
         let guidance = account.guidance.clone().unwrap();
         assert!(guidance.contains("claude auth login"));
-        // An account AgentDock created owns its directory, so nothing else on
+        // An account Tendly created owns its directory, so nothing else on
         // the host edits its sign-in.
         assert!(!account.shared_configuration);
         // And its sign-in has to land in that directory. Without the override
@@ -1430,7 +1430,7 @@ mod tests {
         assert_eq!(usage.source.as_deref(), Some("claude_oauth_usage"));
         assert_eq!(usage.availability, "cached");
 
-        // The cache lives in AgentDock's own directory, never the native client's.
+        // The cache lives in Tendly's own directory, never the native client's.
         let path = usage_cache_path(&f.state, account.id).unwrap();
         assert!(path.starts_with(&f.root) && path.ends_with("usage.json"));
 
@@ -2028,7 +2028,7 @@ async fn rename(
     view(&state, id).map(Json)
 }
 
-/// Remove an account AgentDock created or linked. Only AgentDock's own account
+/// Remove an account Tendly created or linked. Only Tendly's own account
 /// directory is deleted; a linked native home is left completely untouched.
 async fn remove(
     State(state): State<AppState>,
@@ -2064,7 +2064,7 @@ async fn remove(
         .store
         .delete_endpoint_profile(record.profile_id)
         .map_err(ApiError::internal)?;
-    // Always AgentDock's own account directory, never the referenced native
+    // Always Tendly's own account directory, never the referenced native
     // home: an isolated account's sign-in lives here and goes with it, while a
     // linked account only ever stored metadata beside the untouched original.
     fs::remove_dir_all(&directory).map_err(ApiError::internal)?;
@@ -2282,7 +2282,7 @@ async fn reset_quota(
     run_operation(&state, record, json!({"action":"reset_quota","confirmed":true,"idempotency_key":input.idempotency_key,"credit_id":input.credit_id,"retry_authorized":retry_authorized})).await?;
     Ok(Json(view(&state, id)?))
 }
-/// Sign-in, token refresh and sign-out run through AgentDock only for a
+/// Sign-in, token refresh and sign-out run through Tendly only for a
 /// client whose own tooling offers them.
 fn ensure_managed_login(record: &AccountRecord) -> Result<()> {
     if crate::adapters::agent(record.provider)?

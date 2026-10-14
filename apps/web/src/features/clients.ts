@@ -94,7 +94,7 @@ const CLIENTS: Record<AgentProviderKind, ClientInfo> = {
     iconTone: "blue",
     tabTint: "#E8F0FA",
     colorToken: "pi",
-    // The provider AgentDock writes for a profile's endpoint (server adapters/pi.rs).
+    // The provider Tendly writes for a profile's endpoint (server adapters/pi.rs).
     endpointModelPrefix: "agentdock/",
     apis: [
       { value: "openai-completions", label: "OpenAI Chat Completions" },
@@ -107,7 +107,7 @@ const CLIENTS: Record<AgentProviderKind, ClientInfo> = {
     profilePlan: false,
     effortLadder: false,
     modelSlots: false,
-    contextWindow: { help: "Pi is told it per model, in the models.json AgentDock writes for the endpoint. Empty lets Pi decide." },
+    contextWindow: { help: "Pi is told it per model, in the models.json Tendly writes for the endpoint. Empty lets Pi decide." },
     chatNote: "Pi runs its tools without asking. Send messages only for work you are happy for it to carry out in this directory.",
     account: { loginDomains: [], order: 2 },
     reservedEnvironment: ["PI_CODING_AGENT_DIR"],

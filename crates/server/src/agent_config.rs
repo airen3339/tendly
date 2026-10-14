@@ -1,4 +1,4 @@
-//! The agent tools that change AgentDock: endpoint profiles, new-session
+//! The agent tools that change Tendly: endpoint profiles, new-session
 //! defaults, workspaces.
 //!
 //! Each change is sorted by what it would cost the person if it were wrong.
@@ -25,7 +25,7 @@ pub fn tools() -> Vec<Value> {
     vec![
         crate::agent::tool(
             "agentdock_endpoint",
-            "Create, change, delete, test or import AgentDock endpoint profiles (where a Claude Code or Codex session sends requests, with which key and model). Create, update, delete and import are confirmed by the person in the AgentDock window, which is also where they type any API key: never ask for a key in the conversation. test lists the models an existing profile can reach.",
+            "Create, change, delete, test or import Tendly endpoint profiles (where a Claude Code or Codex session sends requests, with which key and model). Create, update, delete and import are confirmed by the person in the Tendly window, which is also where they type any API key: never ask for a key in the conversation. test lists the models an existing profile can reach.",
             object(
                 json!({
                     "action": { "type": "string", "enum": ["create", "update", "delete", "test", "host_configurations", "import_host"] },
@@ -45,7 +45,7 @@ pub fn tools() -> Vec<Value> {
         ),
         crate::agent::tool(
             "agentdock_preferences",
-            "Read or change AgentDock's settings: what new sessions start with, per client (default endpoint profile, reasoning effort, permission mode), and how the interface and its terminals look. Session defaults apply to sessions started afterwards; the appearance changes every open window at once. Changes are shown to the person with an undo; making tools run without asking is confirmed first.",
+            "Read or change Tendly's settings: what new sessions start with, per client (default endpoint profile, reasoning effort, permission mode), and how the interface and its terminals look. Session defaults apply to sessions started afterwards; the appearance changes every open window at once. Changes are shown to the person with an undo; making tools run without asking is confirmed first.",
             object(
                 json!({
                     "action": { "type": "string", "enum": ["get", "set"] },
@@ -61,7 +61,7 @@ pub fn tools() -> Vec<Value> {
         ),
         crate::agent::tool(
             "agentdock_workspace",
-            "Add a directory on this machine as an AgentDock workspace, so sessions can be opened in it. It must be inside the roots the server allows.",
+            "Add a directory on this machine as a Tendly workspace, so sessions can be opened in it. It must be inside the roots the server allows.",
             object(
                 json!({
                     "action": { "type": "string", "enum": ["add"] },

@@ -1,11 +1,11 @@
-//! `agentdock resume <session>`: continue an AgentDock session in this terminal.
+//! `tendly resume <session>`: continue a Tendly session in this terminal.
 //!
 //! The running server owns the database, the configuration homes and the keys,
 //! so this asks it for the session's launch (`launch-plan`, built by the same
-//! launch layer as AgentDock's own terminals) and then becomes that client
+//! launch layer as Tendly's own terminals) and then becomes that client
 //! here: same program, arguments, checkout and environment, and so the same
 //! endpoint, model and native conversation. Nothing is written into the
-//! command line or the clipboard but the AgentDock session ID.
+//! command line or the clipboard but the Tendly session ID.
 use serde::Deserialize;
 use std::{collections::BTreeMap, path::PathBuf, process::Command};
 
@@ -20,7 +20,7 @@ struct Plan {
     env_remove: Vec<String>,
 }
 
-const USAGE: &str = "Usage: agentdock resume <AgentDock session ID> [--force]\n\nThe ID is the AgentDock session ID (Copy resume command in a session's menu),\nnot the client's own session ID. --force opens it even while AgentDock runs it.";
+const USAGE: &str = "Usage: tendly resume <Tendly session ID> [--force]\n\nThe ID is the Tendly session ID (Copy resume command in a session's menu),\nnot the client's own session ID. --force opens it even while Tendly runs it.";
 
 pub async fn command(arguments: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let force = arguments.iter().any(|argument| argument == "--force");
@@ -39,7 +39,7 @@ pub async fn command(arguments: Vec<String>) -> Result<(), Box<dyn std::error::E
         return Err(USAGE.into());
     };
     if uuid::Uuid::parse_str(id).is_err() {
-        return Err(format!("{id:?} is not an AgentDock session ID.\n\n{USAGE}").into());
+        return Err(format!("{id:?} is not a Tendly session ID.\n\n{USAGE}").into());
     }
     let plan = fetch(id, force).await?;
     eprintln!(
@@ -65,13 +65,13 @@ async fn fetch(id: &str, force: bool) -> Result<Plan, Box<dyn std::error::Error>
     let response = request
         .send()
         .await
-        .map_err(|_| format!("AgentDock is not answering at {url}. Start it with `agentdock`."))?;
+        .map_err(|_| format!("Tendly is not answering at {url}. Start it with `agentdock`."))?;
     let status = response.status();
     if !status.is_success() {
         let body: serde_json::Value = response.json().await.unwrap_or_default();
         return Err(body["error"]
             .as_str()
-            .map_or_else(|| format!("AgentDock answered {status}"), str::to_owned)
+            .map_or_else(|| format!("Tendly answered {status}"), str::to_owned)
             .into());
     }
     Ok(response.json().await?)

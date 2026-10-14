@@ -1,5 +1,5 @@
 //! Read-only access the person granted, from the browser, to a file or folder
-//! outside the folders AgentDock may browse.
+//! outside the folders Tendly may browse.
 //!
 //! A grant widens one thing only: the read-only preview of a file an agent
 //! mentioned. It never opens browsing, editing or a workspace there. Grants

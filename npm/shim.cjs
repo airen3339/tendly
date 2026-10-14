@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Entry point for `@wnzzer/agentdock`. The real program is a Rust binary that
+// Entry point for `@wnzzer/tendly` (and `@wnzzer/agentdock`, its name before).
+// The real program is a Rust binary that
 // ships in a per-platform package; npm installs only the one matching this
 // machine, via the `os`/`cpu` fields on those packages. This file finds it and
 // hands over.
@@ -16,17 +17,17 @@ const path = require('node:path');
 // matches `os`/`cpu` against, so this table and the published packages cannot
 // disagree about what a platform is called.
 const PACKAGES = {
-  'darwin-arm64': '@wnzzer/agentdock-darwin-arm64',
-  'darwin-x64': '@wnzzer/agentdock-darwin-x64',
-  'linux-x64': '@wnzzer/agentdock-linux-x64',
-  'linux-arm64': '@wnzzer/agentdock-linux-arm64',
-  'win32-x64': '@wnzzer/agentdock-win32-x64',
+  'darwin-arm64': '@wnzzer/tendly-darwin-arm64',
+  'darwin-x64': '@wnzzer/tendly-darwin-x64',
+  'linux-x64': '@wnzzer/tendly-linux-x64',
+  'linux-arm64': '@wnzzer/tendly-linux-arm64',
+  'win32-x64': '@wnzzer/tendly-win32-x64',
 };
 
-const BINARY = process.platform === 'win32' ? 'agentdock-server.exe' : 'agentdock-server';
+const BINARY = process.platform === 'win32' ? 'tendly-server.exe' : 'tendly-server';
 
 function fail(message) {
-  process.stderr.write(`agentdock: ${message}\n`);
+  process.stderr.write(`tendly: ${message}\n`);
   process.exit(1);
 }
 
@@ -37,7 +38,7 @@ function locate() {
     fail(
       `no prebuilt binary for ${key}.\n` +
         `  Supported: ${Object.keys(PACKAGES).join(', ')}.\n` +
-        '  Build from source instead: https://github.com/wnzzer/agentdock',
+        '  Build from source instead: https://github.com/wnzzer/tendly',
     );
   }
   // Resolve the manifest rather than the binary: a package.json is resolvable
@@ -55,6 +56,22 @@ function locate() {
     );
   }
   return path.join(path.dirname(manifest), 'bin', BINARY);
+}
+
+// Installed under the old name: say once per terminal command what to run
+// instead. Only to a person at a terminal, never into a service's log.
+function installedAs() {
+  try {
+    return require('../package.json').name;
+  } catch {
+    return undefined;
+  }
+}
+if (installedAs() === '@wnzzer/agentdock' && process.stderr.isTTY) {
+  process.stderr.write(
+    'AgentDock is now Tendly. Move to the new package when convenient:\n' +
+      '  npm uninstall -g @wnzzer/agentdock && npm install -g @wnzzer/tendly\n\n',
+  );
 }
 
 const child = spawn(locate(), process.argv.slice(2), { stdio: 'inherit' });

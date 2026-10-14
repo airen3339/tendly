@@ -25,9 +25,9 @@ const SCHEMA_VERSION: u32 = 1;
 /// file, so the mirror is read through its API, which serves the bytes as they
 /// are and without signing in.
 const MIRRORS: [&str; 3] = [
-    "https://cdn.jsdelivr.net/gh/wnzzer/agentdock@main/data/prices.json",
+    "https://cdn.jsdelivr.net/gh/wnzzer/tendly@main/data/prices.json",
     "https://api.gitcode.com/api/v5/repos/wnzzer/agentdock/raw/data%2Fprices.json?ref=main",
-    "https://raw.githubusercontent.com/wnzzer/agentdock/main/data/prices.json",
+    "https://raw.githubusercontent.com/wnzzer/tendly/main/data/prices.json",
 ];
 const REFRESH_AFTER: Duration = Duration::from_secs(24 * 3600);
 const CHECK_EVERY: Duration = Duration::from_secs(6 * 3600);

@@ -2,6 +2,11 @@
 // holding a binary, plus the package users actually name, which holds only the
 // shim and depends on all of them optionally.
 //
+// Tendly was called AgentDock, and installs made under that name update by
+// reinstalling `@wnzzer/agentdock`. That package is still built, from the same
+// shim and on the same platform packages, so those installs keep updating; it
+// is deprecated on the registry, which tells whoever installs it to move.
+//
 //   node npm/build-packages.mjs <version> <dir-of-tarballs> [out]
 //
 // Run locally against artifacts downloaded from a workflow run to inspect
@@ -13,9 +18,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const SCOPE = '@wnzzer';
-const NAME = 'agentdock';
-const BINARY = 'agentdock-server';
-const REPOSITORY = 'https://github.com/wnzzer/agentdock';
+const NAME = 'tendly';
+const LEGACY = 'agentdock';
+const BINARY = 'tendly-server';
+const REPOSITORY = 'https://github.com/wnzzer/tendly';
 // One source in docs/, published under the name a registry reader expects.
 const NOTICES_SOURCE = 'docs/third-party-notices.md';
 const NOTICES = 'THIRD-PARTY-NOTICES.md';
@@ -52,7 +58,7 @@ const shared = {
   engines: { node: '>=20' },
 };
 
-const extractRoot = mkdtempSync(path.join(tmpdir(), 'agentdock-npm-'));
+const extractRoot = mkdtempSync(path.join(tmpdir(), 'tendly-npm-'));
 try {
   for (const target of TARGETS) {
     const tarball = `${NAME}-${version}-${target.triple}.tar.gz`;
@@ -102,35 +108,42 @@ try {
   rmSync(extractRoot, { recursive: true, force: true });
 }
 
-const main = path.join(out, NAME);
-mkdirSync(path.join(main, 'bin'), { recursive: true });
-cpSync(path.join(here, 'shim.cjs'), path.join(main, 'bin', `${NAME}.js`));
-cpSync(path.join(root, 'LICENSE'), path.join(main, 'LICENSE'));
-cpSync(path.join(root, 'README.md'), path.join(main, 'README.md'));
-cpSync(path.join(root, NOTICES_SOURCE), path.join(main, NOTICES));
-writeFileSync(
-  path.join(main, 'package.json'),
-  `${JSON.stringify(
-    {
-      name: `${SCOPE}/${NAME}`,
-      ...shared,
-      keywords: ['claude-code', 'codex', 'agent', 'workspace', 'cli'],
-      bin: { [NAME]: `bin/${NAME}.js` },
-      // Pinned exactly: these ship a binary built from this very commit, so a
-      // range could pair a shim with an executable it was never tested against.
-      optionalDependencies: Object.fromEntries(
-        TARGETS.map((target) => [`${SCOPE}/${NAME}-${target.key}`, version]),
-      ),
-      files: ['bin/', 'LICENSE', NOTICES, 'README.md'],
-    },
-    null,
-    2,
-  )}\n`,
-);
+// `bin` names every command the package installs. The legacy package carries
+// `tendly` too, so what the program prints is runnable whichever was installed;
+// that is also why the two cannot be installed side by side.
+function mainPackage(name, bin) {
+  const dir = path.join(out, name);
+  mkdirSync(path.join(dir, 'bin'), { recursive: true });
+  cpSync(path.join(here, 'shim.cjs'), path.join(dir, 'bin', `${NAME}.js`));
+  cpSync(path.join(root, 'LICENSE'), path.join(dir, 'LICENSE'));
+  cpSync(path.join(root, 'README.md'), path.join(dir, 'README.md'));
+  cpSync(path.join(root, NOTICES_SOURCE), path.join(dir, NOTICES));
+  writeFileSync(
+    path.join(dir, 'package.json'),
+    `${JSON.stringify(
+      {
+        name: `${SCOPE}/${name}`,
+        ...shared,
+        keywords: ['claude-code', 'codex', 'agent', 'workspace', 'cli'],
+        bin: Object.fromEntries(bin.map((command) => [command, `bin/${NAME}.js`])),
+        // Pinned exactly: these ship a binary built from this very commit, so a
+        // range could pair a shim with an executable it was never tested against.
+        optionalDependencies: Object.fromEntries(
+          TARGETS.map((target) => [`${SCOPE}/${NAME}-${target.key}`, version]),
+        ),
+        files: ['bin/', 'LICENSE', NOTICES, 'README.md'],
+      },
+      null,
+      2,
+    )}\n`,
+  );
+}
+mainPackage(NAME, [NAME]);
+mainPackage(LEGACY, [LEGACY, NAME]);
 
 // Platform packages first: the main package names them as dependencies, and a
 // registry that has not seen them yet resolves an install to nothing.
-const order = [...TARGETS.map((target) => `${NAME}-${target.key}`), NAME];
+const order = [...TARGETS.map((target) => `${NAME}-${target.key}`), NAME, LEGACY];
 writeFileSync(path.join(out, 'publish-order.txt'), `${order.join('\n')}\n`);
 console.log(`built ${order.length} packages for ${version} in ${out}`);
 for (const name of order) console.log(`  ${SCOPE}/${name}`);

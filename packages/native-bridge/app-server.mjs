@@ -60,7 +60,7 @@ export class AppServerClient {
   /** @param {RpcMessage} message */
   receive(message) {
     if (message?.id === undefined) { if (message?.method) this.onNotification(message); return; }
-    if (message.method) { this.write({ id: message.id, error: { code: -32601, message: 'Not supported by AgentDock' } }); return; }
+    if (message.method) { this.write({ id: message.id, error: { code: -32601, message: 'Not supported by Tendly' } }); return; }
     const pending = this.pending.get(message.id);
     if (pending) message.error ? pending.reject(new AppServerError(message.error.code)) : pending.resolve(message.result);
   }

@@ -417,7 +417,7 @@ impl Codex {
         }
         self.rpc(
             "initialize",
-            json!({"clientInfo":{"name":"agentdock","title":"AgentDock","version":"0.1.0"}}),
+            json!({"clientInfo":{"name":"agentdock","title":"Tendly","version":"0.1.0"}}),
             Then::Initialize,
             false,
         );
@@ -970,7 +970,7 @@ impl Codex {
             .emit(json!({"type":"tool","id":id,"name":name,"status":status,"text":text}));
     }
 
-    /// `reject`: a request AgentDock cannot answer, refused as unsupported.
+    /// `reject`: a request Tendly cannot answer, refused as unsupported.
     fn reject(&mut self, message: &Value, reason: &str) {
         let id = message.get("id").cloned().unwrap_or(Value::Null);
         if self
@@ -985,7 +985,7 @@ impl Codex {
     }
 
     fn request(&mut self, message: Value) {
-        const UNSUPPORTED: &str = "This native request is not supported by AgentDock.";
+        const UNSUPPORTED: &str = "This native request is not supported by Tendly.";
         let empty = Value::Object(Map::new());
         let p = message
             .get("params")
@@ -1224,8 +1224,8 @@ impl Codex {
                 }
                 self.approval(key, description, Responder::Permissions { id, permissions });
             }
-            // Codex asks before an MCP tool runs, as an MCP elicitation. AgentDock's
-            // own tools already ask the person in AgentDock for anything that
+            // Codex asks before an MCP tool runs, as an MCP elicitation. Tendly's
+            // own tools already ask the person in Tendly for anything that
             // matters, so those pass; any other server's call is the person's.
             "mcpServer/elicitation/request" => {
                 let fields = p
@@ -1243,7 +1243,7 @@ impl Codex {
                 if !matches!(mode, Some("form" | "openai/form" | "openaiForm")) || fields > 0 {
                     return self.reject(
                         &message,
-                        "This MCP server asked for a form AgentDock cannot show.",
+                        "This MCP server asked for a form Tendly cannot show.",
                     );
                 }
                 if p.get("serverName") == Some(&json!("agentdock")) {

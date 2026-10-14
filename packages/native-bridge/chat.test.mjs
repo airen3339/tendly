@@ -52,7 +52,7 @@ test('Claude launch accepts a concrete session name for the native client',()=>{
   assert.deepEqual(options.args.slice(0,2),['--name','Review billing']);
 });
 
-test('AgentDock tools reach both clients as the server injects them (agent::equip)',()=>{
+test('Tendly tools reach both clients as the server injects them (agent::equip)',()=>{
   const claude=claudeLaunch({cwd:'/fixture',args:['--resume=saved-session','--mcp-config=/state/agent-mcp/s.json','--allowedTools=mcp__agentdock']});
   const at=claude.args.indexOf('--mcp-config');
   assert.equal(claude.args[at+1],'/state/agent-mcp/s.json');
@@ -259,7 +259,7 @@ test('a request outside the workspace says so, and can be allowed for the whole 
   }
   assert.doesNotThrow(()=>validateChatInput({type:'approval',request_id:'one',decision:'accept_session'}));
 });
-test('Codex MCP tool confirmations: AgentDock\'s own pass, others ask the person, forms fail closed',()=>{
+test('Codex MCP tool confirmations: Tendly\'s own pass, others ask the person, forms fail closed',()=>{
   const events=[],sent=[],chat=new CodexChat({},event=>events.push(event));chat.active={id:'active'};chat.nativeSessionId='fixture-thread';chat.port={send:message=>sent.push(message)};
   const ask=(id,params)=>chat.request({id,method:'mcpServer/elicitation/request',params:{threadId:'fixture-thread',mode:'form',requestedSchema:{type:'object',properties:{}},message:'Allow tool?',...params}});
   ask('own',{serverName:'agentdock'});
@@ -469,7 +469,7 @@ test('a turn Claude starts by itself, after a background command finished, is sh
   const events=[];
   const chat=Object.create(ClaudeChat.prototype);
   chat.emit=event=>events.push(event);chat.tools=new Map();chat.seen=new Map();chat.active=undefined;
-  // The queued notification comes back as input AgentDock never sent.
+  // The queued notification comes back as input Tendly never sent.
   chat.notification({type:'user',isReplay:true,uuid:'note-1',message:{role:'user',content:'<task-notification>…</task-notification>'}});
   chat.notification({type:'assistant',message:{id:'a-1',content:[{type:'text',text:'Tests passed; pushing.'}]}});
   const turns=events.filter(event=>event.type==='turn');

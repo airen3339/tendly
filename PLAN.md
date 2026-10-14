@@ -1,10 +1,10 @@
-# AgentDock 产品与工程计划
+# Tendly 产品与工程计划
 
 > 这是产品路线图，不是完成清单。当前可运行范围与实测边界见 [MVP 验收记录](docs/mvp-status.md) 和 [README](README.md)。
 
 ## 1. 产品定位
 
-AgentDock 是一个浏览器优先的远程多 Agent 编排壳：用户在远程 Linux workspace 中运行 Claude Code、Codex 等官方客户端，通过统一 UI 管理会话、workspace、文件预览、编辑、Git、布局和任务状态。AgentDock 不重造 Agent 客户端本身。
+Tendly 是一个浏览器优先的远程多 Agent 编排壳：用户在远程 Linux workspace 中运行 Claude Code、Codex 等官方客户端，通过统一 UI 管理会话、workspace、文件预览、编辑、Git、布局和任务状态。Tendly 不重造 Agent 客户端本身。
 
 核心承诺：打开浏览器即可进入一个可恢复、可隔离、可视化的 Agent 开发环境。
 
@@ -15,7 +15,7 @@ AgentDock 是一个浏览器优先的远程多 Agent 编排壳：用户在远程
 - 支持 Linux 服务器上的宿主机原生 workspace
 - 支持 Claude Code、Codex 的适配器和可切换 profile
 - 支持 Endpoint Profile 与会话级配置快照，每个 session 独立端点、模型和认证引用
-- 复用 Claude Code/Codex 原生权限与确认流程，AgentDock 只做透传、展示和输入回传
+- 复用 Claude Code/Codex 原生权限与确认流程，Tendly 只做透传、展示和输入回传
 - 支持官方 CLI 的 PTY/Web 交互透传、停止/恢复任务
 - 支持文件树、代码编辑、图片/视频/Markdown/日志预览
 - 支持可拖拽 workspace canvas，提供 `1:1`、`2:2`、`1:2:1` 布局预设
@@ -50,7 +50,7 @@ AgentDock 是一个浏览器优先的远程多 Agent 编排壳：用户在远程
 ## 5. 目录设计
 
 ```text
-AgentDock/
+Tendly/
 ├── apps/
 │   ├── web/                 # Vue 3 Web UI
 │   └── desktop/             # 后续 Tauri 壳，不阻塞 Web MVP
@@ -90,7 +90,7 @@ AgentDock/
 └── README.md
 ```
 
-目录边界原则：`domain` 不依赖数据库和 Web 框架；Agent provider 只负责启动和适配官方 CLI；前后端通过 `packages/protocol` 的版本化 schema 通信；Agent 工具审批、聊天交互和推理展示交给 provider 原生客户端，AgentDock 只负责 PTY/事件透传、workspace 编排和宿主机生命周期边界。
+目录边界原则：`domain` 不依赖数据库和 Web 框架；Agent provider 只负责启动和适配官方 CLI；前后端通过 `packages/protocol` 的版本化 schema 通信；Agent 工具审批、聊天交互和推理展示交给 provider 原生客户端，Tendly 只负责 PTY/事件透传、workspace 编排和宿主机生命周期边界。
 
 ## 6. 里程碑
 
@@ -121,7 +121,7 @@ AgentDock/
 ## 7. 首要风险
 
 1. Agent CLI 的认证、参数和输出格式可能变化，必须隔离在 provider adapter 中。
-2. 远程执行 shell 是高风险面；工具审批复用 provider 原生机制，AgentDock 仍需提供 workspace 目录边界、进程回收、资源限制和审计。
+2. 远程执行 shell 是高风险面；工具审批复用 provider 原生机制，Tendly 仍需提供 workspace 目录边界、进程回收、资源限制和审计。
 3. 大文件和视频预览会消耗带宽，需流式读取、大小限制和缩略图策略。
 4. 实时连接断开后状态恢复是核心体验，事件必须持久化而不是只存在内存。
 5. “全平台”优先通过浏览器实现；原生桌面端应等 Web 工作流稳定后再做。

@@ -1,16 +1,16 @@
 /**
- * Names for keys AgentDock stores itself (server `secrets.rs`).
+ * Names for keys Tendly stores itself (server `secrets.rs`).
  *
  * A profile refers to its key as `env:AGENTDOCK_SECRET_NAME`, whether the
- * server's environment or AgentDock's own store holds it. A key pasted into
+ * server's environment or Tendly's own store holds it. A key pasted into
  * the profile form is stored under a name made from the profile's name, and
  * never under one another profile already uses: that would silently change
  * the key behind someone else's endpoint.
  */
-/** `stored`: AgentDock keeps a value under the name (absent from an older server, where `source` says it). */
+/** `stored`: Tendly keeps a value under the name (absent from an older server, where `source` says it). */
 export interface SecretName { name: string; source: "agentdock" | "environment"; stored?: boolean }
 
-/** Whether AgentDock itself keeps the key `name`, whichever source wins now. */
+/** Whether Tendly itself keeps the key `name`, whichever source wins now. */
 export function isStored(entries: readonly SecretName[], name: string): boolean {
   return entries.some(entry => entry.name === name && (entry.stored ?? entry.source === "agentdock"));
 }
@@ -33,7 +33,7 @@ export function secretNameFor(label: string, taken: Iterable<string>): string {
 
 /**
  * The stored key a profile can reuse when a new one is pasted: its own, when
- * it already points at one AgentDock holds and no other profile shares it.
+ * it already points at one Tendly holds and no other profile shares it.
  */
 export function ownStoredSecret(reference: string | null | undefined, stored: SecretName[], otherReferences: Array<string | null | undefined>): string | undefined {
   const name = referencedSecret(reference);

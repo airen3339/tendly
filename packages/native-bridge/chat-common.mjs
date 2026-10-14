@@ -220,7 +220,7 @@ export class ChatBase {
   }
   // `commands` are the slash commands the native client itself advertised on
   // startup. They are forwarded verbatim so the composer can offer exactly what
-  // that client accepts, never a list AgentDock invented.
+  // that client accepts, never a list Tendly invented.
   announce(id,commands) {
     // A client that hands back a different session has started a fresh context
     // of its own — /clear does exactly this. The transcript above it describes

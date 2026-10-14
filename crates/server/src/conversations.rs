@@ -701,7 +701,7 @@ async fn select_model(
 }
 /// How tools get approved, for a session that is already running.
 ///
-/// The names are AgentDock's and each bridge translates them, because the two
+/// The names are Tendly's and each bridge translates them, because the two
 /// clients do not model this the same way: Claude Code switches a session-wide
 /// mode, Codex decides per command. `danger` is the one that stops asking, and
 /// it is named for what it costs rather than for what it saves.

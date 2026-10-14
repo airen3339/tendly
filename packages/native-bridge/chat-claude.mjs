@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { ChatBase, NativeProcess, approvalScope, clip, nativeId, MAX_TEXT } from './chat-common.mjs';
 
 /**
- * AgentDock's names for how tools get approved, and Claude Code's.
+ * Tendly's names for how tools get approved, and Claude Code's.
  *
  * Two vocabularies because two clients: the names sent over this pipe have to
  * mean the same thing for Codex, whose approval model is not Claude's. Mapping
@@ -79,7 +79,7 @@ function commandNames(value) {
   return value.map(entry=>typeof entry==='string'?entry:entry&&typeof entry==='object'?entry.name:undefined).filter(name=>typeof name==='string');
 }
 
-/** The client echoes `uuid` back when it reads a message; AgentDock's ids are UUIDs already. */
+/** The client echoes `uuid` back when it reads a message; Tendly's ids are UUIDs already. */
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const wireId=id=>UUID.test(id)?id:randomUUID();
 /** Whether a listed selection still describes the model the client resolved it to. */
@@ -387,7 +387,7 @@ export class ClaudeChat extends ChatBase {
     const name=clip(block.name??'Native tool',256);this.tools.set(block.id,name);if(this.tools.size>512)this.tools.delete(this.tools.keys().next().value);
     this.emit({type:'tool',id:block.id,name,status,text:clip(JSON.stringify(block.input??{})),...(parent?{parent}:{})});
   }
-  reject(message,text='This Claude Code interaction is unsupported in AgentDock.') {
+  reject(message,text='This Claude Code interaction is unsupported in Tendly.') {
     this.port.send({type:'control_response',response:{subtype:'error',request_id:message.request_id,error:text}});this.error(text);
   }
   request(message) {
@@ -413,7 +413,7 @@ export class ClaudeChat extends ChatBase {
     const text=JSON.stringify({reason:request.decision_reason,input});
     if(Buffer.byteLength(text)>MAX_TEXT){this.reject(message,'Native approval is too large to display safely.');return;}
     // Claude offers its own "don't ask again" updates with the request. Kept to
-    // this session: AgentDock never writes them into the user's settings files.
+    // this session: Tendly never writes them into the user's settings files.
     const suggestions=Array.isArray(request.permission_suggestions)?request.permission_suggestions.filter(update=>update&&typeof update==='object'&&typeof update.type==='string').slice(0,8).map(update=>({...update,destination:'session'})):[];
     const tool=String(request.tool_name??'');
     const access=/^(Read|Glob|Grep|LS|NotebookRead)$/.test(tool)?'read':/^(Write|Edit|MultiEdit|NotebookEdit)$/.test(tool)?'write':tool==='Bash'?'execute':/^Web(Fetch|Search)$/.test(tool)?'network':undefined;

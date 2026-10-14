@@ -1,15 +1,15 @@
-//! Tools an agent can use to see and configure AgentDock.
+//! Tools an agent can use to see and configure Tendly.
 //!
-//! An agent reaches these through `agentdock mcp`, a stdio MCP server that
+//! An agent reaches these through `tendly mcp`, a stdio MCP server that
 //! only relays (mcp.rs). Everything that matters happens here: which tools
 //! exist, who is calling, and what each caller may do. Keeping it on the
 //! server means there is one place to check and one place to change.
 //!
-//! Callers identify themselves with a bearer token. A session AgentDock
+//! Callers identify themselves with a bearer token. A session Tendly
 //! launches gets its own token, issued at launch and good only while that
 //! session's process is running, so a call is known to come from it. Any other caller that
-//! passes the server's normal authentication -- `agentdock mcp` in a terminal
-//! outside AgentDock -- is `External`. The token says who is asking; it is not
+//! passes the server's normal authentication -- `tendly mcp` in a terminal
+//! outside Tendly -- is `External`. The token says who is asking; it is not
 //! what protects anything sensitive. That is the confirmation a person gives
 //! in the browser, which no token can skip.
 use crate::{ApiError, AppState, db};
@@ -114,13 +114,13 @@ pub fn launch_environment(state: &AppState, session: SessionId) -> [(String, Str
     ]
 }
 
-/// Give a launch AgentDock's tools, unless the person turned them off.
+/// Give a launch Tendly's tools, unless the person turned them off.
 ///
 /// Only through this launch's flags: the person's own client configuration
 /// (`~/.claude`, `~/.codex`, or a host configuration a profile points at) is
 /// never written. Claude reads a small private file named by `--mcp-config`,
 /// and the tools are allowed up front, because what needs the person's word
-/// is asked in AgentDock itself. Codex takes the same as `-c` overrides.
+/// is asked in Tendly itself. Codex takes the same as `-c` overrides.
 /// A terminal gets the environment only.
 pub fn equip(
     state: &AppState,
@@ -209,18 +209,18 @@ async fn set_session_tools(
 
 /// What the MCP server hands the model at connection time.
 pub const INSTRUCTIONS: &str = "\
-AgentDock is the workspace this agent may be running in: a local web app that runs Claude Code, Codex and terminals side by side, with workspaces, Git worktrees and endpoint profiles. These tools let you inspect it and, where the person allows, configure it.
+Tendly is the workspace this agent may be running in: a local web app that runs Claude Code, Codex and terminals side by side, with workspaces, Git worktrees and endpoint profiles. These tools let you inspect it and, where the person allows, configure it.
 
 - Start with agentdock_status to learn which session, workspace and endpoint you are.
 - agentdock_list shows workspaces, sessions (titles and status only, never conversations), endpoint profiles and installed clients.
-- agentdock_endpoint creates, changes, tests or imports endpoint profiles. To set up an API endpoint, call create with the provider, URL and model: the person confirms in the AgentDock window and types the key there. Then call test to check it works.
-- Never ask the person to paste an API key into the conversation, and never put one in a tool argument. AgentDock collects keys in its own window.
+- agentdock_endpoint creates, changes, tests or imports endpoint profiles. To set up an API endpoint, call create with the provider, URL and model: the person confirms in the Tendly window and types the key there. Then call test to check it works.
+- Never ask the person to paste an API key into the conversation, and never put one in a tool argument. Tendly collects keys in its own window.
 - agentdock_preferences sets what new sessions start with, and the light or dark theme of the interface and its terminals; agentdock_workspace adds a directory as a workspace.
 - agentdock_spawn starts another Claude Code or Codex session with a self-contained task, optionally on its own branch, for independent work worth doing in parallel. Follow it with agentdock_session (wait, result, message). You can only follow sessions you started, and a session you start cannot start more.
-- agentdock_show opens a file at a line, your Git changes, or a session in the person's AgentDock window: use it to point at what you changed instead of describing where it is.
+- agentdock_show opens a file at a line, your Git changes, or a session in the person's Tendly window: use it to point at what you changed instead of describing where it is.
 - agentdock_usage reports the quota your official account last reported.
 - agentdock_canvas lists the tabs open on the canvas and closes some or all of them. Closing a tab never ends a session, except a temporary one.
-- Changes that matter are confirmed by the person in the AgentDock window, and a call waits up to 5 minutes for that answer. If they decline, do not retry the same change unasked.";
+- Changes that matter are confirmed by the person in the Tendly window, and a call waits up to 5 minutes for that answer. If they decline, do not retry the same change unasked.";
 
 pub(crate) fn tool(name: &str, description: &str, schema: Value) -> Value {
     json!({ "name": name, "description": description, "inputSchema": schema })
@@ -230,12 +230,12 @@ pub fn tools() -> Vec<Value> {
     let mut tools = vec![
         tool(
             "agentdock_status",
-            "Who you are in AgentDock: the calling session, its workspace and directory, its endpoint profile and model, and the AgentDock version.",
+            "Who you are in Tendly: the calling session, its workspace and directory, its endpoint profile and model, and the Tendly version.",
             json!({ "type": "object", "properties": {}, "additionalProperties": false }),
         ),
         tool(
             "agentdock_list",
-            "List AgentDock workspaces, sessions (metadata only), endpoint profiles, or installed agent clients.",
+            "List Tendly workspaces, sessions (metadata only), endpoint profiles, or installed agent clients.",
             json!({
                 "type": "object",
                 "properties": {
@@ -305,7 +305,7 @@ async fn call_tool(
         "agentdock_show" => crate::agent_sessions::show(&state, caller, &arguments).await,
         "agentdock_usage" => crate::agent_sessions::usage(&state, caller).await,
         "agentdock_canvas" => crate::agent_canvas::canvas(&state, caller, &arguments).await,
-        other => Err(ApiError::bad(format!("Unknown AgentDock tool {other:?}"))),
+        other => Err(ApiError::bad(format!("Unknown Tendly tool {other:?}"))),
     })
 }
 
@@ -369,7 +369,7 @@ async fn status(state: &AppState, caller: Caller) -> Result<Value, ApiError> {
     let session = session_of(state, caller).await?;
     let you = match &session {
         None => {
-            json!({ "kind": "external", "note": "Not a session AgentDock launched; session-specific tools are unavailable." })
+            json!({ "kind": "external", "note": "Not a session Tendly launched; session-specific tools are unavailable." })
         }
         Some(session) => {
             let workspace_id = session.workspace_id;

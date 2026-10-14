@@ -96,7 +96,7 @@ impl ClientAdapter for Codex {
             args.extend(["-c".into(), format!("model_context_window={window}")]);
         }
         if profile.is_some_and(|p| p.endpoint_url.is_some() || p.secret_ref.is_some()) {
-            config.push_str("model_provider = \"agentdock\"\n\n[model_providers.agentdock]\nname = \"AgentDock\"\nwire_api = \"responses\"\nrequires_openai_auth = false\n");
+            config.push_str("model_provider = \"agentdock\"\n\n[model_providers.agentdock]\nname = \"Tendly\"\nwire_api = \"responses\"\nrequires_openai_auth = false\n");
             let base = profile
                 .and_then(|p| p.endpoint_url.as_deref())
                 .unwrap_or("https://api.openai.com/v1");

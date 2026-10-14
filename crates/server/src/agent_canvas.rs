@@ -23,7 +23,7 @@ use std::collections::HashSet;
 pub fn tools() -> Vec<Value> {
     vec![crate::agent::tool(
         "agentdock_canvas",
-        "The tabs open on the AgentDock canvas: list them, or close some or all. Closing a tab only closes the view; the session keeps running, except a temporary session, which is discarded (a working one only after the person agrees).",
+        "The tabs open on the Tendly canvas: list them, or close some or all. Closing a tab only closes the view; the session keeps running, except a temporary session, which is discarded (a working one only after the person agrees).",
         json!({
             "type": "object",
             "properties": {

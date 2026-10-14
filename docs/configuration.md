@@ -6,33 +6,33 @@ Commands, state directory, credentials, host-configuration reuse, per-session en
 
 | Command             | Description                                                    |
 | ------------------- | -------------------------------------------------------------- |
-| `agentdock`         | Start the server in the background and wait until it responds  |
-| `agentdock --lan`   | Same, but reachable from other machines on the network         |
-| `agentdock status`  | Show whether it is running, its URL and the access token       |
-| `agentdock logs`    | Print the background server's log                              |
-| `agentdock restart` | Stop, then start again                                         |
-| `agentdock stop`    | Stop the background server                                     |
-| `agentdock serve`   | Run in the foreground (for systemd or another supervisor)      |
-| `agentdock init`    | Create the state directory without starting anything           |
-| `agentdock mcp`     | AgentDock's [agent tools](agent-tools.md) as a stdio MCP server |
-| `agentdock update`  | Install the latest npm release over this install (see below)   |
-| `agentdock update --check` | Only say whether a newer release exists                 |
+| `tendly`            | Start the server in the background and wait until it responds  |
+| `tendly --lan`   | Same, but reachable from other machines on the network         |
+| `tendly status`  | Show whether it is running, its URL and the access token       |
+| `tendly logs`    | Print the background server's log                              |
+| `tendly restart` | Stop, then start again                                         |
+| `tendly stop`    | Stop the background server                                     |
+| `tendly serve`   | Run in the foreground (for systemd or another supervisor)      |
+| `tendly init`    | Create the state directory without starting anything           |
+| `tendly mcp`     | Tendly's [agent tools](agent-tools.md) as a stdio MCP server |
+| `tendly update`  | Install the latest npm release over this install (see below)   |
+| `tendly update --check` | Only say whether a newer release exists                 |
 
-If a start fails, the command prints the reason from the log and exits with a non-zero code. On Windows, `agentdock stop` ends the gateway and its agents at once, since Windows has no gentler signal to send a background console program.
+If a start fails, the command prints the reason from the log and exits with a non-zero code. On Windows, `tendly stop` ends the gateway and its agents at once, since Windows has no gentler signal to send a background console program.
 
 ### Updating
 
-`agentdock update`, or **Settings → Updates** in the page, runs `npm install -g @wnzzer/agentdock@<latest>` with `--prefix` set to wherever this copy is installed, so it replaces this install rather than adding one where npm points today. The latest version is looked up through the server's own npm, which keeps any registry mirror or proxy npm is configured with. A single-file release or a source build is not updated; the page shows the release link instead.
+`tendly update`, or **Settings → Updates** in the page, runs `npm install -g @wnzzer/tendly@<latest> (or `@wnzzer/agentdock`, for an install made under the old name)` with `--prefix` set to wherever this copy is installed, so it replaces this install rather than adding one where npm points today. The latest version is looked up through the server's own npm, which keeps any registry mirror or proxy npm is configured with. A single-file release or a source build is not updated; the page shows the release link instead.
 
-Installing does not restart anything: a restart stops every running session, so the new version waits on disk until you choose. In the page, **Restart now** says how many sessions it will stop and asks again. It restarts a background gateway (`agentdock` / `agentdock start`) through a detached `agentdock restart`; a gateway systemd runs as `agentdock serve` exits with status 75 so the unit restarts it (`Restart=always` or `Restart=on-failure`). Anything else — a `serve` in a terminal, another supervisor — is restarted by hand.
+Installing does not restart anything: a restart stops every running session, so the new version waits on disk until you choose. In the page, **Restart now** says how many sessions it will stop and asks again. It restarts a background gateway (`tendly` / `tendly start`) through a detached `tendly restart`; a gateway systemd runs as `tendly serve` exits with status 75 so the unit restarts it (`Restart=always` or `Restart=on-failure`). Anything else — a `serve` in a terminal, another supervisor — is restarted by hand.
 
 A global install made with `sudo` is not writable by the server's user, so the page shows the `sudo npm install -g …` command to run instead. Reinstalling without `sudo` under your own npm prefix (`npm config get prefix`) lets the button update it next time.
 
-Tarballs with `SHA256SUMS` are also attached to every [release](https://github.com/wnzzer/agentdock/releases).
+Tarballs with `SHA256SUMS` are also attached to every [release](https://github.com/wnzzer/tendly/releases).
 
 ## State and credentials
 
-New installations initialize state at **`~/.agentdock/`**, independently of project directories. Run **`pnpm run init`** (not `pnpm init`, which is pnpm's package-initialization command), or `agentdock-server init` for a built binary; first server startup can also initialize it. This creates state only, not a system service or a downloaded installation.
+New installations initialize state at **`~/.tendly/`** (an existing `~/.agentdock/`, from before the rename, stays in use), independently of project directories. Run **`pnpm run init`** (not `pnpm init`, which is pnpm's package-initialization command), or `tendly-server init` for a built binary; first server startup can also initialize it. This creates state only, not a system service or a downloaded installation.
 
 Path priority: `AGENTDOCK_STATE_DIR` → `AGENTDOCK_HOME` → an existing `./.agentdock/agentdock.db` for legacy compatibility → `~/.agentdock`. Existing local data is never silently moved. Set `AGENTDOCK_HOME` explicitly to use the home directory while running from an older checkout. Keep the selected state directory between restarts:
 
@@ -48,12 +48,12 @@ Configuration directories are 0700, generated Codex config files are 0600. The n
 
 API-key profiles hold a **reference**, e.g. `env:AGENTDOCK_SECRET_WORK`, never the key itself. The key behind it lives in one of two places:
 
-- **Saved in AgentDock** (the default in the profile form): paste the key and it is written to `<state>/secrets.toml` (0600, owner only) under a name made from the profile's name. It is usable at once, with no restart, and the API only ever lists names, never values. Deleting a profile removes a saved key no other profile uses.
+- **Saved in Tendly** (the default in the profile form): paste the key and it is written to `<state>/secrets.toml` (0600, owner only) under a name made from the profile's name. It is usable at once, with no restart, and the API only ever lists names, never values. Deleting a profile removes a saved key no other profile uses.
 - **A server environment variable**: set `AGENTDOCK_SECRET_WORK` for the server (or as `secret-work` in `config.toml`) and restart. When both exist, the environment wins.
 
-AgentDock resolves the selected reference on the backend and injects its value into the selected child-process destination variable.
+Tendly resolves the selected reference on the backend and injects its value into the selected child-process destination variable.
 
-New sessions without a host-reference profile use separate generated native configuration directories. **Loaded native histories are different:** resuming uses the original client configuration/login/history directory, after explicit confirmation. These loaded sessions share their source account/configuration, do not copy credentials into AgentDock, and do not add endpoint/model/permission-policy overrides. Structured mode supplies the required stdio transport flags separately. Explicit advanced environment overrides are optional. Metadata listing uses official SDK/app-server APIs, makes no model request, returns at most 500 workspace-scoped items, and reports truncation. Missing/incompatible native clients produce an actionable error rather than scraping terminal output.
+New sessions without a host-reference profile use separate generated native configuration directories. **Loaded native histories are different:** resuming uses the original client configuration/login/history directory, after explicit confirmation. These loaded sessions share their source account/configuration, do not copy credentials into Tendly, and do not add endpoint/model/permission-policy overrides. Structured mode supplies the required stdio transport flags separately. Explicit advanced environment overrides are optional. Metadata listing uses official SDK/app-server APIs, makes no model request, returns at most 500 workspace-scoped items, and reports truncation. Missing/incompatible native clients produce an actionable error rather than scraping terminal output.
 
 ### Reuse the host's existing configuration
 
@@ -67,9 +67,9 @@ Importing **does not rebind existing sessions**. If a session still asks for log
 - Source resolution follows the same deployment settings as native history: `AGENTDOCK_CODEX_HISTORY_DIR` → `CODEX_HOME` → `~/.codex`, and `AGENTDOCK_CLAUDE_HISTORY_DIR` → `CLAUDE_CONFIG_DIR` → `~/.claude`. These are the **server user's** directories, not the browser machine's.
 - A reference pins the provider, source ID, canonical directory and original directory-environment context. A changed/deleted source is rejected at create/start. The **directory's contents remain live**, not an immutable copy; native configuration changes can affect subsequent starts.
 - The original unset-versus-explicit `CODEX_HOME`/`CLAUDE_CONFIG_DIR` state is preserved. On macOS, explicitly setting even the default Claude directory can select a different Keychain login context. Explicit absolute paths keep their original spelling; relative directory variables are rejected because the workspace changes the child's working directory.
-- AgentDock neither creates a new config home nor rewrites the source settings. The native client still manages its own credential refresh and conversation history. Existing login is reused when valid; reauthorization can still be required by the provider.
+- Tendly neither creates a new config home nor rewrites the source settings. The native client still manages its own credential refresh and conversation history. Existing login is reused when valid; reauthorization can still be required by the provider.
 - Host-reference profiles support rename, advanced environment defaults and removal of the reference. Direct endpoint/model/proxy/permission fields and the native source identity remain read-only. Removing one never deletes the native home, logs out the account, or removes snapshots from existing sessions.
-- Native clients inherit the backend process's environment, excluding AgentDock's private secret namespace/access token and required native-context removals. AgentDock does not source shell startup files or import aliases, shell functions, temporary exports or flags from another terminal. There is no generic import/conversion of CLIProxyAPI token JSON.
+- Native clients inherit the backend process's environment, excluding Tendly's private secret namespace/access token and required native-context removals. Tendly does not source shell startup files or import aliases, shell functions, temporary exports or flags from another terminal. There is no generic import/conversion of CLIProxyAPI token JSON.
 
 This is an explicit **shared native configuration reference**, not a copied account or a claim of process-level credential isolation. The separate official-account manager creates its own private account directories; imported host references retain their existing source directory. Each new session gets its own process/conversation; loading a specific old conversation remains **Load existing session**. Managed account/profile ownership must not be broken by deleting its profile independently.
 
@@ -85,7 +85,7 @@ instance_label = "novel box"
 allowed-origins = ["http://box.local:28789"]
 ```
 
-Any other key names the `AGENTDOCK_` variable it spells (`shell`, `claude-bin`, `browse-roots`, …); dashes and underscores are the same, a full `AGENTDOCK_*` name is accepted as written, and a list becomes the comma-separated form those variables already take. Keys always land under that prefix, so this file cannot set a variable outside AgentDock's namespace.
+Any other key names the `AGENTDOCK_` variable it spells (`shell`, `claude-bin`, `browse-roots`, …); dashes and underscores are the same, a full `AGENTDOCK_*` name is accepted as written, and a list becomes the comma-separated form those variables already take. Keys always land under that prefix, so this file cannot set a variable outside Tendly's namespace.
 
 ### Running agent clients in the server itself
 

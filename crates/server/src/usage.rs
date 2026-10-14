@@ -3,7 +3,7 @@
 //! Claude Code and Codex each write every model call, with its token counts,
 //! into JSONL transcripts under their config directory. Reading those -- the
 //! user's own, every isolated session home, every account -- counts everything
-//! the host spent, including sessions started outside AgentDock, and needs no
+//! the host spent, including sessions started outside Tendly, and needs no
 //! cooperation from the clients.
 //!
 //! Files are parsed once and then only from where they were last read, since a
@@ -36,7 +36,7 @@ pub(crate) struct Call {
     /// The client's own conversation id.
     pub(crate) conversation: Arc<str>,
     pub(crate) cwd: Arc<str>,
-    /// Set when the file sits in an AgentDock session's own client home.
+    /// Set when the file sits in a Tendly session's own client home.
     pub(crate) home_session: Option<Arc<str>>,
     /// Claude logs a reply more than once; one key per real call.
     pub(crate) dedupe: Option<Arc<str>>,
@@ -375,7 +375,7 @@ pub struct ModelRow {
 pub struct ConversationRow {
     pub conversation: String,
     pub provider: ProviderKind,
-    /// The AgentDock session this conversation belongs to, when known.
+    /// The Tendly session this conversation belongs to, when known.
     pub session_id: Option<String>,
     pub title: Option<String>,
     pub cwd: String,
@@ -451,7 +451,7 @@ pub struct UsageQuery {
     project: Option<String>,
 }
 
-/// A client home, and the AgentDock session it belongs to when it is one's own.
+/// A client home, and the Tendly session it belongs to when it is one's own.
 type Home = (PathBuf, Option<Arc<str>>);
 
 /// Conversations met while reading, with the models each used.

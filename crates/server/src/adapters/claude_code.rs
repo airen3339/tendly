@@ -127,7 +127,7 @@ impl ClientAdapter for ClaudeCode {
     }
 
     // A small private file named by `--mcp-config`, and the tools allowed up
-    // front: what needs the person's word is asked in AgentDock itself.
+    // front: what needs the person's word is asked in Tendly itself.
     fn equip_tools(
         &self,
         state: &AppState,

@@ -16,7 +16,7 @@ pub struct Launch<'a> {
 }
 
 /// Secret references resolve from the server's environment, then from the
-/// secrets AgentDock stores (see secrets.rs); a main-model value becomes the
+/// secrets Tendly stores (see secrets.rs); a main-model value becomes the
 /// session's model at this launch, and a main-model-context value its window.
 pub fn apply(
     spec: &mut SpawnSpec,

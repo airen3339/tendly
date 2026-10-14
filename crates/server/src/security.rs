@@ -202,7 +202,7 @@ impl Security {
             // all would leave a shell on this machine open to the network.
             if token.is_none() {
                 return Err(format!(
-                    "Listening on {address} reaches other machines, so it needs an access token. Set AGENTDOCK_TOKEN, or let AgentDock generate one by not setting it."
+                    "Listening on {address} reaches other machines, so it needs an access token. Set AGENTDOCK_TOKEN, or let Tendly generate one by not setting it."
                 )
                 .into());
             }
@@ -330,7 +330,7 @@ fn error(status: StatusCode, message: &str) -> Response {
     (status, Json(serde_json::json!({"error":message}))).into_response()
 }
 
-/// The one mutation `agentdock resume` makes, which a command line names as
+/// The one mutation `tendly resume` makes, which a command line names as
 /// `X-AgentDock-Client: cli`; it is still authenticated like any other.
 fn cli_path(path: &str) -> bool {
     path.strip_prefix("/api/sessions/")
@@ -352,7 +352,7 @@ pub async fn guard(State(state): State<AppState>, request: Request, next: Next) 
     {
         return error(
             StatusCode::FORBIDDEN,
-            "This address is not one AgentDock was told to answer for. Add it to AGENTDOCK_ALLOWED_ORIGINS.",
+            "This address is not one Tendly was told to answer for. Add it to AGENTDOCK_ALLOWED_ORIGINS.",
         );
     }
     if let Some(origin) = headers.get(header::ORIGIN)

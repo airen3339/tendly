@@ -114,7 +114,7 @@ onUnmounted(() => { alive = false; browseController?.abort(); });
 <template>
   <ModalDialog :title="t('Add workspace')" wide :closable="!busy" @close="emit('close')">
     <form class="form-stack workspace-form" @submit.prevent="create">
-      <p class="form-description">{{ t('Choose an existing folder on the host running AgentDock. Your files stay where they are.') }}</p>
+      <p class="form-description">{{ t('Choose an existing folder on the host running Tendly. Your files stay where they are.') }}</p>
 
       <section v-if="recent.length" class="recent-workspaces" :aria-label="t('Recent workspaces')">
         <h3>{{ t('Recent workspaces') }}</h3>

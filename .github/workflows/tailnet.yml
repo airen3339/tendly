@@ -2,10 +2,10 @@ name: Tailnet
 
 # Remote access through Tailscale, end to end, on a real machine of each kind.
 #
-# Each runner joins the tailnet as an ephemeral node, starts AgentDock the way
-# a person does (`agentdock --tailscale`), and checks what a phone would see:
+# Each runner joins the tailnet as an ephemeral node, starts Tendly the way
+# a person does (`tendly --tailscale`), and checks what a phone would see:
 # the HTTPS address answers with a real certificate, the tailnet needs the
-# token while this machine does not, and `agentdock stop` takes the address
+# token while this machine does not, and `tendly stop` takes the address
 # down again (on Windows that last part is done by the CLI, not the gateway).
 #
 # Run by hand from the Actions tab. It needs, once, in the Tailscale admin
@@ -35,7 +35,7 @@ jobs:
         shell: bash
     env:
       AGENTDOCK_HOME: ${{ github.workspace }}/.agentdock-ci
-      BIN: target/debug/agentdock-server
+      BIN: target/debug/tendly-server
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -109,7 +109,7 @@ jobs:
           "$BIN" stop
           tailscale serve status --json | tee serve.json
           if grep -q "$TARGET" serve.json; then
-            echo "::error::$TARGET is still published after agentdock stop"
+            echo "::error::$TARGET is still published after tendly stop"
             exit 1
           fi
 

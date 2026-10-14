@@ -63,10 +63,10 @@ export function filterSessionList(sessions: readonly Session[], workspaces: read
 
 /**
  * The command that continues a session in a terminal of one's own, on the
- * machine AgentDock runs on (`agentdock resume`, server resume.rs): by the
- * AgentDock session ID, which carries its client, endpoint and checkout. A
+ * machine Tendly runs on (`tendly resume`, server resume.rs): by the
+ * Tendly session ID, which carries its client, endpoint and checkout. A
  * client session needs a conversation to continue; a shell always has one.
  */
 export function resumeCommand(session: Pick<Session, "id" | "provider" | "provider_session_id">): string | undefined {
-  return session.provider === "terminal" || session.provider_session_id ? `agentdock resume ${session.id}` : undefined;
+  return session.provider === "terminal" || session.provider_session_id ? `tendly resume ${session.id}` : undefined;
 }

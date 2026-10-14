@@ -39,11 +39,11 @@ const PROBLEMS: Record<string, { title: string; body: string }> = {
   daemon_down: { title: 'Tailscale is installed but not running', body: 'Open the Tailscale app; it lives in the menu bar.' },
   not_running: { title: 'Tailscale is signed out or disconnected', body: isMac ? 'Open the Tailscale app from the menu bar, sign in and connect. Or run:' : 'Sign in and connect:' },
   no_magic_dns: { title: 'MagicDNS is off for your tailnet', body: 'Turn on MagicDNS on the DNS page of the Tailscale admin console. It gives this machine the name the address is built on.' },
-  serve_consent: { title: 'Allow Serve and HTTPS for your tailnet', body: 'Tailscale asks once per tailnet. Open the link, approve it, and come back. AgentDock notices by itself within a minute.' },
+  serve_consent: { title: 'Allow Serve and HTTPS for your tailnet', body: 'Tailscale asks once per tailnet. Open the link, approve it, and come back. Tendly notices by itself within a minute.' },
   no_https: { title: 'HTTPS certificates are off for your tailnet', body: 'Enable HTTPS Certificates on the DNS page of the Tailscale admin console, then check again.' },
-  port_taken: { title: 'Another service already uses this HTTPS address', body: 'AgentDock will not replace it. If it is no longer needed, remove it and check again:' },
+  port_taken: { title: 'Another service already uses this HTTPS address', body: 'Tendly will not replace it. If it is no longer needed, remove it and check again:' },
   access_denied: { title: 'This user may not change Tailscale settings', body: 'Allow it once by making yourself the Tailscale operator:' },
-  unreachable: { title: 'Published, but this machine could not open it', body: 'The first certificate can take a minute, and some machines do not resolve their own tailnet name. Try it on your phone; AgentDock checks again every minute.' },
+  unreachable: { title: 'Published, but this machine could not open it', body: 'The first certificate can take a minute, and some machines do not resolve their own tailnet name. Try it on your phone; Tendly checks again every minute.' },
   failed: { title: 'Tailscale could not publish the address', body: 'What Tailscale said:' },
 };
 const explained = computed(() => {
@@ -126,10 +126,10 @@ const checkedAt = computed(() => status.value?.checked_at ? new Date(status.valu
         <ul>
           <li><Icon name="shield" :size="15"/><span>{{ t('Only devices on your tailnet can connect, and each one signs in with this workspace\'s access token once.') }}</span></li>
           <li><Icon name="globe" :size="15"/><span>{{ t('A stable HTTPS address such as https://your-mac.tailnet.ts.net, with a real certificate.') }}</span></li>
-          <li><Icon name="check" :size="15"/><span>{{ t('Nothing changes for this machine: it keeps using AgentDock without a token.') }}</span></li>
+          <li><Icon name="check" :size="15"/><span>{{ t('Nothing changes for this machine: it keeps using Tendly without a token.') }}</span></li>
         </ul>
         <button type="button" class="primary-button" :disabled="busy" @click="turnOn"><Icon name="globe" :size="14"/>{{ t('Turn on remote access') }}</button>
-        <p class="remote-hint">{{ t('AgentDock walks you through anything missing. You need a free Tailscale account.') }} <a href="https://tailscale.com/download" target="_blank" rel="noopener">{{ t('Get Tailscale') }}</a></p>
+        <p class="remote-hint">{{ t('Tendly walks you through anything missing. You need a free Tailscale account.') }} <a href="https://tailscale.com/download" target="_blank" rel="noopener">{{ t('Get Tailscale') }}</a></p>
       </div>
 
       <!-- On: the steps, where it stopped, and what to do there. -->
@@ -169,7 +169,7 @@ const checkedAt = computed(() => status.value?.checked_at ? new Date(status.valu
               <strong>{{ t('On your phone') }}</strong>
               <ol>
                 <li>{{ t('Install Tailscale and sign in with the same account.') }} <a href="https://tailscale.com/download" target="_blank" rel="noopener">{{ t('Get Tailscale') }}</a></li>
-                <li>{{ t('Scan the sign-in code with the camera. It opens AgentDock already signed in.') }}</li>
+                <li>{{ t('Scan the sign-in code with the camera. It opens Tendly already signed in.') }}</li>
                 <li>{{ t('Optional: add it to the home screen to open it like an app.') }}</li>
               </ol>
               <p class="remote-hint">{{ t('Signed-in devices stay signed in for 30 days.') }}</p>
@@ -208,7 +208,7 @@ const checkedAt = computed(() => status.value?.checked_at ? new Date(status.valu
       </template>
       <p v-else class="remote-hint">{{ t('Loading…') }}</p>
     </article>
-    <p class="update-hint">{{ t('From a terminal: agentdock --tailscale starts with it on, and agentdock status prints the address and token.') }}</p>
+    <p class="update-hint">{{ t('From a terminal: tendly --tailscale starts with it on, and tendly status prints the address and token.') }}</p>
   </section>
 </template>
 

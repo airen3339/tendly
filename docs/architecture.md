@@ -1,4 +1,4 @@
-# AgentDock 架构草案
+# Tendly 架构草案
 
 ```text
 Browser (React)
@@ -31,7 +31,7 @@ pub trait AgentProvider: Send + Sync {
 }
 ```
 
-第一版不追求微服务化。保持单个 Rust server + 宿主机 workspace，等出现多节点调度需求后再拆 control plane 和 worker。AgentDock 是编排壳，不复制官方 CLI 的 Agent loop、权限系统或工具实现。
+第一版不追求微服务化。保持单个 Rust server + 宿主机 workspace，等出现多节点调度需求后再拆 control plane 和 worker。Tendly 是编排壳，不复制官方 CLI 的 Agent loop、权限系统或工具实现。
 
 ## SQLite storage policy
 
@@ -69,7 +69,7 @@ HostRuntime (default)
 
 ## Workspace layout model
 
-Workspace Layout Engine 是 AgentDock 的核心产品层。Agent provider、Terminal、Git 和 Preview 都只是被布局引擎承载的 pane，不应反过来决定工作区结构。
+Workspace Layout Engine 是 Tendly 的核心产品层。Agent provider、Terminal、Git 和 Preview 都只是被布局引擎承载的 pane，不应反过来决定工作区结构。
 
 可编排工作区使用持久化布局树：
 

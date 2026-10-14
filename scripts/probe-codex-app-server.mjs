@@ -24,7 +24,7 @@ function rpc(method,params) {return new Promise((resolve,reject)=>{const id=next
 try {
   const result=await Promise.race([
     (async()=>{
-      const init=await rpc("initialize",{clientInfo:{name:"agentdock_probe",title:"AgentDock protocol probe",version:"0.1.0"}});
+      const init=await rpc("initialize",{clientInfo:{name:"agentdock_probe",title:"Tendly protocol probe",version:"0.1.0"}});
       child.stdin.write(JSON.stringify({method:"initialized",params:{}})+"\n");
       const models=await rpc("model/list",{limit:20,includeHidden:false});
       return { initialized:!!init, model_count:Array.isArray(models?.data)?models.data.length:0, transport:"native app-server JSONL", inference_requested:false };

@@ -52,7 +52,7 @@ function pathsIn(value,found=[],depth=0) {
 const itemStatus=item=>['failed','declined','cancelled'].includes(item.status)||item.success===false?'failed':item.status==='inProgress'?'running':'completed';
 
 /**
- * How AgentDock's modes reach Codex. It approves per command rather than by
+ * How Tendly's modes reach Codex. It approves per command rather than by
  * switching review modes, so only the two ends of the range translate: ask, and
  * the policy that stops asking. `danger` also drops the sandbox, because an
  * unattended run blocked by the sandbox instead of by a prompt is the same
@@ -67,11 +67,11 @@ export class CodexChat extends ChatBase {
   async initialize() {
     this.launch=codexLaunch(this.job);this.tools=new Map();
     this.port=new NativeProcess(this.job.program,this.launch.args,this.job.cwd,message=>this.notification(message),message=>this.fatal(message),()=>this.fatal('Codex app-server exited.'),{...this.options,clientName:'Codex'});
-    await this.port.rpc('initialize',{clientInfo:{name:'agentdock',title:'AgentDock',version:'0.1.0'}});
+    await this.port.rpc('initialize',{clientInfo:{name:'agentdock',title:'Tendly',version:'0.1.0'}});
     this.port.send({method:'initialized',params:{}});this.announce();
     this.settings(undefined,this.launch.thread.model);
     // Asking for models must not hold up the session. A Codex build without
-    // model/list simply offers no picker rather than a list AgentDock guessed.
+    // model/list simply offers no picker rather than a list Tendly guessed.
     void this.port.rpc('model/list',{limit:100,includeHidden:false},true)
       .then(result=>{
         this.models=codexModels(result);
@@ -102,7 +102,7 @@ export class CodexChat extends ChatBase {
     this.settings(this.models,this.launch.thread.model??this.defaultModel,this.effort);
   }
   /**
-   * The sandbox this thread had before AgentDock overrode it: what Codex
+   * The sandbox this thread had before Tendly overrode it: what Codex
    * reported when the thread opened. Full access reported for a thread whose
    * launch never asked for it is an earlier override carried over by resume,
    * not the thread's own setting, so that falls back to workspace-write.
@@ -223,7 +223,7 @@ export class CodexChat extends ChatBase {
     if(this.tools.size>512)this.tools.delete(this.tools.keys().next().value);
     this.emit({type:'tool',id:item.id,name:clip(name,256),status:method==='item/started'?'running':itemStatus(item),text});
   }
-  reject(message,reason='This native request is not supported by AgentDock.') {
+  reject(message,reason='This native request is not supported by Tendly.') {
     this.port.send({id:message.id,error:{code:-32601,message:reason}});this.error(reason);
   }
   request(message) {
@@ -261,13 +261,13 @@ export class CodexChat extends ChatBase {
       });return;
     }
     // Codex asks before an MCP tool runs, as an MCP elicitation: a form with no
-    // fields is a plain yes or no. AgentDock's own tools already ask the person
-    // in AgentDock for anything that matters (server activity.rs), so asking
+    // fields is a plain yes or no. Tendly's own tools already ask the person
+    // in Tendly for anything that matters (server activity.rs), so asking
     // here too would ask twice; Claude sessions allow them up front the same
     // way. Any other server's call is the person's to approve.
     if(method==='mcpServer/elicitation/request'){
       const schema=p.requestedSchema,fields=schema&&typeof schema==='object'&&schema.properties&&typeof schema.properties==='object'?Object.keys(schema.properties):[];
-      if(!['form','openai/form','openaiForm'].includes(p.mode)||fields.length){this.reject(message,'This MCP server asked for a form AgentDock cannot show.');return;}
+      if(!['form','openai/form','openaiForm'].includes(p.mode)||fields.length){this.reject(message,'This MCP server asked for a form Tendly cannot show.');return;}
       if(p.serverName==='agentdock'){this.port.send({id:message.id,result:{action:'accept',content:{}}});return;}
       const text=JSON.stringify({server:p.serverName,message:p.message});
       if(Buffer.byteLength(text)>MAX_TEXT){this.reject(message,'Native approval is too large to display safely.');return;}

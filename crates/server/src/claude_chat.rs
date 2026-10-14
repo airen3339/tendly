@@ -18,7 +18,7 @@ use indexmap::{IndexMap, IndexSet};
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, HashMap};
 
-/// AgentDock's names for how tools get approved, and Claude Code's.
+/// Tendly's names for how tools get approved, and Claude Code's.
 const PERMISSIONS: [(&str, &str); 4] = [
     ("ask", "default"),
     ("plan", "plan"),
@@ -281,7 +281,7 @@ fn is_uuid(id: &str) -> bool {
         })
 }
 
-/// The client echoes `uuid` back when it reads a message; AgentDock's ids are
+/// The client echoes `uuid` back when it reads a message; Tendly's ids are
 /// UUIDs already, and any other id goes out as a fresh one.
 fn wire_id(id: &str) -> String {
     if is_uuid(id) {
@@ -1309,7 +1309,7 @@ impl Claude {
             self.fatal("Invalid native request identifier.");
             return;
         };
-        const UNSUPPORTED: &str = "This Claude Code interaction is unsupported in AgentDock.";
+        const UNSUPPORTED: &str = "This Claude Code interaction is unsupported in Tendly.";
         let subtype = request.get("subtype").and_then(Value::as_str).unwrap_or("");
         if subtype == "request_user_dialog" {
             // Undeclared dialog kinds must not be answered, even with an error.
@@ -1353,7 +1353,7 @@ impl Claude {
             return;
         }
         // Claude's own "don't ask again" updates, kept to this session:
-        // AgentDock never writes them into the user's settings files.
+        // Tendly never writes them into the user's settings files.
         let suggestions: Vec<Value> = request
             .get("permission_suggestions")
             .and_then(Value::as_array)
@@ -1426,7 +1426,7 @@ impl Claude {
 
     /// `AskUserQuestion`: the client's questions, answered in the interface.
     fn ask(&mut self, message: &Value, key: &str, input: Value) {
-        const UNSUPPORTED: &str = "This Claude Code interaction is unsupported in AgentDock.";
+        const UNSUPPORTED: &str = "This Claude Code interaction is unsupported in Tendly.";
         let questions: Vec<Value> = input
             .get("questions")
             .and_then(Value::as_array)

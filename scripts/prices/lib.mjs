@@ -25,10 +25,10 @@ const tokens = value => (Number.isInteger(value) && value > 0 ? value : undefine
 const MOST_TOKENS = 100_000_000;
 
 /**
- * The prices AgentDock uses from one LiteLLM entry. Only the base tier: the
+ * The prices Tendly uses from one LiteLLM entry. Only the base tier: the
  * long-context, batch, flex and priority tiers are not told apart in the
  * clients' logs. A cache write is priced only where the provider charges for
- * one; absent, AgentDock bills it at the input price.
+ * one; absent, Tendly bills it at the input price.
  */
 export function convert(entry) {
   const price = {

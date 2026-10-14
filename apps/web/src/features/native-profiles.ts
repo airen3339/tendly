@@ -23,7 +23,7 @@ export function nativeProfileUpdatePayload(name: string, rows: EnvironmentRow[],
 }
 
 /**
- * Whether a native configuration directory is one AgentDock created and owns.
+ * Whether a native configuration directory is one Tendly created and owns.
  *
  * A profile having a `native_config` only says it runs against a client's own
  * configuration directory — not whose directory that is. An account created

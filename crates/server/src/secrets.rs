@@ -1,4 +1,4 @@
-//! Endpoint secrets AgentDock keeps itself.
+//! Endpoint secrets Tendly keeps itself.
 //!
 //! A profile names its key as `env:AGENTDOCK_SECRET_NAME`. That used to mean
 //! only the server's environment, so adding a key meant setting a variable and
@@ -7,7 +7,7 @@
 //! written through the API, so a key typed into the browser is usable at once.
 //!
 //! The environment still wins, because whoever set it did so on purpose and
-//! outside AgentDock. Values are never read back out through the API: it lists
+//! outside Tendly. Values are never read back out through the API: it lists
 //! names and where each is set, nothing more.
 use crate::ApiError;
 use std::{
@@ -113,7 +113,7 @@ pub fn resolve_reference(state_dir: &Path, reference: &str) -> Result<String, Ap
         .ok_or_else(|| ApiError::bad("Invalid secret reference"))?;
     resolve(state_dir, name).ok_or_else(|| {
         ApiError::bad(format!(
-            "Secret {name} is not set: save the key in AgentDock or set it on the server"
+            "Secret {name} is not set: save the key in Tendly or set it on the server"
         ))
     })
 }
@@ -136,7 +136,7 @@ pub fn store(state_dir: &Path, name: &str, value: &str) -> Result<(), ApiError> 
 }
 
 /// Whether anything was removed from the file. A name set only in the
-/// environment is not AgentDock's to remove.
+/// environment is not Tendly's to remove.
 pub fn remove(state_dir: &Path, name: &str) -> Result<bool, ApiError> {
     let _guard = WRITE.lock().expect("secrets lock");
     let mut secrets = load_for_write(state_dir)?;
@@ -153,7 +153,7 @@ pub struct SecretName {
     /// `environment` when the server's environment sets it (and so wins),
     /// otherwise `agentdock`.
     pub source: &'static str,
-    /// Whether AgentDock keeps a value of its own under this name: the one
+    /// Whether Tendly keeps a value of its own under this name: the one
     /// used once the server's environment no longer sets it.
     pub stored: bool,
 }
@@ -180,7 +180,7 @@ pub fn list(state_dir: &Path) -> Vec<SecretName> {
         .collect()
 }
 
-/// Keep in AgentDock the value the server's environment gives `name`, so a
+/// Keep in Tendly the value the server's environment gives `name`, so a
 /// profile that read the key from there goes on working once it is gone.
 /// The value is read and written here; it never travels to the browser.
 pub fn adopt(state_dir: &Path, name: &str, value: Option<String>) -> Result<SecretName, ApiError> {

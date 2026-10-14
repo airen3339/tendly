@@ -43,7 +43,7 @@ const pendingNavigation = ref<(() => void)>();
 const form = reactive({ name: "", provider: DEFAULT_CLIENT as AgentProviderKind, endpoint_url: "", api: "", model: "", effort: "", permission_mode: "native" as EndpointProfile["permission_mode"], secret_ref: "", proxy_url: "" });
 const secretValid = computed(() => secretMode.value === "stored" || !form.secret_ref || /^env:AGENTDOCK_SECRET_[A-Z0-9_]+$/.test(form.secret_ref));
 /**
- * Where the endpoint's key lives. "stored": pasted here and kept by AgentDock
+ * Where the endpoint's key lives. "stored": pasted here and kept by Tendly
  * in the state directory (secrets.rs), usable at once. "env": a variable set
  * on the server by hand, as before. Either way the profile only ever holds
  * the reference, and the key itself never comes back to the browser.
@@ -53,12 +53,12 @@ const storedSecrets = ref<SecretName[]>([]);
 const otherReferences = computed(() => props.profiles.filter(profile => profile.id !== editing.value).map(profile => profile.secret_ref));
 /** The stored key this profile uses now, shown as "saved". */
 const storedKey = computed(() => { const name = referencedSecret(form.secret_ref); return name && isStored(storedSecrets.value, name) ? name : undefined; });
-/** The variable the server sets that this profile reads, while AgentDock has no copy of it. */
+/** The variable the server sets that this profile reads, while Tendly has no copy of it. */
 const adoptable = computed(() => { const name = referencedSecret(form.secret_ref); return name && !isStored(storedSecrets.value, name) && storedSecrets.value.some(entry => entry.name === name && entry.source === "environment") ? name : undefined; });
 /** The server also sets the stored key's name, and wins while it does. */
 const shadowed = computed(() => !!storedKey.value && storedSecrets.value.some(entry => entry.name === storedKey.value && entry.source === "environment"));
 const adopting = ref(false);
-/** Keep the server's value in AgentDock: read and written on the server, never sent here. */
+/** Keep the server's value in Tendly: read and written on the server, never sent here. */
 async function adoptKey() {
   const name = adoptable.value;
   if (!name || adopting.value) return;
@@ -345,7 +345,7 @@ onBeforeUnmount(()=>{discoveryRevision++;});
             <label>{{ t('Provider') }}<select v-model="form.provider" :disabled="!!editing||busy"><option v-for="id in AGENT_CLIENTS" :key="id" :value="id">{{ clientLabel(id) }}</option></select></label>
           </div>
           <template v-if="editingNative">
-            <div class="shared-config-panel"><strong><ProviderIcon :provider="editingProfile!.provider" :size="17" />{{ sharesHostConfig(editingNative) ? t('Host configuration · shared sign-in') : t('Isolated configuration · this account only') }}</strong><code>{{ editingNative.config_dir }}</code><p v-if="sharesHostConfig(editingNative)">{{ t('Shared with the host: sign-in, model and permissions come from this directory, and anything else that edits it changes this profile too. AgentDock never copies or rewrites it.') }}</p><p v-else>{{ t('AgentDock created this directory for this account, and nothing else signs in through it.') }}</p></div>
+            <div class="shared-config-panel"><strong><ProviderIcon :provider="editingProfile!.provider" :size="17" />{{ sharesHostConfig(editingNative) ? t('Host configuration · shared sign-in') : t('Isolated configuration · this account only') }}</strong><code>{{ editingNative.config_dir }}</code><p v-if="sharesHostConfig(editingNative)">{{ t('Shared with the host: sign-in, model and permissions come from this directory, and anything else that edits it changes this profile too. Tendly never copies or rewrites it.') }}</p><p v-else>{{ t('Tendly created this directory for this account, and nothing else signs in through it.') }}</p></div>
           </template>
           <template v-else>
           <label>{{ t('Endpoint URL') }}<input v-model="form.endpoint_url" type="url" :placeholder="t('Official endpoint when empty')" autocomplete="off" /></label>
@@ -359,10 +359,10 @@ onBeforeUnmount(()=>{discoveryRevision++;});
             <button v-if="backendCapabilities.storedSecrets" type="button" class="text-button secret-switch" @click="secretMode='env'">{{ t('Use a server environment variable instead') }}</button>
           </template>
           <template v-else>
-            <div v-if="adoptable && backendCapabilities.storedSecrets" class="inline-notice secret-adopt"><span>{{ t("This profile reads its key from {name} in the server's environment.", { name: adoptable }) }}</span><button type="button" class="small-button" :disabled="adopting" @click="adoptKey">{{ t('Keep it in AgentDock') }}</button></div>
+            <div v-if="adoptable && backendCapabilities.storedSecrets" class="inline-notice secret-adopt"><span>{{ t("This profile reads its key from {name} in the server's environment.", { name: adoptable }) }}</span><button type="button" class="small-button" :disabled="adopting" @click="adoptKey">{{ t('Keep it in Tendly') }}</button></div>
             <label>{{ t('Secret reference') }} <small>{{ t('never an API key') }}</small><input v-model="form.secret_ref" placeholder="env:AGENTDOCK_SECRET_PROVIDER_KEY" autocomplete="off" spellcheck="false" /></label>
             <p :class="secretValid?'form-help':'inline-error'">{{ secretValid?t('Name a server environment variable such as env:AGENTDOCK_SECRET_WORK. Its value never reaches the browser.'):t('Enter an environment reference, not the secret itself.') }}</p>
-            <button v-if="backendCapabilities.storedSecrets" type="button" class="text-button secret-switch" @click="secretMode='stored'">{{ t('Save the key in AgentDock instead') }}</button>
+            <button v-if="backendCapabilities.storedSecrets" type="button" class="text-button secret-switch" @click="secretMode='stored'">{{ t('Save the key in Tendly instead') }}</button>
           </template>
           <div class="model-fetch"><strong>{{ t('Model selection') }}</strong><button type="button" class="small-button" :disabled="discovering||!backendCapabilities.models||!secretValid||!!aliases.error" :title="!backendCapabilities.models?t('Backend upgrade required'):t('Reads the endpoint\'s model list. No model is run.')" @click="discover"><Icon name="refresh" :size="14" />{{ discovering?t('Loading models…'):t('Load models from endpoint') }}</button></div>
           <div v-if="modelError" class="inline-error" role="alert">{{ modelError }}<p>{{ t('You can still enter a model ID or alias manually.') }}</p></div>

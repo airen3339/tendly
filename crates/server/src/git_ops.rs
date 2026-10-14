@@ -69,7 +69,7 @@ async fn git(root: &std::path::Path, list: Vec<String>, wait: Duration) -> Resul
 }
 
 /// A workspace-relative path a request names, refused if it leaves the
-/// workspace or touches what AgentDock never edits.
+/// workspace or touches what Tendly never edits.
 fn checked_path(path: &str) -> Result<String> {
     let relative = safe_relative(path)?;
     if path.is_empty() || path == "." || is_protected_path(&relative) {

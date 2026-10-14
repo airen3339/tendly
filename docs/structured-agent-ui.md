@@ -28,7 +28,7 @@ Claude 使用原 CLI 程序、工作目录和已构建的进程环境，默认�
 - 已运行的 PTY 不接管、不注入控制协议、不无损迁移。用户明确结束旧进程后，才可选择结构化入口。旧后端缺少 capability 时继续兼容原界面，不靠反复调用缺失接口探测。
 - 消息、工具、审批、问题、轮次、用量和错误是统一显示事件，不等同于两个客户端拥有相同能力。assistant delta 按 ID 追加，final 替换全文；工具文字和用量是快照，不能重复相加。
 - 审批仅提供当前请求支持的 accept/decline/cancel。问题答案按原生 question ID/文本转换；单选显示为下拉选项，多选显示为勾选项，`isOther` 保留自由输入。这样 Claude 的 AskUserQuestion、Codex 的 requestUserInput 以及 plan 类交互可以在 Web 中选择后原样回传；不静默批准，不写入“永久允许”规则。未知 MCP/dialog 等交互明确拒绝或提示使用原生客户端。
-- Claude Code 启动时公布的 slash commands 会进入会话 `ready` 事件，输入 `/` 时只展示客户端实际公布的命令并支持键盘补全。Codex app-server 没有 slash-command 协议，因此 AgentDock 不把 Codex 的 `/...` 静默发送给模型，而是提示用户切换原生终端。
+- Claude Code 启动时公布的 slash commands 会进入会话 `ready` 事件，输入 `/` 时只展示客户端实际公布的命令并支持键盘补全。Codex app-server 没有 slash-command 协议，因此 Tendly 不把 Codex 的 `/...` 静默发送给模型，而是提示用户切换原生终端。
 - **Interrupt** 转发当前轮次打断，不是结束会话或暂停/恢复整个进程。真正 **End session** 是单独的二级确认操作；关闭 pane 和断开 WebSocket 不结束会话。
 - 进程运行与浏览器输出连接是两个状态；会话运行中不意味着输出流已连接。连接失败不自动重试模型请求或重放输入。
 

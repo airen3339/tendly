@@ -1,4 +1,4 @@
-// The agent clients AgentDock drives, by the provider id the server sends.
+// The agent clients Tendly drives, by the provider id the server sends.
 // Each entry names that client's own adapter per concern, so the bridges look
 // a client up here instead of branching on its id; adding a client is its
 // modules plus one entry.

@@ -1,4 +1,4 @@
-//! Updating an npm install in place: `agentdock update`, and the same from the
+//! Updating an npm install in place: `tendly update`, and the same from the
 //! settings page.
 //!
 //! Only an install npm made can be updated here, because only there is
@@ -30,7 +30,10 @@ use std::{
 };
 use tokio::process::Command;
 
-pub const PACKAGE: &str = "@wnzzer/agentdock";
+pub const PACKAGE: &str = "@wnzzer/tendly";
+/// The name Tendly was published under before. Installs made with it are still
+/// updated through it: the package is still published, on the same binaries.
+const LEGACY_PACKAGE: &str = "@wnzzer/agentdock";
 /// How long a registry answer stands. Opening settings repeatedly should not
 /// cost a registry round trip each time; a deliberate check skips this.
 const CHECK_TTL: Duration = Duration::from_secs(10 * 60);
@@ -77,12 +80,15 @@ pub struct NpmInstall {
     pub node_modules: PathBuf,
     /// What `npm --prefix` must be for an install to land in `node_modules`.
     pub prefix: PathBuf,
+    /// The package this install was made with, and so the one to reinstall.
+    pub package: &'static str,
 }
 
 /// Recognise an npm global install from the binary's own path.
 ///
 /// The platform binary lives at
-/// `…/node_modules/@wnzzer/agentdock[/node_modules]/@wnzzer/agentdock-<platform>/bin/`,
+/// `…/node_modules/@wnzzer/tendly[/node_modules]/@wnzzer/tendly-<platform>/bin/`
+/// (or under `@wnzzer/agentdock`, Tendly's former name),
 /// so the outermost `node_modules` is the global one. Its prefix is two levels
 /// up on Unix (`<prefix>/lib/node_modules`) and one on Windows
 /// (`<prefix>\node_modules`). Passing that prefix explicitly is what makes the
@@ -90,15 +96,36 @@ pub struct NpmInstall {
 /// happens to point now.
 pub fn npm_install(executable: &Path) -> Option<NpmInstall> {
     let mut node_modules = PathBuf::new();
+    let mut components = executable.components();
     let mut found = false;
-    for component in executable.components() {
+    for component in components.by_ref() {
         node_modules.push(component);
         if component.as_os_str() == "node_modules" {
             found = true;
             break;
         }
     }
-    if !found || !node_modules.join("@wnzzer").join("agentdock").is_dir() {
+    if !found {
+        return None;
+    }
+    // The package directory the binary sits under says which name made this
+    // install; a flattened layout leaves only what exists beside it.
+    let under: Vec<_> = components.take(2).collect();
+    let named = |package: &str| {
+        under
+            .iter()
+            .map(|part| part.as_os_str())
+            .eq(package.split('/').map(std::ffi::OsStr::new))
+    };
+    let package = [PACKAGE, LEGACY_PACKAGE]
+        .into_iter()
+        .find(|package| named(package))
+        .or_else(|| {
+            [PACKAGE, LEGACY_PACKAGE]
+                .into_iter()
+                .find(|package| node_modules.join(package).is_dir())
+        })?;
+    if !node_modules.join(package).is_dir() {
         return None;
     }
     let parent = node_modules.parent()?;
@@ -110,6 +137,7 @@ pub fn npm_install(executable: &Path) -> Option<NpmInstall> {
     Some(NpmInstall {
         prefix: prefix.to_path_buf(),
         node_modules,
+        package,
     })
 }
 
@@ -144,9 +172,11 @@ fn writable(install: &NpmInstall) -> bool {
 /// cannot do it for them.
 fn manual_command(install: Option<&NpmInstall>, writable: bool) -> String {
     match install {
-        Some(_) if !writable && cfg!(unix) => format!("sudo npm install -g {PACKAGE}@latest"),
-        Some(_) => format!("npm install -g {PACKAGE}@latest"),
-        None => "https://github.com/wnzzer/agentdock/releases/latest".into(),
+        Some(install) if !writable && cfg!(unix) => {
+            format!("sudo npm install -g {}@latest", install.package)
+        }
+        Some(install) => format!("npm install -g {}@latest", install.package),
+        None => "https://github.com/wnzzer/tendly/releases/latest".into(),
     }
 }
 
@@ -169,7 +199,7 @@ pub fn newer(candidate: &str, than: &str) -> bool {
     matches!((version_key(candidate), version_key(than)), (Some(a), Some(b)) if a > b)
 }
 
-/// The package holding this machine's binary, `@wnzzer/agentdock-<platform>`,
+/// The package holding this machine's binary, `@wnzzer/tendly-<platform>`,
 /// read from where this executable sits.
 fn platform_package(executable: &Path) -> Option<String> {
     let mut parts = executable
@@ -178,7 +208,7 @@ fn platform_package(executable: &Path) -> Option<String> {
     while let Some(part) = parts.next() {
         if part == "@wnzzer"
             && let Some(name) = parts.clone().next()
-            && name.starts_with("agentdock-")
+            && (name.starts_with("tendly-") || name.starts_with("agentdock-"))
         {
             return Some(format!("@wnzzer/{name}"));
         }
@@ -265,7 +295,7 @@ pub async fn install(install: &NpmInstall, version: &str) -> std::result::Result
     let _only = INSTALLING
         .try_lock()
         .map_err(|_| "An update is already being installed".to_owned())?;
-    let program = executable().ok_or("Cannot locate the AgentDock executable")?;
+    let program = executable().ok_or("Cannot locate the Tendly executable")?;
     if let Some(package) = platform_package(program)
         && !published(&package, version).await
     {
@@ -287,10 +317,11 @@ pub async fn install(install: &NpmInstall, version: &str) -> std::result::Result
     let reason = installed.unwrap_err();
     match npm_install_version(install, program, running).await {
         Ok(_) => Err(format!(
-            "{reason}. {running} was put back, so AgentDock still starts."
+            "{reason}. {running} was put back, so Tendly still starts."
         )),
         Err(again) => Err(format!(
-            "{reason}. Putting {running} back failed too ({again}); run `npm install -g {PACKAGE}@{running}` before restarting."
+            "{reason}. Putting {running} back failed too ({again}); run `npm install -g {}@{running}` before restarting.",
+            install.package
         )),
     }
 }
@@ -309,7 +340,7 @@ async fn npm_install_version(
             .arg("--prefix")
             .arg(&install.prefix)
             .args(["--no-fund", "--no-audit"])
-            .arg(format!("{PACKAGE}@{version}"))
+            .arg(format!("{}@{version}", install.package))
             .output(),
     )
     .await
@@ -343,8 +374,8 @@ async fn npm_install_version(
 #[derive(Debug, Clone, Copy, Serialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum RestartMode {
-    /// Started by `agentdock` / `agentdock start`: a detached helper runs
-    /// `agentdock restart` with the new binary.
+    /// Started by `agentdock` / `tendly start`: a detached helper runs
+    /// `tendly restart` with the new binary.
     Daemon,
     /// A service manager runs `serve` and restarts it when it exits.
     Supervisor,
@@ -490,7 +521,7 @@ async fn apply(State(state): State<AppState>) -> Result<Json<UpdateStatus>> {
         .is_some_and(|installed| !newer(&version, installed))
     {
         return Err(ApiError::conflict(format!(
-            "{version} is already installed; restart AgentDock to use it"
+            "{version} is already installed; restart Tendly to use it"
         )));
     }
     tracing::info!(%version, prefix = %install.prefix.display(), "installing update");
@@ -519,11 +550,11 @@ async fn restart(State(state): State<AppState>) -> Result<Json<Restarting>> {
     let mode = restart_mode(&state.state_dir);
     if mode == RestartMode::Manual {
         return Err(ApiError::conflict(
-            "Nothing would start AgentDock again after it stops here; restart it where it was started",
+            "Nothing would start Tendly again after it stops here; restart it where it was started",
         ));
     }
     let program = executable()
-        .ok_or_else(|| ApiError::internal("cannot locate the AgentDock executable"))?
+        .ok_or_else(|| ApiError::internal("cannot locate the Tendly executable"))?
         .to_path_buf();
     let address: SocketAddr = env::var("AGENTDOCK_ADDR")
         .ok()
@@ -560,16 +591,16 @@ pub fn routes() -> Router<AppState> {
         .route("/api/update/restart", post(restart))
 }
 
-/// `agentdock update [--check]`.
+/// `tendly update [--check]`.
 ///
 /// Installs but does not restart, like the page: a running gateway keeps its
 /// sessions until someone restarts it, and this says how.
 pub async fn command(check_only: bool) -> std::result::Result<(), Box<dyn std::error::Error>> {
     let current = env!("CARGO_PKG_VERSION");
-    let program = executable().ok_or("Cannot locate the AgentDock executable")?;
+    let program = executable().ok_or("Cannot locate the Tendly executable")?;
     let Some(found) = npm_install(program) else {
         println!(
-            "AgentDock {current} at {}\nThis install was not made by npm, so it cannot update itself.\nDownload the latest release from {}",
+            "Tendly {current} at {}\nThis install was not made by npm, so it cannot update itself.\nDownload the latest release from {}",
             program.display(),
             manual_command(None, false)
         );
@@ -577,12 +608,12 @@ pub async fn command(check_only: bool) -> std::result::Result<(), Box<dyn std::e
     };
     let version = latest(true).await?;
     if !newer(&version, current) {
-        println!("AgentDock {current} is up to date");
+        println!("Tendly {current} is up to date");
         return Ok(());
     }
     if check_only {
         println!(
-            "AgentDock {version} is available (this is {current}). Run `agentdock update` to install it."
+            "Tendly {version} is available (this is {current}). Run `tendly update` to install it."
         );
         return Ok(());
     }
@@ -594,10 +625,10 @@ pub async fn command(check_only: bool) -> std::result::Result<(), Box<dyn std::e
         )
         .into());
     }
-    println!("Installing AgentDock {version} (this is {current})…");
+    println!("Installing Tendly {version} (this is {current})…");
     let installed = install(&found, &version).await?;
     println!(
-        "Installed AgentDock {installed}.\n\nA running gateway keeps the old version until it restarts, which stops its\nrunning sessions. When ready: agentdock restart (or restart the service that\nruns it, or use Settings → Updates in the page)."
+        "Installed Tendly {installed}.\n\nA running gateway keeps the old version until it restarts, which stops its\nrunning sessions. When ready: tendly restart (or restart the service that\nruns it, or use Settings → Updates in the page)."
     );
     Ok(())
 }
@@ -619,13 +650,14 @@ mod tests {
 
     #[test]
     fn an_npm_global_install_is_recognised_with_the_prefix_npm_needs() {
-        let root = env::temp_dir().join(format!("agentdock-update-{}", std::process::id()));
+        let root = env::temp_dir().join(format!("tendly-update-{}", std::process::id()));
         let node_modules = root.join("lib").join("node_modules");
         let binary_dir =
-            node_modules.join("@wnzzer/agentdock/node_modules/@wnzzer/agentdock-linux-x64/bin");
+            node_modules.join("@wnzzer/tendly/node_modules/@wnzzer/tendly-linux-x64/bin");
         std::fs::create_dir_all(&binary_dir).unwrap();
-        let found = npm_install(&binary_dir.join("agentdock-server")).unwrap();
+        let found = npm_install(&binary_dir.join("tendly-server")).unwrap();
         assert_eq!(found.node_modules, node_modules);
+        assert_eq!(found.package, "@wnzzer/tendly");
         if cfg!(windows) {
             assert_eq!(found.prefix, root.join("lib"));
         } else {
@@ -635,38 +667,57 @@ mod tests {
     }
 
     #[test]
+    fn an_install_made_under_the_old_name_is_updated_under_it() {
+        let root = env::temp_dir().join(format!("tendly-update-legacy-{}", std::process::id()));
+        let node_modules = root.join("node_modules");
+        let binary_dir =
+            node_modules.join("@wnzzer/agentdock/node_modules/@wnzzer/tendly-linux-x64/bin");
+        std::fs::create_dir_all(&binary_dir).unwrap();
+        let found = npm_install(&binary_dir.join("tendly-server")).unwrap();
+        assert_eq!(found.package, "@wnzzer/agentdock");
+        assert_eq!(
+            manual_command(Some(&found), true),
+            "npm install -g @wnzzer/agentdock@latest"
+        );
+        // Flattened: the platform package beside the main one says nothing.
+        let flat = root.join("flat/node_modules");
+        std::fs::create_dir_all(flat.join("@wnzzer/agentdock")).unwrap();
+        std::fs::create_dir_all(flat.join("@wnzzer/tendly-linux-x64/bin")).unwrap();
+        let found = npm_install(&flat.join("@wnzzer/tendly-linux-x64/bin/tendly-server")).unwrap();
+        assert_eq!(found.package, "@wnzzer/agentdock");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn the_platform_package_is_read_from_where_the_binary_sits() {
         assert_eq!(
             platform_package(Path::new(
-                "/home/u/.local/lib/node_modules/@wnzzer/agentdock/node_modules/@wnzzer/agentdock-linux-x64/bin/agentdock-server"
+                "/home/u/.local/lib/node_modules/@wnzzer/tendly/node_modules/@wnzzer/tendly-linux-x64/bin/tendly-server"
             ))
             .as_deref(),
-            Some("@wnzzer/agentdock-linux-x64")
+            Some("@wnzzer/tendly-linux-x64")
         );
         assert_eq!(
             platform_package(Path::new(
-                "/usr/lib/node_modules/@wnzzer/agentdock-darwin-arm64/bin/agentdock-server"
+                "/usr/lib/node_modules/@wnzzer/agentdock-darwin-arm64/bin/tendly-server"
             ))
             .as_deref(),
             Some("@wnzzer/agentdock-darwin-arm64")
         );
         assert_eq!(
-            platform_package(Path::new("/usr/local/bin/agentdock-server")),
+            platform_package(Path::new("/usr/local/bin/tendly-server")),
             None
         );
     }
 
     #[test]
     fn a_binary_outside_node_modules_is_not_an_npm_install() {
-        assert_eq!(
-            npm_install(Path::new("/usr/local/bin/agentdock-server")),
-            None
-        );
+        assert_eq!(npm_install(Path::new("/usr/local/bin/tendly-server")), None);
         // A node_modules that does not hold this package is someone else's.
-        let root = env::temp_dir().join(format!("agentdock-update-other-{}", std::process::id()));
+        let root = env::temp_dir().join(format!("tendly-update-other-{}", std::process::id()));
         let elsewhere = root.join("node_modules/other/bin");
         std::fs::create_dir_all(&elsewhere).unwrap();
-        assert_eq!(npm_install(&elsewhere.join("agentdock-server")), None);
+        assert_eq!(npm_install(&elsewhere.join("tendly-server")), None);
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -675,10 +726,11 @@ mod tests {
         let install = NpmInstall {
             node_modules: PathBuf::from("/usr/lib/node_modules"),
             prefix: PathBuf::from("/usr"),
+            package: PACKAGE,
         };
         assert_eq!(
             manual_command(Some(&install), true),
-            "npm install -g @wnzzer/agentdock@latest"
+            "npm install -g @wnzzer/tendly@latest"
         );
         if cfg!(unix) {
             assert!(manual_command(Some(&install), false).starts_with("sudo "));

@@ -236,7 +236,7 @@ const insights = computed(() => {
   <PageShell named-above :title="t('Usage')" :subtitle="t('Tokens and cost for Claude Code and Codex, read from this host\'s own client logs.')" @back="emit('back')">
     <template #actions><button class="secondary-button" :disabled="loading" @click="load"><Icon name="refresh" :size="14" />{{ t('Refresh') }}</button></template>
     <div class="usage">
-      <p v-if="unsupported" class="inline-notice">{{ t('This backend does not report usage. Update AgentDock on the host to see it.') }}</p>
+      <p v-if="unsupported" class="inline-notice">{{ t('This backend does not report usage. Update Tendly on the host to see it.') }}</p>
       <p v-else-if="error" class="inline-error" role="alert">{{ error }}</p>
 
       <section v-if="accounts.length" class="quota-row" :aria-label="t('Subscription allowance')">

@@ -71,7 +71,7 @@ onMounted(loadTags);
         <input v-model="adding.url" placeholder="git@github.com:owner/repo.git" :aria-label="t('Remote URL')" spellcheck="false" autocomplete="off" />
         <button type="submit" class="small-button primary" :disabled="busy || !adding.name.trim() || !adding.url.trim()"><Icon name="plus" :size="13" />{{ t('Add remote') }}</button>
       </form>
-      <p class="form-help">{{ t('Sign-in for a remote comes from Git on the host: an SSH key or a credential helper. AgentDock never asks for a password.') }}</p>
+      <p class="form-help">{{ t('Sign-in for a remote comes from Git on the host: an SSH key or a credential helper. Tendly never asks for a password.') }}</p>
     </section>
     <section v-else class="git-repo-list">
       <div v-for="tag in tags" :key="tag.name" class="git-repo-row">

@@ -145,7 +145,7 @@ const percent = (value: number) => value < 0.5 ? '<1%' : `${Math.round(value)}%`
       <RouterLink :to="{ name: 'settings', params: { section: 'preferences' } }">{{ t('Settings') }}</RouterLink>
     </p>
     <p v-else-if="history?.monitoring === false && empty" class="host-history-empty">{{ t('Nothing was kept before monitoring was turned off.') }}</p>
-    <p v-else-if="empty" class="host-history-empty">{{ t('History builds up while AgentDock runs; the first points arrive within a minute.') }}</p>
+    <p v-else-if="empty" class="host-history-empty">{{ t('History builds up while Tendly runs; the first points arrive within a minute.') }}</p>
     <template v-if="history && !empty">
       <div class="host-trends">
         <div v-for="chart in charts" :key="chart.key" class="host-trend">

@@ -1,14 +1,14 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/banner-dark.png">
-    <img src="docs/assets/banner-light.png" alt="AgentDock: one canvas for the official Claude Code and Codex CLIs, on your own machine." width="100%">
+    <img src="docs/assets/banner-light.png" alt="Tendly: one canvas for the official Claude Code and Codex CLIs, on your own machine." width="100%">
   </picture>
 </p>
 
 <p align="center">
-  <a href="https://github.com/wnzzer/agentdock/actions/workflows/check.yml"><img src="https://img.shields.io/github/actions/workflow/status/wnzzer/agentdock/check.yml?branch=main&style=flat-square&label=CI&color=0f7f70" alt="CI status"></a>
-  <a href="https://github.com/wnzzer/agentdock/releases"><img src="https://img.shields.io/github/v/release/wnzzer/agentdock?style=flat-square&label=release&color=0f7f70" alt="Latest release"></a>
-  <a href="https://www.npmjs.com/package/@wnzzer/agentdock"><img src="https://img.shields.io/npm/v/%40wnzzer%2Fagentdock?style=flat-square&label=npm&color=0f7f70" alt="npm version"></a>
+  <a href="https://github.com/wnzzer/tendly/actions/workflows/check.yml"><img src="https://img.shields.io/github/actions/workflow/status/wnzzer/tendly/check.yml?branch=main&style=flat-square&label=CI&color=0f7f70" alt="CI status"></a>
+  <a href="https://github.com/wnzzer/tendly/releases"><img src="https://img.shields.io/github/v/release/wnzzer/tendly?style=flat-square&label=release&color=0f7f70" alt="Latest release"></a>
+  <a href="https://www.npmjs.com/package/@wnzzer/tendly"><img src="https://img.shields.io/npm/v/%40wnzzer%2Ftendly?style=flat-square&label=npm&color=0f7f70" alt="npm version"></a>
   <img src="https://img.shields.io/badge/node-%E2%89%A5%2024-0f7f70?style=flat-square" alt="Node.js 24 or newer">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-7760b5?style=flat-square" alt="Platforms: macOS, Linux and Windows">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-7760b5?style=flat-square" alt="License: MIT"></a>
@@ -24,12 +24,12 @@
 
 <br>
 
-AgentDock is a browser workspace for the official **Claude Code** and **Codex** CLIs. It runs where your code lives and puts agent sessions, files, Git diffs and terminals on one canvas you can split and dock, from any browser, phone included.
+Tendly is a browser workspace for the official **Claude Code** and **Codex** CLIs. It runs where your code lives and puts agent sessions, files, Git diffs and terminals on one canvas you can split and dock, from any browser, phone included.
 
 It has no agent of its own: Codex runs through its official `app-server` and Claude Code through `stream-json`, so logins, models, hooks, `CLAUDE.md` and permission prompts stay native.
 
 <p align="center">
-  <img src="docs/assets/screenshot-canvas.png" alt="The AgentDock canvas: two agent sessions side by side, and Git changes with a diff bottom right." width="100%">
+  <img src="docs/assets/screenshot-canvas.png" alt="The Tendly canvas: two agent sessions side by side, and Git changes with a diff bottom right." width="100%">
 </p>
 
 ## Highlights
@@ -70,7 +70,7 @@ It has no agent of its own: Codex runs through its official `app-server` and Cla
 <p align="center">
   <img src="docs/assets/screenshot-steer.png" alt="A steered message in the middle of a running turn, with the send menu open." width="70%">
   &nbsp;
-  <img src="docs/assets/screenshot-mobile.png" alt="AgentDock on a phone: the split folded into tabs and the composer." width="26%">
+  <img src="docs/assets/screenshot-mobile.png" alt="Tendly on a phone: the split folded into tabs and the composer." width="26%">
 </p>
 <p align="center">
   <sub>Left: a steered message joins the running turn, with the send menu open. Right: the same canvas on a phone.</sub>
@@ -110,8 +110,8 @@ It has no agent of its own: Codex runs through its official `app-server` and Cla
 Requires Node.js 24+ and [Claude Code](https://www.npmjs.com/package/@anthropic-ai/claude-code) and/or [Codex](https://www.npmjs.com/package/@openai/codex) on the same machine.
 
 ```bash
-npm install -g @wnzzer/agentdock
-agentdock          # starts in the background → http://127.0.0.1:28789/
+npm install -g @wnzzer/tendly
+tendly             # starts in the background → http://127.0.0.1:28789/
 ```
 
 Then **pick a workspace** (any directory on the host), reuse your sign-in from *Settings → Official accounts → Import existing configuration*, and **create a session** or **load an existing one**.
@@ -120,15 +120,25 @@ Prebuilt for macOS (arm64, x64), Linux (x64, arm64, static musl) and Windows (x6
 
 | Command | Description |
 | --- | --- |
-| `agentdock` / `agentdock --lan` | Start in the background, on loopback or on every interface |
-| `agentdock status` · `logs` | URL, access token and server log |
-| `agentdock restart` · `stop` | Restart or stop the background server |
-| `agentdock update` · `--check` | Install the latest npm release (or only check); Settings → Updates does the same |
-| `agentdock serve` | Run in the foreground, for systemd or another supervisor |
+| `tendly` / `tendly --lan` | Start in the background, on loopback or on every interface |
+| `tendly status` · `logs` | URL, access token and server log |
+| `tendly restart` · `stop` | Restart or stop the background server |
+| `tendly update` · `--check` | Install the latest npm release (or only check); Settings → Updates does the same |
+| `tendly serve` | Run in the foreground, for systemd or another supervisor |
+
+### Coming from AgentDock
+
+Tendly was called AgentDock until 0.1.75. Nothing about your data changes: sessions, settings, the access token and stored secrets stay in `~/.agentdock`, which Tendly keeps using, and the `AGENTDOCK_*` variables still apply. To move to the new package:
+
+```bash
+npm uninstall -g @wnzzer/agentdock && npm install -g @wnzzer/tendly
+```
+
+An install under the old name keeps updating until then, and already answers to `tendly` as well as `agentdock`.
 
 ## Configuration and remote access
 
-State lives in `~/.agentdock/` (SQLite, settings, logs), with no telemetry. Settings are read from `~/.agentdock/config.toml`, and matching `AGENTDOCK_*` environment variables win:
+State lives in `~/.tendly/` (or `~/.agentdock/`, kept from before the rename; SQLite, settings, logs), with no telemetry. Settings are read from `config.toml` there, and matching `AGENTDOCK_*` environment variables win:
 
 ```toml
 lan = true                  # same as --lan
@@ -140,15 +150,15 @@ allowed-origins = ["https://dock.example.com"]
 To reach it from another device, prefer **SSH forwarding** (`ssh -L 28789:127.0.0.1:28789 user@server`). `--lan` is plain HTTP for trusted networks only, and an **HTTPS reverse proxy** must keep `Host` and WebSocket upgrades. See [Configuration](docs/configuration.md) and [remote access](docs/security.md#private-remote-access).
 
 > [!WARNING]
-> AgentDock is for **a single trusted user**. Anyone who can reach it has your user's permissions, and `claude` / `codex` run **unsandboxed**. Read [Security and boundaries](docs/security.md) before exposing it beyond localhost.
+> Tendly is for **a single trusted user**. Anyone who can reach it has your user's permissions, and `claude` / `codex` run **unsandboxed**. Read [Security and boundaries](docs/security.md) before exposing it beyond localhost.
 
 ## How it works
 
 ```mermaid
 flowchart LR
   browser["<b>Browser</b><br/>Vue 3 canvas<br/>sessions · files · Git · terminals"]
-  server["<b>agentdock-server</b> · Rust<br/>workspaces · files · Git<br/>auth · PTY supervisor"]
-  db[("SQLite<br/>~/.agentdock")]
+  server["<b>tendly-server</b> · Rust<br/>workspaces · files · Git<br/>auth · PTY supervisor"]
+  db[("SQLite<br/>~/.tendly")]
   bridge["<b>Native bridge</b> · Node<br/>JSONL"]
   claude["claude<br/>stream-json"]
   codex["codex<br/>app-server"]
@@ -182,4 +192,4 @@ See [Development](docs/development.md) for the full check list and repository la
 
 ## License
 
-[MIT](LICENSE). Third-party material is listed in [third-party notices](docs/third-party-notices.md). Claude Code and Codex are products of Anthropic and OpenAI respectively. AgentDock is an independent project and is not affiliated with or endorsed by either company.
+[MIT](LICENSE). Third-party material is listed in [third-party notices](docs/third-party-notices.md). Claude Code and Codex are products of Anthropic and OpenAI respectively. Tendly is an independent project and is not affiliated with or endorsed by either company.

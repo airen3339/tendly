@@ -12,7 +12,7 @@ import { PassThrough } from 'node:stream';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { delimiter, dirname, extname, join, resolve } from 'node:path';
 
-// AgentDock's own credentials never reach a native client. The same rule as
+// Tendly's own credentials never reach a native client. The same rule as
 // `bridge::is_agentdock_secret` on the server, which already strips them from
 // every bridge; repeated here so a bridge run by hand is held to it too.
 export const isAgentDockSecret = key => key.startsWith('AGENTDOCK_SECRET_') || key === 'AGENTDOCK_TOKEN';

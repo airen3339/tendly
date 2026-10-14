@@ -1,13 +1,13 @@
-//! `agentdock mcp`: the AgentDock tools as a stdio MCP server.
+//! `tendly mcp`: the Tendly tools as a stdio MCP server.
 //!
 //! This process only relays. It speaks MCP (JSON-RPC 2.0, one message per
 //! line) to whichever client launched it and forwards the tool list and each
-//! tool call to the running AgentDock server, which decides everything
+//! tool call to the running Tendly server, which decides everything
 //! (agent.rs). It never opens the database or binds a port.
 //!
-//! Inside a session AgentDock launched, `AGENTDOCK_URL` and
+//! Inside a session Tendly launched, `AGENTDOCK_URL` and
 //! `AGENTDOCK_AGENT_TOKEN` say where the server is and which session is
-//! calling. Anywhere else it finds the local server the way `agentdock status`
+//! calling. Anywhere else it finds the local server the way `tendly status`
 //! does, with the deployment's own token when there is one.
 use serde_json::{Value, json};
 use std::{env, sync::Arc, time::Duration};
@@ -40,7 +40,7 @@ impl Upstream {
     async fn json(&self, request: reqwest::RequestBuilder) -> Result<Value, String> {
         let response = request.send().await.map_err(|_| {
             format!(
-                "AgentDock is not answering at {}. Start it with `agentdock`.",
+                "Tendly is not answering at {}. Start it with `agentdock`.",
                 self.url
             )
         })?;
@@ -51,7 +51,7 @@ impl Upstream {
         } else {
             Err(body["error"]
                 .as_str()
-                .map_or_else(|| format!("AgentDock answered {status}"), str::to_owned))
+                .map_or_else(|| format!("Tendly answered {status}"), str::to_owned))
         }
     }
     async fn tools(&self) -> Result<Value, String> {
@@ -80,8 +80,8 @@ impl Upstream {
     }
 }
 
-/// Where the local server answers: the address a session AgentDock launched is
-/// given, or else this machine's port, as `agentdock status` finds it.
+/// Where the local server answers: the address a session Tendly launched is
+/// given, or else this machine's port, as `tendly status` finds it.
 pub(crate) fn local_url() -> String {
     let url = env::var("AGENTDOCK_URL")
         .ok()

@@ -550,7 +550,7 @@ impl Store {
         Ok(ids.into_iter().filter_map(|id| id.parse().ok()).collect())
     }
 
-    /// A session's own choice about AgentDock's agent tools; `None` follows
+    /// A session's own choice about Tendly's agent tools; `None` follows
     /// the preference.
     pub fn session_agent_tools(&self, id: SessionId) -> Result<Option<bool>> {
         self.connection
@@ -931,7 +931,7 @@ fn validate_native_profile(profile: &EndpointProfile) -> Result<()> {
         || profile.endpoint_url.is_some()
         || profile.model.is_some()
         || profile.secret_ref.is_some()
-        // A proxy is allowed: it is the route AgentDock uses when it launches
+        // A proxy is allowed: it is the route Tendly uses when it launches
         // the client, applied as launch environment. It never rewrites the
         // native configuration, unlike the settings rejected above.
         || !profile.model_aliases.is_empty()
@@ -1773,7 +1773,7 @@ mod tests {
                 "Native {field} must not change through update"
             );
         }
-        // A proxy is now allowed: it is the route AgentDock uses when launching
+        // A proxy is now allowed: it is the route Tendly uses when launching
         // the client, not a native setting it rewrites.
         let mut proxied = original.clone();
         proxied.proxy_url = Some("http://127.0.0.1:7890".into());

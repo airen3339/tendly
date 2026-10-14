@@ -341,7 +341,7 @@ async fn gateway_start(
     address: SocketAddr,
 ) -> std::result::Result<(), Box<dyn std::error::Error>> {
     if daemon::healthy(address).await {
-        println!("AgentDock is already running at http://{address}/");
+        println!("Tendly is already running at http://{address}/");
         return Ok(());
     }
     let pid = daemon::start(state_dir, address)?;
@@ -349,15 +349,15 @@ async fn gateway_start(
         let log = daemon::tail(state_dir, 20);
         let _ = daemon::stop(state_dir, Duration::from_secs(5));
         return Err(format!(
-            "AgentDock did not become ready on {address}.\n\n{log}\n\nFull log: {}",
+            "Tendly did not become ready on {address}.\n\n{log}\n\nFull log: {}",
             daemon::log_file(state_dir).display()
         )
         .into());
     }
-    println!("AgentDock {} (pid {pid})\n", env!("CARGO_PKG_VERSION"));
+    println!("Tendly {} (pid {pid})\n", env!("CARGO_PKG_VERSION"));
     print_access(state_dir, address, true).await;
     println!(
-        "\n  logs    agentdock logs\n  stop    agentdock stop\n\nState: {}",
+        "\n  logs    tendly logs\n  stop    tendly stop\n\nState: {}",
         state_dir.display()
     );
     Ok(())
@@ -435,8 +435,8 @@ async fn gateway_stop(
     state_dir: &std::path::Path,
 ) -> std::result::Result<(), Box<dyn std::error::Error>> {
     match daemon::stop(state_dir, Duration::from_secs(20))? {
-        Some(pid) => println!("Stopped AgentDock (pid {pid})"),
-        None => println!("AgentDock is not running"),
+        Some(pid) => println!("Stopped Tendly (pid {pid})"),
+        None => println!("Tendly is not running"),
     }
     tailscale::withdraw_left_behind(state_dir).await;
     Ok(())
@@ -487,26 +487,26 @@ fn banner_urls(address: SocketAddr) -> Vec<(&'static str, String)> {
 /// to bind is worse than one on a number nobody else claims.
 const DEFAULT_ADDRESS: &str = "127.0.0.1:28789";
 
-const HELP: &str = r#"AgentDock — a host workspace for Claude Code and Codex
+const HELP: &str = r#"Tendly — a host workspace for Claude Code and Codex
 
-  agentdock                 Start the gateway in the background
-  agentdock --lan           Same, reachable from other machines on the network
-  agentdock --tailscale     Same, and published to your tailnet over HTTPS
+  tendly                    Start the gateway in the background
+  tendly --lan              Same, reachable from other machines on the network
+  tendly --tailscale        Same, and published to your tailnet over HTTPS
                             (or switch it on in Settings → Remote access)
-  agentdock stop            Stop it
-  agentdock restart         Stop it, then start it again
-  agentdock status          Whether it is running, and where
-  agentdock logs            What the background gateway has said
-  agentdock update          Install the latest version (npm installs); the
+  tendly stop               Stop it
+  tendly restart            Stop it, then start it again
+  tendly status             Whether it is running, and where
+  tendly logs               What the background gateway has said
+  tendly update             Install the latest version (npm installs); the
                             gateway keeps running the old one until restarted
-  agentdock update --check  Only say whether a newer version exists
-  agentdock serve           Run in the foreground instead (no background process)
-  agentdock init            Create user state without starting anything
-  agentdock mcp             AgentDock's agent tools as a stdio MCP server, e.g.
-                            claude mcp add agentdock -- agentdock mcp
-  agentdock resume <id>     Continue an AgentDock session in this terminal, with
+  tendly update --check     Only say whether a newer version exists
+  tendly serve              Run in the foreground instead (no background process)
+  tendly init               Create user state without starting anything
+  tendly mcp                Tendly's agent tools as a stdio MCP server, e.g.
+                            claude mcp add agentdock -- tendly mcp
+  tendly resume <id>        Continue a Tendly session in this terminal, with
                             its client, endpoint, model and checkout; <id> is
-                            the AgentDock session ID (Copy resume command)
+                            the Tendly session ID (Copy resume command)
 
   --version                 Print the version
   --help                    This text
@@ -524,7 +524,8 @@ instance-label, allowed-origins = ["http://..."], and so on.
 
 Listens on 127.0.0.1:28789 otherwise. A binding that reaches other machines
 needs an access token; one is generated and kept in the state directory unless a
-token is given, and `status` prints it again. State lives in ~/.agentdock;
+token is given, and `status` prints it again. State lives in ~/.tendly (or in
+~/.agentdock, kept from before Tendly was renamed);
 AGENTDOCK_HOME or AGENTDOCK_STATE_DIR override it (that one cannot come from the
 file, which lives inside it), and existing project-local .agentdock databases
 are preserved."#;
@@ -589,7 +590,7 @@ fn apply_settings() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
 async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
     // Flags may precede or follow the command, so the command is the first
-    // argument that is not one. `agentdock --lan` is a start with a flag, not a
+    // argument that is not one. `tendly --lan` is a start with a flag, not a
     // request to run something called `--lan`.
     let action = env::args()
         .skip(1)
@@ -608,7 +609,7 @@ async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     if matches!(action.as_str(), "--version" | "-V" | "version") {
-        println!("agentdock {}", env!("CARGO_PKG_VERSION"));
+        println!("tendly {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
     // A relay to the running server: no state directory, database or port.
@@ -646,7 +647,7 @@ async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
     if action == "init" {
         let _database = installation::open_database(&state_dir, &database)?;
         println!(
-            "Initialized AgentDock at {}\nDatabase: {}\nProjects and existing client credentials were not moved.",
+            "Initialized Tendly at {}\nDatabase: {}\nProjects and existing client credentials were not moved.",
             state_dir.display(),
             database.display()
         );
@@ -740,7 +741,7 @@ async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
     // Reconcile only after startup has passed all configuration, binding and
     // ownership checks. `locked_database` stays alive through graceful shutdown.
     state.store.reconcile_after_restart()?;
-    tracing::info!(%address,db=%database.display(),"AgentDock listening (trusted single-user host mode)");
+    tracing::info!(%address,db=%database.display(),"Tendly listening (trusted single-user host mode)");
     let tailnet_server = tokio::spawn(
         axum::serve(
             tailnet_listener,
@@ -1145,7 +1146,7 @@ async fn discover_models(
 
 /// Models a stored profile can run.
 ///
-/// Official accounts are asked through the profile AgentDock already holds,
+/// Official accounts are asked through the profile Tendly already holds,
 /// never through a native configuration supplied by the caller: the directory a
 /// client is pointed at decides which credentials it reads.
 async fn discover_profile_models(
@@ -1371,12 +1372,12 @@ struct LaunchPlanQuery {
     force: bool,
 }
 
-/// What `agentdock resume` runs to continue a session in a terminal of its own:
+/// What `tendly resume` runs to continue a session in a terminal of its own:
 /// program, arguments, directory and environment, from the shared launch plan.
 ///
 /// The environment carries the endpoint's resolved key, as any launch does, so
 /// only a caller on this machine gets one: the plan names this host's paths and
-/// is of no use elsewhere. A session AgentDock is running now is refused unless
+/// is of no use elsewhere. A session Tendly is running now is refused unless
 /// forced, since two clients writing one conversation interleave it.
 async fn session_launch_plan(
     State(state): State<AppState>,
@@ -1393,7 +1394,7 @@ async fn session_launch_plan(
     if !local {
         return Err(ApiError {
             status: StatusCode::FORBIDDEN,
-            message: "A session can only be resumed in a terminal on the machine AgentDock runs on"
+            message: "A session can only be resumed in a terminal on the machine Tendly runs on"
                 .into(),
         });
     }
@@ -1405,7 +1406,7 @@ async fn session_launch_plan(
         )
     {
         return Err(ApiError::conflict(
-            "This session is running in AgentDock. End it there first, or pass --force to open a second client on the same conversation",
+            "This session is running in Tendly. End it there first, or pass --force to open a second client on the same conversation",
         ));
     }
     let spec = launch::continuation(&state, &session).await?;

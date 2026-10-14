@@ -608,7 +608,7 @@ async function pickModel(id: string) {
  * Timeline context menu.
  *
  * Clearing is the client's own /clear, so it only appears when this client
- * advertised that command; AgentDock never invents one.
+ * advertised that command; Tendly never invents one.
  */
 const timelineMenu = ref<{ x: number; y: number; text: string } | null>(null);
 const clearAvailable = computed(() => canClearContext({ preview: isPreview.value, running: running.value, ready: view.value.ready, busy: turnBusy.value || actionBusy.value, connected: streamState.value === 'connected', commands: view.value.commands }));

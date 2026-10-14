@@ -38,13 +38,13 @@ UI 现在分开显示“进程运行中”和“实时流已连接”；WebSocke
 
 - 端点的环境默认值与新会话覆盖合并后，保存为该会话的有效显式映射快照；以后修改端点不改变老会话。编辑已有会话是**完整替换**这份映射，不是部分 PATCH；原端点快照不变。
 - 载入历史不填覆盖时省略 `environment`，重复载入保留旧会话配置；显式提交不同映射返回 409，不静默改绑。空对象是明确值，不等同于字段省略。
-- 继承的是 **AgentDock 后端进程**的环境，保留原有账号隔离和内部变量过滤；不是浏览器机器、另一个终端的临时 exports、shell alias/function/rc 文件，也无法从历史恢复没有记录的旧变量。不会把宿主机整份环境快照写入数据库或发给 UI。
+- 继承的是 **Tendly 后端进程**的环境，保留原有账号隔离和内部变量过滤；不是浏览器机器、另一个终端的临时 exports、shell alias/function/rc 文件，也无法从历史恢复没有记录的旧变量。不会把宿主机整份环境快照写入数据库或发给 UI。
 - `literal` 原样赋值，不展开 `$PATH`、`${NAME}`、`~` 或命令表达式。它是明文本地元数据，不能放密钥。`secret_ref` 只接受 `env:AGENTDOCK_SECRET_NAME`，在后端启动环境中配置引用，直到会话启动才解析，不返回真实值。`unset` 明确从子进程启动环境中移除变量。
 - 删除覆盖不等于 `unset`：新会话草稿会重新显露端点默认值；已有会话的完整映射删除条目后，让基础启动环境生效。原生配置文件是否提供其他值，仍按 CLI 自己的优先级决定。环境编辑不写回原生源配置，也不承诺覆盖每一种原生设置。
 - 名称匹配 `[A-Za-z_][A-Za-z0-9_]{0,127}`；`HOME`、`USERPROFILE`、`PWD`、`OLDPWD`、`CODEX_HOME`、`CLAUDE_CONFIG_DIR`、`CLAUDECODE` 和所有 `AGENTDOCK_*` 大小写无关地保留。名称含 `TOKEN` / `SECRET` / `PASSWORD` / `PRIVATE_KEY` / `API_KEY` / `AUTHORIZATION`，或代理/base URL 含用户名密码时，不能用 literal，应使用 secret reference（或 unset）。这不是通用密钥识别器，其他普通名称也不要填写秘密。
 - 最多 64 项、序列化 JSON 不超过 64 KiB；literal 和解析后的 secret 值不超过 8192 UTF-8 字节且不含 NUL。端点默认值与会话覆盖合并后也检查限制。
 
-可选的交互式 Terminal 仍按 shell 自己的行为加载启动文件；这不等于 AgentDock 从旧终端/历史导入了一份环境快照。
+可选的交互式 Terminal 仍按 shell 自己的行为加载启动文件；这不等于 Tendly 从旧终端/历史导入了一份环境快照。
 
 SQLite schema 6 增加环境 JSON 字段，旧记录默认为 `{}`，不移动凭证、不重写旧快照。后端通过 `session_environment` capability 声明支持；旧服务上 UI 禁用相关编辑并说明升级原因，不发送缺失路由或不兼容字段。完整合同见 [API 文档](api.md)。
 

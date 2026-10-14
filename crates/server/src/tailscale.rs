@@ -794,7 +794,7 @@ fn save(state_dir: &Path, change: impl FnOnce(&mut Saved)) {
 
 /// Remove what a gateway stopped from outside left published.
 ///
-/// Windows has no signal a detached gateway can receive, so `agentdock stop`
+/// Windows has no signal a detached gateway can receive, so `tendly stop`
 /// ends it without its shutdown, and the name would go on forwarding to a
 /// closed port: a phone would get an error page instead of nothing at all.
 /// Elsewhere the gateway withdrew on its way out and this finds nothing.
@@ -920,7 +920,7 @@ async fn login_code(State(state): State<AppState>) -> Result<Json<Value>> {
     let Some(token) = state.security.access_token() else {
         return Err(ApiError::conflict("This gateway has no access token"));
     };
-    let link = format!("{url}#agentdock-token={token}");
+    let link = format!("{url}#tendly-token={token}");
     let code = qrcode::QrCode::new(link.as_bytes()).map_err(ApiError::internal)?;
     let svg = code
         .render::<qrcode::render::svg::Color>()

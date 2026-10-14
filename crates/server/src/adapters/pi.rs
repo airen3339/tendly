@@ -2,7 +2,7 @@
 //! `PI_CODING_AGENT_DIR`, a generated `models.json` and flags.
 //!
 //! Pi has no approval prompts and no MCP: it runs its tools without asking,
-//! so it offers no permission modes, and AgentDock's own tools do not reach
+//! so it offers no permission modes, and Tendly's own tools do not reach
 //! it. Its chat runs over `pi --mode rpc` (chat-pi.mjs).
 use super::{AccountOperations, CatalogStep, ClientAdapter, EndpointLaunch};
 use crate::usage::{Call, FileState, Source, Tokens, empty, number, timestamp};

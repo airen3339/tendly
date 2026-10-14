@@ -14,9 +14,9 @@ const isEphemeral = computed(() => isEphemeralSession(props.session));
 <template>
     <ModalDialog :title="t('Run information')" @close="emit('close')">
       <dl class="session-runtime-info" :data-session-id="session.id">
-        <div><dt>{{ t('AgentDock session ID') }}</dt><dd><code>{{ session.id }}</code><CopyButton :text="session.id" label="Copy" compact /><small>{{ t('Names this session in AgentDock, with its client, endpoint and checkout.') }}</small></dd></div>
+        <div><dt>{{ t('Tendly session ID') }}</dt><dd><code>{{ session.id }}</code><CopyButton :text="session.id" label="Copy" compact /><small>{{ t('Names this session in Tendly, with its client, endpoint and checkout.') }}</small></dd></div>
         <div v-if="session.provider !== 'terminal'"><dt>{{ t('{client} session ID', { client: clientLabel(session.provider) }) }}</dt><dd><code>{{ session.provider_session_id || '—' }}</code><CopyButton v-if="session.provider_session_id" :text="session.provider_session_id" label="Copy" compact /><small>{{ session.provider_session_id ? t("The client's own conversation ID. Alone it opens nothing: the conversation lives in this session's configuration directory.") : t('Assigned once the first message is sent.') }}</small></dd></div>
-        <div v-if="resumeCommand(session)"><dt>{{ t('Resume in a terminal') }}</dt><dd><code>{{ resumeCommand(session) }}</code><CopyButton :text="resumeCommand(session)!" label="Copy" compact /><small>{{ t('Run on the machine AgentDock runs on. The key stays there; only the session ID is in the command.') }}</small></dd></div>
+        <div v-if="resumeCommand(session)"><dt>{{ t('Resume in a terminal') }}</dt><dd><code>{{ resumeCommand(session) }}</code><CopyButton :text="resumeCommand(session)!" label="Copy" compact /><small>{{ t('Run on the machine Tendly runs on. The key stays there; only the session ID is in the command.') }}</small></dd></div>
         <div><dt>{{ t('Mode') }}</dt><dd>{{ session.interaction_mode || 'pty' }}</dd></div>
         <div v-if="isEphemeral"><dt>{{ t('Temporary window') }}</dt><dd>{{ t('Discarded when its window is closed') }}</dd></div>
         <div><dt>{{ t('Workspace') }}</dt><dd><code>{{ session.workspace_id }}</code></dd></div>

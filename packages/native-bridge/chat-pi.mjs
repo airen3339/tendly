@@ -4,7 +4,7 @@ import { ChatBase, NativeProcess, clip, nativeId } from './chat-common.mjs';
  * Pi's structured mode is `pi --mode rpc`: commands in, a response per
  * command and a stream of agent events out, one JSON object per line.
  *
- * The launch flags AgentDock builds for a terminal run (providers.rs) are
+ * The launch flags Tendly builds for a terminal run (providers.rs) are
  * carried over, with RPC mode in front of them.
  */
 export function piLaunch(job) {
@@ -57,7 +57,7 @@ export class PiChat extends ChatBase {
     if(!state||typeof state!=='object')return;
     this.model=modelName(state.model)??this.model;
     this.window=Number.isSafeInteger(state.model?.contextWindow)?state.model.contextWindow:this.window;
-    // Pi also has `off` and `minimal`; AgentDock's depth control names only
+    // Pi also has `off` and `minimal`; Tendly's depth control names only
     // the levels every client shares, so those read as no depth chosen.
     if(typeof state.thinkingLevel==='string')this.effort=SHARED_LEVELS.includes(state.thinkingLevel)?state.thinkingLevel:undefined;
     this.report();

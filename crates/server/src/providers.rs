@@ -7,7 +7,7 @@ use std::{
 };
 use url::Url;
 
-/// Levels both native clients accept. AgentDock forwards one of these or none.
+/// Levels both native clients accept. Tendly forwards one of these or none.
 pub const EFFORT_LEVELS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
 
 pub fn validate_effort(value: Option<&str>) -> Result<(), ApiError> {
@@ -31,7 +31,7 @@ pub fn validate_profile(p: &EndpointProfile) -> Result<(), ApiError> {
     }
     if let Some(reference) = &p.native_config {
         // Where the requests go and who they authenticate as belong to the
-        // native configuration; AgentDock must not redirect either.
+        // native configuration; Tendly must not redirect either.
         if reference.source_id.is_empty()
             || !Path::new(&reference.config_dir).is_absolute()
             || p.permission_mode != "native"
@@ -52,7 +52,7 @@ pub fn validate_profile(p: &EndpointProfile) -> Result<(), ApiError> {
         // clients already do themselves — Claude Code through its
         // ANTHROPIC_DEFAULT_*_MODEL variables, Codex through model_providers.
         // A second alias table here would compete with theirs and would apply
-        // only to sessions AgentDock launched, so it stays refused.
+        // only to sessions Tendly launched, so it stays refused.
         if !p.model_aliases.is_empty() {
             return Err(ApiError::bad(
                 "An official account maps models through its own client configuration, not through aliases here",

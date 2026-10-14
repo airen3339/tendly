@@ -30,9 +30,7 @@ pub async fn prepare_server(
     let listener = TcpListener::bind(address).await.map_err(|error| {
         io::Error::new(
             error.kind(),
-            format!(
-                "Cannot listen on {address}; check whether AgentDock is already running: {error}"
-            ),
+            format!("Cannot listen on {address}; check whether Tendly is already running: {error}"),
         )
     })?;
     Ok(PreparedServer {
@@ -138,7 +136,7 @@ fn lock_file(path: &Path, resource: &str) -> io::Result<OwnershipLock> {
     {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "AgentDock ownership lock must be a regular file, not a symbolic link",
+            "Tendly ownership lock must be a regular file, not a symbolic link",
         ));
     }
     let mut options = fs::OpenOptions::new();
@@ -153,12 +151,12 @@ fn lock_file(path: &Path, resource: &str) -> io::Result<OwnershipLock> {
         fs::TryLockError::WouldBlock => io::Error::new(
             io::ErrorKind::WouldBlock,
             format!(
-                "AgentDock {resource} is already in use by another server or initialization. Stop that instance or choose a separate AGENTDOCK_HOME and AGENTDOCK_DB."
+                "Tendly {resource} is already in use by another server or initialization. Stop that instance or choose a separate AGENTDOCK_HOME and AGENTDOCK_DB."
             ),
         ),
         fs::TryLockError::Error(error) => io::Error::new(
             error.kind(),
-            format!("Cannot acquire the AgentDock {resource} ownership lock: {error}"),
+            format!("Cannot acquire the Tendly {resource} ownership lock: {error}"),
         ),
     })?;
     // Never unlink this file on release: a waiting/new owner may already hold
@@ -191,9 +189,14 @@ fn choose_state(
     if legacy.join("agentdock.db").is_file() {
         return Ok(legacy);
     }
-    Ok(home
-        .ok_or("No user home available; set AGENTDOCK_HOME")?
-        .join(".agentdock"))
+    let home = home.ok_or("No user home available; set AGENTDOCK_HOME")?;
+    // Tendly was AgentDock: state made under that name stays where it is, so
+    // an upgrade keeps its sessions, token and settings without a move.
+    let former = home.join(".agentdock");
+    if former.is_dir() {
+        return Ok(former);
+    }
+    Ok(home.join(".tendly"))
 }
 pub fn web_directory(state_dir: &Path) -> PathBuf {
     asset_path(
@@ -302,15 +305,25 @@ mod tests {
             choose_state(
                 None,
                 Some("/home/tester".into()),
-                Path::new("/unlikely/agentdock/cwd")
+                Path::new("/unlikely/tendly/cwd")
             )
             .unwrap(),
-            PathBuf::from("/home/tester/.agentdock")
+            PathBuf::from("/home/tester/.tendly")
         );
         assert_eq!(
             choose_state(Some("/srv/ad".into()), None, Path::new("/other")).unwrap(),
             PathBuf::from("/srv/ad")
         );
+    }
+    #[test]
+    fn state_from_before_the_rename_stays_in_use() {
+        let home = std::env::temp_dir().join(format!("tendly-home-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(home.join(".agentdock")).unwrap();
+        assert_eq!(
+            choose_state(None, Some(home.clone()), Path::new("/other")).unwrap(),
+            home.join(".agentdock")
+        );
+        std::fs::remove_dir_all(home).unwrap();
     }
     #[test]
     fn existing_local_state_is_never_silently_moved() {

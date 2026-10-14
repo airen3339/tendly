@@ -62,7 +62,7 @@ pub fn tools() -> Vec<Value> {
         ),
         crate::agent::tool(
             "agentdock_show",
-            "Show the person something in the AgentDock window: a file (at a line), your workspace's Git changes, or a session you started.",
+            "Show the person something in the Tendly window: a file (at a line), your workspace's Git changes, or a session you started.",
             object(
                 json!({
                     "file": { "type": "string", "description": "Path relative to your working directory, or absolute inside it." },
@@ -75,7 +75,7 @@ pub fn tools() -> Vec<Value> {
         ),
         crate::agent::tool(
             "agentdock_usage",
-            "The quota your session's official account last reported (Claude or ChatGPT sign-in managed in AgentDock). Nothing is known for API-key endpoints.",
+            "The quota your session's official account last reported (Claude or ChatGPT sign-in managed in Tendly). Nothing is known for API-key endpoints.",
             object(json!({}), &[]),
         ),
     ]
@@ -84,7 +84,7 @@ pub fn tools() -> Vec<Value> {
 async fn own_session(state: &AppState, caller: Caller, tool: &str) -> Result<Session, ApiError> {
     let Caller::Session(id) = caller else {
         return Err(ApiError::bad(format!(
-            "{tool} works only from a session AgentDock launched"
+            "{tool} works only from a session Tendly launched"
         )));
     };
     db(state, move |s| s.get_session(id))
@@ -386,7 +386,7 @@ pub async fn usage(state: &AppState, caller: Caller) -> Result<Value, ApiError> 
         .or(me.endpoint_snapshot.as_ref().map(|p| p.id))
     else {
         return Ok(
-            json!({ "known": false, "why": "This session uses the client's own sign-in, which AgentDock does not manage." }),
+            json!({ "known": false, "why": "This session uses the client's own sign-in, which Tendly does not manage." }),
         );
     };
     let axum::Json(accounts) = crate::accounts::list(axum::extract::State(state.clone())).await?;
@@ -395,7 +395,7 @@ pub async fn usage(state: &AppState, caller: Caller) -> Result<Value, ApiError> 
         .find(|account| account.profile_id == profile)
     else {
         return Ok(
-            json!({ "known": false, "why": "Quota is known only for official accounts managed in AgentDock, not API-key endpoints." }),
+            json!({ "known": false, "why": "Quota is known only for official accounts managed in Tendly, not API-key endpoints." }),
         );
     };
     Ok(

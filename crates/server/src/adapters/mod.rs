@@ -1,4 +1,4 @@
-//! What differs between the agent clients AgentDock drives, in one place.
+//! What differs between the agent clients Tendly drives, in one place.
 //!
 //! Everything the server does with a client goes through its adapter: where
 //! its binary comes from, how a launch reaches an endpoint, which permission
@@ -14,7 +14,7 @@ mod claude_code;
 mod codex;
 mod pi;
 
-/// A launch AgentDock configures itself, as opposed to one that defers to a
+/// A launch Tendly configures itself, as opposed to one that defers to a
 /// native configuration: the endpoint, credential and permission choices of a
 /// profile, turned into this client's flags, variables and files.
 pub struct EndpointLaunch<'a> {
@@ -43,7 +43,7 @@ pub enum CatalogStep {
 /// Which account operations a client's own tooling supports.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct AccountOperations {
-    /// Sign in, refresh the token and sign out through AgentDock.
+    /// Sign in, refresh the token and sign out through Tendly.
     pub managed_login: bool,
     /// Read subscription usage on request.
     pub usage: bool,
@@ -69,7 +69,7 @@ pub trait ClientAdapter: Sync {
     fn source_order(&self) -> u8;
     /// Names in a workspace that hold its configuration, kept out of listings.
     fn protected_names(&self) -> &'static [&'static str];
-    /// Host variables that would route a launch AgentDock configures to some
+    /// Host variables that would route a launch Tendly configures to some
     /// other endpoint, account or model; removed before its own are set.
     fn inherited_keys(&self) -> &'static [&'static str];
     /// Prefixes of every host variable an isolated account launch drops.
@@ -100,7 +100,7 @@ pub trait ClientAdapter: Sync {
     ) -> (Vec<String>, BTreeMap<String, String>) {
         (Vec::new(), BTreeMap::new())
     }
-    /// A launch AgentDock configures: endpoint, credential, permission mode,
+    /// A launch Tendly configures: endpoint, credential, permission mode,
     /// effort and context window, as this client takes them.
     fn configure(&self, launch: EndpointLaunch<'_>) -> Result<(), ApiError>;
 
@@ -140,7 +140,7 @@ pub trait ClientAdapter: Sync {
 
     /// The account operations its tooling supports.
     fn account_operations(&self) -> AccountOperations;
-    /// The command a person runs to sign an account in, where AgentDock does
+    /// The command a person runs to sign an account in, where Tendly does
     /// not sign in for them; `login_home` is where that sign-in must land.
     fn login_guidance(&self, _login_home: Option<&str>) -> Option<String> {
         None
@@ -165,7 +165,7 @@ pub trait ClientAdapter: Sync {
     fn cache_write_rates(&self, input: f64) -> (f64, f64) {
         (input, input)
     }
-    /// Give a launch AgentDock's MCP server (agent.rs): `program` run as
+    /// Give a launch Tendly's MCP server (agent.rs): `program` run as
     /// `program mcp` with `identity` as its environment, through this launch's
     /// flags only, never the person's own client configuration.
     fn equip_tools(

@@ -11,7 +11,7 @@ export class ApiConnectionError extends ApiError {
     const outcomeUnknown = !["GET", "HEAD", "OPTIONS"].includes(method.toUpperCase());
     super(useI18n().t(outcomeUnknown
       ? "Connection was lost while sending the request. It may have reached the server; refresh its state before retrying."
-      : "Cannot reach AgentDock from this page. Check that this page's service is running and the address is correct, then retry."), 0);
+      : "Cannot reach Tendly from this page. Check that this page's service is running and the address is correct, then retry."), 0);
     this.name = "ApiConnectionError";
     this.outcomeUnknown = outcomeUnknown;
   }
@@ -48,7 +48,7 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   catch (cause) {
     if (aborted(cause, init.signal)) throw cause;
     if (cause instanceof TypeError) throw new ApiConnectionError(method);
-    throw new ApiError(useI18n().t("The backend returned an unreadable response. Check that the page and backend belong to the same AgentDock instance."), response.status);
+    throw new ApiError(useI18n().t("The backend returned an unreadable response. Check that the page and backend belong to the same Tendly instance."), response.status);
   }
 }
 

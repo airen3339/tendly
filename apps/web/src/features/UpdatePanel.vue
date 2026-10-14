@@ -51,7 +51,7 @@ async function restart() {
 
 <template>
   <section class="update-page">
-    <div class="settings-lead"><p>{{ t('Which AgentDock this server runs, and how to move it to the newest release.') }}</p></div>
+    <div class="settings-lead"><p>{{ t('Which Tendly this server runs, and how to move it to the newest release.') }}</p></div>
     <p v-if="error" class="inline-error" role="alert">{{ error }}</p>
     <article class="preference-card update-card">
       <div class="update-row">
@@ -65,12 +65,12 @@ async function restart() {
       <div v-else-if="stage === 'check-failed'" class="update-state warn" role="status">{{ t('Could not check for a newer version: {error}', { error: status!.check_error! }) }}</div>
 
       <div v-else-if="stage === 'available'" class="update-state">
-        <p>{{ t('AgentDock {version} is available. Installing does not interrupt anything; it takes effect when you restart.', { version: status!.latest! }) }}</p>
+        <p>{{ t('Tendly {version} is available. Installing does not interrupt anything; it takes effect when you restart.', { version: status!.latest! }) }}</p>
         <button type="button" class="primary-button" :disabled="!!busy" @click="install"><Icon name="download" :size="14"/>{{ t(busy === 'installing' ? 'Installing… (this can take a minute)' : 'Install {version}', { version: status!.latest! }) }}</button>
       </div>
 
       <div v-else-if="stage === 'needs-permission'" class="update-state">
-        <p>{{ t('AgentDock {version} is available, but this install belongs to another user (usually installed with sudo). Run this on the server:', { version: status!.latest! }) }}</p>
+        <p>{{ t('Tendly {version} is available, but this install belongs to another user (usually installed with sudo). Run this on the server:', { version: status!.latest! }) }}</p>
         <div class="update-command"><code>{{ status!.command }}</code><CopyButton :text="status!.command" :label="t('Copy command')"/></div>
         <p class="update-hint">{{ t('Installing it under your own npm prefix instead lets this button update it next time.') }}</p>
       </div>
@@ -81,13 +81,13 @@ async function restart() {
       </div>
 
       <div v-else-if="stage === 'restart'" class="update-state">
-        <p>{{ t('AgentDock {version} is installed. Restart to use it.', { version: status!.installed! }) }}</p>
+        <p>{{ t('Tendly {version} is installed. Restart to use it.', { version: status!.installed! }) }}</p>
         <template v-if="status!.restart === 'manual'">
-          <p class="update-hint">{{ t('Nothing would start this server again on its own. Restart it where it was started, for example with agentdock restart.') }}</p>
+          <p class="update-hint">{{ t('Nothing would start this server again on its own. Restart it where it was started, for example with tendly restart.') }}</p>
         </template>
         <template v-else>
           <p v-if="confirming" class="preference-note danger" role="alert">{{ t('Restarting stops {count} running sessions. Their history stays; start them again afterwards.', { count: status!.running_sessions }) }}</p>
-          <p v-if="restartFailed" class="preference-note danger" role="alert">{{ t('AgentDock did not come back with the new version within 90 seconds. Check the server, for example with agentdock status.') }}</p>
+          <p v-if="restartFailed" class="preference-note danger" role="alert">{{ t('Tendly did not come back with the new version within 90 seconds. Check the server, for example with tendly status.') }}</p>
           <div class="update-actions">
             <button type="button" :class="confirming ? 'primary-button danger' : 'primary-button'" :disabled="!!busy" @click="restart"><Icon name="refresh" :size="14"/>{{ t(busy === 'restarting' ? 'Restarting…' : confirming ? 'Stop sessions and restart' : 'Restart now') }}</button>
             <button v-if="confirming" type="button" class="secondary-button" @click="confirming = false">{{ t('Cancel') }}</button>
@@ -95,7 +95,7 @@ async function restart() {
         </template>
       </div>
     </article>
-    <p class="update-hint">{{ t('From a terminal: agentdock update installs the same way, and agentdock update --check only looks.') }}</p>
+    <p class="update-hint">{{ t('From a terminal: tendly update installs the same way, and tendly update --check only looks.') }}</p>
   </section>
 </template>
 

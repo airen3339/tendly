@@ -32,9 +32,11 @@ test('a live address is only fully done once this machine reached it', () => {
 });
 
 test('a sign-in link carries its token in the fragment only', () => {
+  assert.equal(tokenFromHash('#tendly-token=abc123'), 'abc123');
+  // A code shown before the rename still signs in.
   assert.equal(tokenFromHash('#agentdock-token=abc123'), 'abc123');
-  assert.equal(tokenFromHash('agentdock-token=abc123&x=1'), 'abc123');
+  assert.equal(tokenFromHash('tendly-token=abc123&x=1'), 'abc123');
   assert.equal(tokenFromHash('#other=1'), null);
-  assert.equal(tokenFromHash('#agentdock-token='), null);
+  assert.equal(tokenFromHash('#tendly-token='), null);
   assert.equal(tokenFromHash(''), null);
 });

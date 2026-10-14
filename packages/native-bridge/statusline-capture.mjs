@@ -1,7 +1,7 @@
-// Status line capture for Claude Code sessions AgentDock launches.
+// Status line capture for Claude Code sessions Tendly launches.
 //
 // Claude Code hands its status line command a documented JSON payload on stdin
-// that includes `rate_limits` for subscription accounts. AgentDock stores that
+// that includes `rate_limits` for subscription accounts. Tendly stores that
 // payload next to the session's configuration so the account page can show
 // official usage when the user explicitly asks for it.
 //
@@ -9,7 +9,7 @@
 // credentials and never makes a network request. When the account already had
 // its own status line command, that command is run with the same payload and
 // its output is passed through unchanged, so the visible status line does not
-// change just because a session was started from AgentDock.
+// change just because a session was started from Tendly.
 import { spawn } from 'node:child_process';
 import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';

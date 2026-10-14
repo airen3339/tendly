@@ -21,7 +21,7 @@ export async function codexHistory(cwd,configDir,configEnv) {
   try {
     return await Promise.race([
       (async()=>{
-        await rpc("initialize",{clientInfo:{name:"agentdock_history",title:"AgentDock history",version:"0.1.0"}});
+        await rpc("initialize",{clientInfo:{name:"agentdock_history",title:"Tendly history",version:"0.1.0"}});
         server.notify("initialized");
         const items=[],seenIds=new Set(),seenCursors=new Set();let cursor=null,pages=0;
         do{

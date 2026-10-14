@@ -80,7 +80,7 @@ test('session effort overrides stay with the selected non-native client configur
   assert.deepEqual(sessionEffortOverride('codex', undefined, '  '), {});
 });
 
-test('a directory AgentDock made for one account is not a shared host sign-in', () => {
+test('a directory Tendly made for one account is not a shared host sign-in', () => {
   // The distinction the UI got wrong: having a native_config says the profile
   // runs against a client's configuration directory, not whose directory it is.
   const owned = { source_id: 'account:4b624e9e-e721-4207-be56-9a9b17c0663d', config_dir: '/state/.agentdock/accounts/4b624e9e' };

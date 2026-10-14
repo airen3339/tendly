@@ -29,8 +29,8 @@ pub async fn terminal_reopen(state: &AppState, source: &Session) -> Result<Sessi
     Ok(session)
 }
 
-/// The launch a terminal outside AgentDock runs to continue a session
-/// (`agentdock resume`): the plan an escape-hatch terminal gets, on the
+/// The launch a terminal outside Tendly runs to continue a session
+/// (`tendly resume`): the plan an escape-hatch terminal gets, on the
 /// source's pinned configuration, without recording a session for it. A
 /// terminal session simply opens its shell where it ran.
 pub async fn continuation(state: &AppState, source: &Session) -> Result<SpawnSpec, ApiError> {
@@ -83,7 +83,7 @@ pub fn build(state: &AppState, session: &Session, cwd: PathBuf) -> Result<SpawnS
     {
         spec.args.extend(args);
     }
-    // A client that keeps a native session title gets the AgentDock title on
+    // A client that keeps a native session title gets the Tendly title on
     // every new or reopened process; renaming a live process remains a
     // display-only change until its next explicit reopen.
     else if let Some(client) = crate::adapters::adapter(session.provider)
@@ -236,7 +236,7 @@ fn build_base(state: &AppState, session: &Session, cwd: PathBuf) -> Result<Spawn
             client.config_key().into(),
             dir.to_string_lossy().into_owned(),
         );
-        // Avoid inherited endpoint/auth overrides from the AgentDock host,
+        // Avoid inherited endpoint/auth overrides from the Tendly host,
         // every client's: a variable meant for one can still steer another.
         remove.extend(
             crate::adapters::all()

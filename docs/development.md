@@ -31,7 +31,7 @@ Choose an existing host directory in the workspace picker, then create/open a se
 | `packages/native-bridge` | Node JSONL bridge to Claude Code and Codex                   |
 | `packages/protocol`      | DTOs and layout model shared with the client                 |
 | `apps/web`               | Vue 3 + TypeScript client and layout engine                  |
-| `npm/`                   | Packaging for `@wnzzer/agentdock` and platform packages      |
+| `npm/`                   | Packaging for `@wnzzer/tendly`, the legacy `@wnzzer/agentdock`, and platform packages      |
 
 ## Verify
 

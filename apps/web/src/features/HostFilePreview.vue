@@ -17,7 +17,7 @@ const props = defineProps<{ path: string; line?: number }>();
 const emit = defineEmits<{ close: []; addWorkspace: [folder: string] }>();
 const { t } = useI18n();
 const content = ref<string>(), error = ref(''), copied = ref(false), html = ref<string[]>();
-/** Refused only for lying outside the folders AgentDock may browse: something the person can open, for now. */
+/** Refused only for lying outside the folders Tendly may browse: something the person can open, for now. */
 const grantable = ref(false), granting = ref(false);
 const body = ref<HTMLElement>();
 const name = computed(() => props.path.split('/').pop() || props.path);
@@ -56,7 +56,7 @@ async function load() {
   }
 }
 onMounted(load);
-/** A read-only grant for this file, or its folder, kept until AgentDock restarts. */
+/** A read-only grant for this file, or its folder, kept until Tendly restarts. */
 async function grant(directory: boolean) {
   granting.value = true;
   try { await request('/host/grants', json('POST', { path: props.path, directory })); await load(); }
@@ -80,8 +80,8 @@ async function copyPath() {
       <div v-if="grantable" class="host-grant" role="alertdialog">
         <span class="host-grant-icon"><Icon name="shield" :size="18" /></span>
         <div>
-          <strong>{{ t('This file is outside the folders AgentDock may browse') }}</strong>
-          <p>{{ t('You can allow read-only access for now. It ends when AgentDock restarts, and it opens nothing to editing, browsing or agents.') }}</p>
+          <strong>{{ t('This file is outside the folders Tendly may browse') }}</strong>
+          <p>{{ t('You can allow read-only access for now. It ends when Tendly restarts, and it opens nothing to editing, browsing or agents.') }}</p>
           <div class="host-grant-actions">
             <button type="button" class="primary-button" :disabled="granting" @click="grant(false)">{{ t('Allow reading this file') }}</button>
             <button type="button" class="secondary-button" :disabled="granting" @click="grant(true)">{{ t('Allow reading the folder {folder}', { folder }) }}</button>

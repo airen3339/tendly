@@ -39,7 +39,7 @@ export const MarkdownContent = defineComponent({
   },
   setup(props) {
     /** Images that would not load: shown as a link to the file instead, which
-     * can explain why -- outside the folders AgentDock may browse, say. */
+     * can explain why -- outside the folders Tendly may browse, say. */
     const failed = reactive(new Set<string>());
     const hostPath = (src: string) => {
       let value = src.trim().replace(/^file:\/\//i, '');

@@ -62,10 +62,10 @@ test('sensitive variable names reject plaintext case-insensitively but permit re
   }
 });
 
-test('account, workspace and AgentDock-reserved names are blocked for every value type and case', () => {
+test('account, workspace and Tendly-reserved names are blocked for every value type and case', () => {
   for (const name of ['HOME', 'userprofile', 'Pwd', 'oldpwd', 'CodeX_HoMe', 'claude_config_dir', 'ClaudeCode', 'AGENTDOCK_', 'agentdock_future_setting', 'AGENTDOCK_SECRET_FIXTURE']) {
     for (const kind of ['literal', 'secret_ref', 'unset']) {
-      invalid([row(name, kind === 'secret_ref' ? 'env:AGENTDOCK_SECRET_FIXTURE' : 'fixture', kind)], 'Account directories, workspace identity and AgentDock internal variables cannot be overridden.');
+      invalid([row(name, kind === 'secret_ref' ? 'env:AGENTDOCK_SECRET_FIXTURE' : 'fixture', kind)], 'Account directories, workspace identity and Tendly internal variables cannot be overridden.');
     }
   }
 });

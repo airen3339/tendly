@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * One session's choice about AgentDock's agent tools (server agent.rs):
+ * One session's choice about Tendly's agent tools (server agent.rs):
  * follow the preference for every session, or on, or off for this one. The
  * tools are injected at launch, so a change applies at the next start.
  */
@@ -34,7 +34,7 @@ async function choose(choice: boolean | null) {
 
 <template>
   <!-- A row like the menu's others: the choice opens beside it, with when it applies. -->
-  <MenuFlyout v-if="state" class="agent-tools-row" :label="t('AgentDock tools')" icon="spark" :value="current" :width="220">
+  <MenuFlyout v-if="state" class="agent-tools-row" :label="t('Tendly tools')" icon="spark" :value="current" :width="220">
     <button v-for="option in options" :key="String(option.choice)" type="button" role="menuitemradio" :aria-checked="state.choice === option.choice" :disabled="busy" @click.stop="choose(option.choice)"><Icon v-if="state.choice === option.choice" name="check" :size="14" /><span v-else class="agent-tools-space" />{{ option.label }}</button>
     <p>{{ error || t('Takes effect when this session next starts.') }}</p>
   </MenuFlyout>

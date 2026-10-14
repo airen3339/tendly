@@ -4,6 +4,11 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+# The program is Tendly; the crates keep the name they were written under.
+[[bin]]
+name = "tendly-server"
+path = "src/main.rs"
+
 [dependencies]
 agentdock-domain.workspace = true
 agentdock-persistence.workspace = true
