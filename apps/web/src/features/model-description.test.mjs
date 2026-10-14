@@ -35,3 +35,12 @@ test('a line this dictionary has never seen is shown as the client wrote it', ()
     'Sonnet 5 · Efficient for routine tasks · $2/$10 per Mtok');
   assert.equal(describeModel('', zh), '');
 });
+
+test('a default entry is named by the model its description points at, and only then', async () => {
+  const { resolvedDefaultName } = await import('./model-description.ts');
+  const models = [{ id: 'default', name: 'Default (recommended)' }, { id: 'opus', name: 'Opus 5.5' }, { id: 'sonnet', name: 'Sonnet 5.5' }];
+  assert.equal(resolvedDefaultName({ id: 'default', description: 'Opus 5.5 · Best for everyday, complex tasks' }, models), 'Opus 5.5');
+  assert.equal(resolvedDefaultName({ id: 'default', description: 'Use the default model (currently Sonnet 4.5) · $3/$15 per Mtok' }, models), 'Sonnet 4.5');
+  assert.equal(resolvedDefaultName({ id: 'default', description: 'Best for everyday, complex tasks' }, models), undefined);
+  assert.equal(resolvedDefaultName({ id: 'opus', description: 'Sonnet 5.5 · whatever' }, models), undefined);
+});

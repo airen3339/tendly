@@ -889,6 +889,7 @@ export const zhCN: Readonly<Record<string, string>> = {
   "Reopen this session to continue. No process is restarted automatically after it ends.": "重新打开可继续此会话；会话结束后不会反复自动重启。",
   "Load existing session": "载入已有会话",
   "Earlier": "更早",
+  "Model: {model}": "模型：{model}",
   "Fold idle sessions": "收起不活跃的会话",
   "Sessions not used for this long move under Earlier in the sidebar. For this browser.": "超过这段时间没用过的会话，会收进侧栏的「更早」里。仅对此浏览器生效。",
   "After 1 day": "1 天后",

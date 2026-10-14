@@ -37,3 +37,22 @@ function translateSegment(segment: string, t: Translate): string {
   }
   return t(segment);
 }
+
+/**
+ * The model a "default" entry stands for, when its description names it.
+ *
+ * Claude Code lists its default as "Default (recommended)" and says which model
+ * that is only in the description ("Opus 5.5 · …", or "Use the default model
+ * (currently Opus 5.5)" in older versions). A chip reading "Default" does not
+ * say what is answering, so the name is lifted out — only when it is the
+ * name of another model in the same list, or the client said "currently".
+ */
+export function resolvedDefaultName(entry: { id: string; description?: string }, models: readonly { id: string; name: string }[]): string | undefined {
+  if (entry.id !== 'default' || !entry.description) return undefined;
+  for (const segment of entry.description.split('·').map(part => part.trim())) {
+    const current = /^Use the default model \(currently (.+)\)$/.exec(segment)?.[1];
+    if (current) return current;
+    if (models.some(model => model.id !== entry.id && model.name === segment)) return segment;
+  }
+  return undefined;
+}
