@@ -71,7 +71,14 @@ jobs:
 
       - name: Check what a phone would see
         run: |
-          status=$(curl -fsS http://127.0.0.1:28789/api/tailnet)
+          # A machine's first certificate is issued on the first HTTPS request,
+          # which the gateway makes itself; wait for its verdict, as a person
+          # watching the settings page would.
+          for _ in $(seq 90); do
+            status=$(curl -fsS http://127.0.0.1:28789/api/tailnet)
+            [ "$(echo "$status" | jq -r .verified)" != null ] && break
+            sleep 2
+          done
           echo "$status" | jq .
           test "$(echo "$status" | jq -r .phase)" = live
           name=$(echo "$status" | jq -r .machine.name)

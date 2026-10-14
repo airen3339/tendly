@@ -43,6 +43,9 @@ const STATE_FILE: &str = "tailnet.json";
 
 /// How often a live publication is checked, and a failed one retried.
 const WATCH_INTERVAL: Duration = Duration::from_secs(60);
+/// How long a fresh publication is given to answer. The first one on a machine
+/// waits for its certificate to be issued, which can take a minute or more.
+const VERIFY_WINDOW: Duration = Duration::from_secs(150);
 
 /// Whether this deployment asked to be published (`--tailscale`, or
 /// `tailscale = true` in the settings file).
@@ -469,6 +472,8 @@ struct Inner {
     current: Mutex<Current>,
     /// One publish or withdrawal at a time.
     operation: tokio::sync::Mutex<()>,
+    /// A check of the published address is under way.
+    verifying: std::sync::atomic::AtomicBool,
 }
 
 impl Tailnet {
@@ -489,6 +494,7 @@ impl Tailnet {
                     problem: None,
                 }),
                 operation: tokio::sync::Mutex::new(()),
+                verifying: std::sync::atomic::AtomicBool::new(false),
             }),
         }
     }
@@ -623,15 +629,14 @@ impl Tailnet {
         let mut current = self.current();
         current.checked_at = Some(chrono::Utc::now().timestamp_millis());
         match outcome {
-            Ok(verified) => {
+            Ok(name) => {
+                // Live as soon as Tailscale accepted it; whether it answers is
+                // found out alongside, without holding up a switch-off.
                 current.phase = Phase::Live;
-                current.verified = Some(verified);
-                current.problem = (!verified).then(|| {
-                    Problem::new(
-                        "unreachable",
-                        "This machine could not open the published address.",
-                    )
-                });
+                current.verified = None;
+                current.problem = None;
+                drop(current);
+                self.verify(name);
             }
             Err(problem) => {
                 tracing::warn!(code = problem.code, detail = %problem.detail, "tailnet publish failed");
@@ -642,9 +647,51 @@ impl Tailnet {
         }
     }
 
-    /// Every step from finding the CLI to reaching the result. `Ok` carries
-    /// whether the published address answered.
-    async fn publish(&self) -> std::result::Result<bool, Problem> {
+    /// Open the published address from this machine until it answers or
+    /// [`VERIFY_WINDOW`] runs out, in the background. Gives up quietly when the
+    /// publication changed in the meantime.
+    fn verify(&self, name: String) {
+        use std::sync::atomic::Ordering;
+        if self.inner.verifying.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let this = self.clone();
+        tokio::spawn(async move {
+            let verified = reachable(&name, || this.serves(&name)).await;
+            this.inner.verifying.store(false, Ordering::Release);
+            let Some(verified) = verified else { return };
+            let mut current = this.current();
+            if !this.serves_locked(&current, &name) {
+                return;
+            }
+            current.verified = Some(verified);
+            current.checked_at = Some(chrono::Utc::now().timestamp_millis());
+            current.problem = (!verified).then(|| {
+                Problem::new(
+                    "unreachable",
+                    "This machine could not open the published address.",
+                )
+            });
+        });
+    }
+
+    /// Still live, under the same name.
+    fn serves(&self, name: &str) -> bool {
+        self.serves_locked(&self.current(), name)
+    }
+
+    fn serves_locked(&self, current: &Current, name: &str) -> bool {
+        current.enabled
+            && current.phase == Phase::Live
+            && current
+                .machine
+                .as_ref()
+                .is_some_and(|machine| machine.name == name)
+    }
+
+    /// Every step from finding the CLI to `tailscale serve`. `Ok` carries the
+    /// name it is published under.
+    async fn publish(&self) -> std::result::Result<String, Problem> {
         let status = tailscale(&["status", "--json"], Duration::from_secs(15)).await?;
         let machine = machine_from_status(&status)?;
         let name = machine.name.clone();
@@ -673,7 +720,7 @@ impl Tailnet {
         let https = format!("--https={HTTPS_PORT}");
         tailscale(&["serve", "--bg", &https, &target], Duration::from_secs(30)).await?;
         tracing::info!(url = %url(&name), "published to the tailnet");
-        Ok(reachable(&name).await)
+        Ok(name)
     }
 
     /// The watchdog's look at a live publication: still there, still ours,
@@ -690,14 +737,7 @@ impl Tailnet {
             return self.bring_up().await;
         }
         if self.current().verified != Some(true) {
-            let _operation = self.inner.operation.lock().await;
-            let verified = reachable(&name).await;
-            let mut current = self.current();
-            current.verified = Some(verified);
-            current.checked_at = Some(chrono::Utc::now().timestamp_millis());
-            if verified {
-                current.problem = None;
-            }
+            self.verify(name);
         }
     }
 
@@ -795,19 +835,21 @@ fn read_saved(state_dir: &Path) -> Saved {
         .unwrap_or_default()
 }
 
-/// Whether this machine reaches its own published address. The first request
-/// can wait on a certificate being issued, so it is given a few tries.
-async fn reachable(name: &str) -> bool {
+/// Whether this machine reaches its own published address within
+/// [`VERIFY_WINDOW`]. Until the certificate is issued the handshake fails, so
+/// it keeps trying; `None` when `still` says the answer no longer matters.
+async fn reachable(name: &str, still: impl Fn() -> bool) -> Option<bool> {
     let Ok(client) = reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
         .build()
     else {
-        return false;
+        return Some(false);
     };
     let health = format!("{}api/health", url(name));
-    for attempt in 0..3 {
-        if attempt > 0 {
-            tokio::time::sleep(Duration::from_secs(5)).await;
+    let deadline = Instant::now() + VERIFY_WINDOW;
+    loop {
+        if !still() {
+            return None;
         }
         if client
             .get(&health)
@@ -815,10 +857,13 @@ async fn reachable(name: &str) -> bool {
             .await
             .is_ok_and(|response| response.status().is_success())
         {
-            return true;
+            return Some(true);
         }
+        if Instant::now() >= deadline {
+            return Some(false);
+        }
+        tokio::time::sleep(Duration::from_secs(5)).await;
     }
-    false
 }
 
 type Via = Option<Extension<ViaTailnet>>;

@@ -1962,6 +1962,7 @@ export const zhCN: Readonly<Record<string, string>> = {
   "That sign-in code is no longer valid. Show a new one on the computer.": "这个登录码已失效，请在电脑上重新显示一个。",
   "On the computer running AgentDock, open Settings → Remote access and scan the sign-in code with this device, or run agentdock status there to see the token.": "在运行 AgentDock 的电脑上打开 设置 → 远程访问，用这台设备扫描登录码；也可以在那台电脑上运行 agentdock status 查看令牌。",
   "Check again": "重新检查",
+  "Checking that the address opens. The first time, Tailscale issues its HTTPS certificate, which can take a minute or two.": "正在确认这个地址能打开。第一次使用时 Tailscale 要签发 HTTPS 证书，可能需要一两分钟。",
 };
 
 export function normalizeLocale(value: unknown): Locale {

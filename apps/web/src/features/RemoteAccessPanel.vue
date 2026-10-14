@@ -20,6 +20,7 @@ const error = ref(''), busy = ref(false), confirmingOff = ref(false), showDetail
 const code = ref<{ link: string; svg: string }>(), codeError = ref('');
 
 const steps = computed(() => status.value ? tailnetSteps(status.value) : []);
+const verifying = computed(() => status.value?.phase === 'live' && status.value.verified === null);
 const problem = computed(() => status.value?.problem ?? null);
 const token = computed(() => code.value ? tokenFromHash(new URL(code.value.link).hash) : null);
 const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform || navigator.userAgent);
@@ -63,7 +64,7 @@ let timer: ReturnType<typeof setTimeout> | undefined, disposed = false;
 function schedule() {
   clearTimeout(timer);
   if (disposed) return;
-  timer = setTimeout(() => void load(true), status.value?.phase === 'starting' ? 1500 : 15000);
+  timer = setTimeout(() => void load(true), verifying.value || status.value?.phase === 'starting' ? 1500 : 15000);
 }
 async function load(quiet = false) {
   try {
@@ -143,6 +144,8 @@ const checkedAt = computed(() => status.value?.checked_at ? new Date(status.valu
             <span class="remote-step-label">{{ t(STEP_LABELS[step.id]) }}</span>
           </li>
         </ol>
+
+        <p v-if="verifying" class="remote-hint" role="status">{{ t('Checking that the address opens. The first time, Tailscale issues its HTTPS certificate, which can take a minute or two.') }}</p>
 
         <div v-if="problem && explained" :class="['remote-problem', { warning: status.phase === 'live' }]" role="status">
           <strong>{{ t(explained.title) }}</strong>
