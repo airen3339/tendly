@@ -58,6 +58,10 @@ jobs:
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
           hostname: agentdock-ci-${{ runner.os }}-${{ github.run_id }}
+          # Without one, tailscaled keeps its state in memory and has nowhere
+          # to put a certificate, so HTTPS never comes up. (Windows runs the
+          # installed service, which has its own.)
+          statedir: ${{ runner.temp }}/tailscale-state
       # tailscaled runs as root; changing serve as the runner user needs this,
       # which is also what the settings page tells a person on Linux.
       - name: Allow this user to configure Tailscale
@@ -113,3 +117,6 @@ jobs:
       - name: Gateway log
         if: always()
         run: cat "$AGENTDOCK_HOME/agentdock.log" 2>/dev/null || true
+      - name: Tailscale log
+        if: failure() && runner.os != 'Windows'
+        run: tail -n 100 ~/tailscaled.log 2>/dev/null || true
