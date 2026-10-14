@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { FitAddon } from "@xterm/addon-fit";
+import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
 import Icon from "../features/Icon.vue";
 import { useI18n } from "../i18n";
@@ -360,12 +361,16 @@ function initializeTerminal() {
   if (!host.value) throw new Error("Terminal host is unavailable");
   terminal = new Terminal({
     cursorBlink: true, fontSize: 12, lineHeight: 1.22, scrollback: 5000,
+    // A wheel notch glides instead of jumping three lines at once; a trackpad
+    // already sends fine steps and is followed as it moves.
+    smoothScrollDuration: 100,
     // A Nerd Font the viewer already has wins; the bundled symbols fill in the
     // prompt icons for everyone else, phones included.
     fontFamily: '"SFMono-Regular", Consolas, "Liberation Mono", "Symbols Nerd Font Mono", "Tendly Symbols", monospace',
     theme: terminalTheme(),
   });
   fit = new FitAddon(); terminal.loadAddon(fit); terminal.open(host.value);
+  useWebgl(terminal);
   subscriptions.push(terminal.onData(data => {
     if (shiftArmed.value) { shiftArmed.value = false; data = shiftSequence(data); }
     if (ctrlArmed.value) { ctrlArmed.value = false; data = ctrlSequence(data); }
@@ -373,6 +378,22 @@ function initializeTerminal() {
   }));
   subscriptions.push(terminal.onBinary(data => { stream.send(Uint8Array.from(data, value => value.charCodeAt(0) & 255)); }));
   observer = new ResizeObserver(resize); observer.observe(host.value);
+}
+/**
+ * Draw with the GPU where there is one.
+ *
+ * xterm.js 6 dropped its canvas renderer, leaving the DOM one, which rebuilds
+ * every visible row as spans on each scroll step -- enough to make scrolling a
+ * busy client's output stutter. Without WebGL, or once the browser takes the
+ * context back (it keeps only so many), the terminal goes on drawing with the
+ * DOM, as it did before.
+ */
+function useWebgl(target: Terminal) {
+  try {
+    const webgl = new WebglAddon();
+    webgl.onContextLoss(() => { try { webgl.dispose(); } catch { /* Already gone with the context. */ } });
+    target.loadAddon(webgl);
+  } catch { /* No WebGL here; the DOM renderer stays. */ }
 }
 function cleanupTerminal() {
   cancelAnimationFrame(resizeFrame);
