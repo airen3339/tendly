@@ -28,6 +28,7 @@ import SessionRunInfo from "./features/SessionRunInfo.vue";
 import { SESSION_ACTIONS } from "./features/session-actions-context";
 import SessionRenameDialog from "./features/SessionRenameDialog.vue";
 import AuthDialog from "./features/AuthDialog.vue";
+import { linkSignIn } from "./features/link-sign-in";
 import Icon from "./features/Icon.vue";
 import TabIcon from "./features/TabIcon.vue";
 import BottomSheet from "./features/BottomSheet.vue";
@@ -829,11 +830,15 @@ watch([() => route.name, () => route.params.id, () => sessions.value.length, can
   void router.replace({ name: "canvas" });
   openSession(session);
 }, { immediate: true });
+/** Reached from a phone, the sign-in dialog says where the token is (link-sign-in.ts). */
+const authViaTailnet = ref(false), linkSignInFailed = ref(false);
 async function bootstrap() {
   const own = ++bootstrapRevision;
   loading.value = true; error.value = ""; connectionError.value = "";
   try {
-    const auth = await request<{ required: boolean; authenticated: boolean }>("/auth");
+    linkSignInFailed.value = (await linkSignIn) === "failed";
+    const auth = await request<{ required: boolean; authenticated: boolean; via_tailnet?: boolean }>("/auth");
+    authViaTailnet.value = !!auth.via_tailnet;
     if (auth.required && !auth.authenticated) { showAuth.value = true; return; }
     showAuth.value = false;
     // The appearance is a preference too; it applies itself when it arrives (theme.ts).
@@ -1009,7 +1014,7 @@ onUnmounted(() => { if (pendingLayout) cacheLayout(pendingLayout, true); dispose
   <SessionEnvironmentDialog v-if="environmentSession" :key="environmentSession.id" :session="environmentSession" @close="environmentSessionId=undefined" @saved="sessionEnvironmentSaved"/>
   <SessionRenameDialog v-if="renameSessionTarget" :key="renameSessionTarget.id" :session="renameSessionTarget" @close="renameSessionId=undefined" @save="saveRenameSession"/>
   <LoadHistoryDialog v-if="historyWorkspace && backendCapabilities.nativeHistory" :workspace="historyWorkspace" @close="historyWorkspaceId=undefined" @loaded="historyLoaded"/>
-  <AuthDialog v-if="showAuth" @authenticated="bootstrap"/>
+  <AuthDialog v-if="showAuth" :via-tailnet="authViaTailnet" :link-failed="linkSignInFailed" @authenticated="bootstrap"/>
 </template>
 
 <style scoped>

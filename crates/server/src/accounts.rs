@@ -1075,6 +1075,7 @@ mod tests {
                     "127.0.0.1:8787".parse().unwrap(),
                     None,
                 ),
+                tailnet: crate::tailscale::Tailnet::disabled(),
                 claude_manual_mode: true,
                 operations: Arc::new(tokio::sync::Mutex::new(())),
                 agents: crate::agent::AgentRegistry::default(),

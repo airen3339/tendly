@@ -45,6 +45,7 @@ mod secrets;
 mod security;
 mod sensors;
 mod settings;
+mod tailscale;
 mod update;
 mod usage;
 mod workspace_io;
@@ -94,6 +95,8 @@ struct AppState {
     watches: file_watch::FileWatches,
     accounts: accounts::AccountManager,
     security: security::Security,
+    /// Publishing to a tailnet (`tailscale.rs`).
+    tailnet: tailscale::Tailnet,
     claude_manual_mode: bool,
     operations: Arc<tokio::sync::Mutex<()>>,
     agents: agent::AgentRegistry,
@@ -352,7 +355,7 @@ async fn gateway_start(
         .into());
     }
     println!("AgentDock {} (pid {pid})\n", env!("CARGO_PKG_VERSION"));
-    print_access(state_dir, address);
+    print_access(state_dir, address, true).await;
     println!(
         "\n  logs    agentdock logs\n  stop    agentdock stop\n\nState: {}",
         state_dir.display()
@@ -365,14 +368,66 @@ async fn gateway_start(
 /// The token belongs here rather than only in the log: the gateway is detached,
 /// so whatever it printed on its own stdout is somewhere nobody looks, and a URL
 /// without the token it demands is only half an answer.
-fn print_access(state_dir: &std::path::Path, address: SocketAddr) {
+async fn print_access(state_dir: &std::path::Path, address: SocketAddr, wait: bool) {
     for (label, url) in banner_urls(address) {
         println!("  {label}  {url}");
     }
-    if !address.ip().is_loopback()
+    let tailnet = tailnet_line(address, wait).await;
+    if let Some(line) = &tailnet {
+        println!("  Tailnet  {line}");
+    }
+    if (!address.ip().is_loopback() || tailnet.is_some())
         && let Some(token) = security::stored_token(state_dir)
     {
         println!("  Token    {token}");
+    }
+}
+
+/// What the running gateway says about its tailnet address, if it was asked
+/// to publish one. A start waits for the attempt to finish, since the address
+/// is what the person starting it came for.
+async fn tailnet_line(address: SocketAddr, wait: bool) -> Option<String> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .ok()?;
+    let url = format!("http://127.0.0.1:{}/api/tailnet", address.port());
+    let deadline = std::time::Instant::now() + Duration::from_secs(if wait { 60 } else { 0 });
+    loop {
+        let mut request = client.get(&url);
+        if let Some(token) = security::existing_token() {
+            request = request.bearer_auth(token);
+        }
+        let status: Value = request.send().await.ok()?.json().await.ok()?;
+        match status["phase"].as_str()? {
+            "off" => return None,
+            "live" => {
+                let url = status["url"].as_str()?.to_owned();
+                return Some(if status["verified"] == json!(false) {
+                    format!(
+                        "{url}  (could not reach it from this machine; check Settings → Remote access)"
+                    )
+                } else {
+                    url
+                });
+            }
+            "starting" if std::time::Instant::now() < deadline => {
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+            "starting" => return Some("publishing… (see Settings → Remote access)".into()),
+            _ => {
+                let problem = &status["problem"];
+                let fix = problem["command"]
+                    .as_str()
+                    .or_else(|| problem["link"].as_str())
+                    .map(|fix| format!("\n           fix: {fix}"))
+                    .unwrap_or_default();
+                return Some(format!(
+                    "not published: {}{fix}\n           details in Settings → Remote access",
+                    problem["detail"].as_str().unwrap_or("unknown error")
+                ));
+            }
+        }
     }
 }
 
@@ -395,7 +450,7 @@ async fn gateway_status(
     match (pid, answering) {
         (Some(pid), true) => {
             println!("Running (pid {pid})\n");
-            print_access(state_dir, address);
+            print_access(state_dir, address, false).await;
         }
         // A process that is up but silent is the shape a hung or still-starting
         // server takes, and saying "running" would hide it.
@@ -435,6 +490,8 @@ const HELP: &str = r#"AgentDock — a host workspace for Claude Code and Codex
 
   agentdock                 Start the gateway in the background
   agentdock --lan           Same, reachable from other machines on the network
+  agentdock --tailscale     Same, and published to your tailnet over HTTPS
+                            (or switch it on in Settings → Remote access)
   agentdock stop            Stop it
   agentdock restart         Stop it, then start it again
   agentdock status          Whether it is running, and where
@@ -459,6 +516,7 @@ file:
   lan = true              # reachable from other machines (same as --lan)
   port = 28789            # or addr = "192.168.0.9:28789"
   token = "..."           # AGENTDOCK_TOKEN
+  tailscale = true        # publish to the tailnet (same as --tailscale)
 
 Any other key names the AGENTDOCK_ variable it spells: shell, claude-bin,
 instance-label, allowed-origins = ["http://..."], and so on.
@@ -515,6 +573,10 @@ fn apply_settings() -> std::result::Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     };
     let lan = env::args().any(|argument| argument == "--lan");
+    if env::args().any(|argument| argument == "--tailscale") {
+        // Sound here and nowhere later: no other thread exists yet.
+        unsafe { env::set_var("AGENTDOCK_TAILSCALE", "1") };
+    }
     for (key, value) in settings::pairs(&state_dir, lan)? {
         if env::var_os(&key).is_none() {
             // Sound here and nowhere later: no other thread exists yet.
@@ -616,7 +678,11 @@ async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
     // Validate configuration and reserve both the port and database ownership
     // before any startup reconciliation can change existing session records.
     let token = security::resolve_token(&state_dir, !address.ip().is_loopback())?;
+    // The tailnet always asks for a token, so there is one even on loopback,
+    // and switching the tailnet on later needs no restart.
+    let access_token = security::resolve_token(&state_dir, true)?;
     let security = security::Security::new(address, token)?
+        .with_access_token(access_token)
         .with_session_secret(&security::resolve_session_secret(&state_dir)?);
     let browse_roots = directories::roots()?;
     let workspace_roots = directories::workspace_roots(&browse_roots)?;
@@ -625,6 +691,10 @@ async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
         database: locked_database,
     } = installation::prepare_server(address, &state_dir, &database).await?;
     let store = locked_database.store.clone();
+    // Where `tailscale serve` forwards to: a port of its own, so whatever
+    // arrives on it is known to come from the tailnet.
+    let tailnet_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let tailnet = tailscale::Tailnet::new(&state_dir, tailnet_listener.local_addr()?.port());
     let claude_bin = clients::program(&state_dir, &agentdock_domain::ProviderKind::ClaudeCode);
     let help = tokio::time::timeout(
         Duration::from_secs(3),
@@ -652,6 +722,7 @@ async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
         workspace_roots,
         native_sources: native_history::sources(),
         security,
+        tailnet,
         claude_manual_mode,
         operations: Arc::new(tokio::sync::Mutex::new(())),
         agents: agent::AgentRegistry::default(),
@@ -669,6 +740,16 @@ async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
     // ownership checks. `locked_database` stays alive through graceful shutdown.
     state.store.reconcile_after_restart()?;
     tracing::info!(%address,db=%database.display(),"AgentDock listening (trusted single-user host mode)");
+    let tailnet_server = tokio::spawn(
+        axum::serve(
+            tailnet_listener,
+            app.clone()
+                .layer(axum::Extension(security::ViaTailnet))
+                .into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .into_future(),
+    );
+    state.tailnet.start();
     // The peer address lets a few routes answer only this machine (`launch-plan`).
     axum::serve(
         listener,
@@ -686,11 +767,13 @@ async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
         {
             let _ = tokio::signal::ctrl_c().await;
         }
+        state.tailnet.shutdown().await;
         state.runtime.shutdown().await;
         state.chats.shutdown().await;
         state.accounts.shutdown().await;
     })
     .await?;
+    tailnet_server.abort();
     Ok(())
 }
 
@@ -736,6 +819,7 @@ fn router(state: AppState) -> Router {
         .merge(conversations::routes())
         .merge(file_watch::routes())
         .merge(update::routes())
+        .merge(tailscale::routes())
         .route("/api/health", get(health))
         .route("/api/auth", get(security::status).post(security::login))
         .route(
@@ -944,7 +1028,7 @@ fn optional(value: Option<String>) -> Option<String> {
 }
 async fn health() -> Json<Value> {
     Json(
-        json!({"ok":true,"service":"agentdock-server","platform":env::consts::OS,"mode":"trusted-single-user","api_version":2,"capabilities":["shared_canvas","native_configurations","native_history","host_directories","endpoint_models","session_environment","structured_chat","official_accounts","session_configuration","session_archive","account_import_native","agent_clients","ephemeral_sessions","session_model","workspace_file_search","session_terminal_escape","stored_secrets","agent_tools","self_update","resource_monitoring"],"instance_label":env::var("AGENTDOCK_INSTANCE_LABEL").ok(),"version":env!("CARGO_PKG_VERSION")}),
+        json!({"ok":true,"service":"agentdock-server","platform":env::consts::OS,"mode":"trusted-single-user","api_version":2,"capabilities":["shared_canvas","native_configurations","native_history","host_directories","endpoint_models","session_environment","structured_chat","official_accounts","session_configuration","session_archive","account_import_native","agent_clients","ephemeral_sessions","session_model","workspace_file_search","session_terminal_escape","stored_secrets","agent_tools","self_update","resource_monitoring","tailnet"],"instance_label":env::var("AGENTDOCK_INSTANCE_LABEL").ok(),"version":env!("CARGO_PKG_VERSION")}),
     )
 }
 
@@ -1302,7 +1386,9 @@ async fn session_launch_plan(
     let local = request
         .extensions()
         .get::<axum::extract::ConnectInfo<SocketAddr>>()
-        .is_some_and(|peer| peer.0.ip().is_loopback());
+        .is_some_and(|peer| peer.0.ip().is_loopback())
+        // Tailscale forwards from loopback too.
+        && request.extensions().get::<security::ViaTailnet>().is_none();
     if !local {
         return Err(ApiError {
             status: StatusCode::FORBIDDEN,

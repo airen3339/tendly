@@ -8,6 +8,7 @@ import ProfilesDialog from './ProfilesDialog.vue';
 import AccountsDialog from './AccountsDialog.vue';
 import PreferencesPanel from './PreferencesPanel.vue';
 import UpdatePanel from './UpdatePanel.vue';
+import RemoteAccessPanel from './RemoteAccessPanel.vue';
 import { backendCapabilities } from './backend-capabilities';
 import { useI18n } from '../i18n';
 
@@ -28,10 +29,12 @@ const ALL_SECTIONS = [
   { id: 'agents', icon: 'spark', label: 'Agent clients' },
   { id: 'endpoints', icon: 'settings', label: 'Endpoint profiles' },
   { id: 'accounts', icon: 'account', label: 'Official accounts' },
+  { id: 'remote', icon: 'globe', label: 'Remote access' },
   { id: 'updates', icon: 'download', label: 'Updates' },
 ] as const;
-/** An older server has no update API, so it gets no page that would fail. */
-const SECTIONS = computed(() => ALL_SECTIONS.filter(entry => entry.id !== 'updates' || backendCapabilities.selfUpdate));
+/** An older server lacks some APIs, so it gets no page that would fail. */
+const SECTIONS = computed(() => ALL_SECTIONS.filter(entry =>
+  (entry.id !== 'updates' || backendCapabilities.selfUpdate) && (entry.id !== 'remote' || backendCapabilities.tailnet)));
 
 const section = computed(() => SECTIONS.value.some(entry => entry.id === props.section) ? props.section : 'preferences');
 const profilesPage = ref<{ requestLeave: (action: () => void) => void }>();
@@ -64,6 +67,7 @@ function select(next: SettingsSection) { if (next !== section.value) emit('navig
         <AgentClientsPanel v-else-if="section==='agents'"/>
         <ProfilesDialog v-else-if="section==='endpoints'" ref="profilesPage" embedded :profiles="profiles" @close="emit('back')" @changed="emit('changed', $event)" @accounts="select('accounts')"/>
         <UpdatePanel v-else-if="section==='updates'"/>
+        <RemoteAccessPanel v-else-if="section==='remote'"/>
         <AccountsDialog v-else embedded @close="emit('back')" @changed="emit('changed', $event)"/>
       </div>
     </div>

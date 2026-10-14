@@ -130,9 +130,24 @@ pub fn stored_token(state_dir: &std::path::Path) -> Option<String> {
         })
 }
 
+/// Marks a request that arrived on the tailnet listener (see `tailscale.rs`).
+///
+/// Tailscale forwards from 127.0.0.1, so neither the peer address nor a header
+/// a client could write tells a phone from this machine; which listener took
+/// the connection does, and that is what this records.
+#[derive(Clone, Copy)]
+pub struct ViaTailnet;
+
 #[derive(Clone)]
 pub struct Security {
+    /// What this binding itself demands; `None` on loopback.
     token: Option<String>,
+    /// What a request from the tailnet must present. The same as `token`
+    /// whenever this binding needs one; on loopback it is the one kept in the
+    /// state directory, so the tailnet can be switched on without a restart.
+    access_token: Option<String>,
+    /// A configured origin is HTTPS, so cookies have to be `Secure` there.
+    secure_cookies: bool,
     cookie: String,
     origins: HashSet<String>,
     hosts: HashSet<String>,
@@ -149,13 +164,29 @@ impl Security {
         let mut hash = Sha256::new();
         hash.update(secret.as_bytes());
         hash.update([0]);
-        hash.update(self.token.as_deref().unwrap_or("").as_bytes());
+        hash.update(self.access_token.as_deref().unwrap_or("").as_bytes());
         self.cookie = hash
             .finalize()
             .iter()
             .map(|byte| format!("{byte:02x}"))
             .collect();
         self
+    }
+    /// The token the tailnet asks for, where this binding asks for none. Set
+    /// before `with_session_secret`, which signs sessions with it.
+    pub fn with_access_token(mut self, token: Option<String>) -> Self {
+        if self.token.is_none() {
+            self.access_token = token.filter(|v| !v.is_empty());
+        }
+        self
+    }
+    /// The token that signs a device in from anywhere this server is reached.
+    pub fn access_token(&self) -> Option<&str> {
+        self.access_token.as_deref()
+    }
+    /// Whether a request arriving this way has to be signed in.
+    pub fn required(&self, via_tailnet: bool) -> bool {
+        via_tailnet || self.token.is_some()
     }
     /// This server as a process on the same machine reaches it.
     pub fn local_url(&self) -> String {
@@ -198,8 +229,11 @@ impl Security {
             .filter_map(|s| Url::parse(s).ok())
             .map(|u| u[url::Position::BeforeHost..url::Position::AfterPort].to_owned())
             .collect();
+        let secure_cookies = origins.iter().any(|v| v.starts_with("https://"));
         Ok(Self {
+            access_token: token.clone(),
             token,
+            secure_cookies,
             cookie: format!(
                 "{}{}",
                 uuid::Uuid::new_v4().simple(),
@@ -258,9 +292,16 @@ impl Security {
         // An origin has no path, so anything after the authority disqualifies it.
         !authority.contains('/') && self.addressed_by_ip(authority)
     }
-    fn authenticated(&self, headers: &axum::http::HeaderMap) -> bool {
-        let Some(token) = &self.token else {
-            return true;
+    fn authenticated(&self, headers: &axum::http::HeaderMap, via_tailnet: bool) -> bool {
+        let token = if via_tailnet {
+            &self.access_token
+        } else {
+            &self.token
+        };
+        let Some(token) = token else {
+            // No token at all is an open door on loopback and a shut one on
+            // the tailnet.
+            return !via_tailnet;
         };
         if headers
             .get(header::AUTHORIZATION)
@@ -298,11 +339,16 @@ fn cli_path(path: &str) -> bool {
 }
 
 pub async fn guard(State(state): State<AppState>, request: Request, next: Next) -> Response {
+    let via_tailnet = request.extensions().get::<ViaTailnet>().is_some();
     let headers = request.headers();
     if !headers
         .get(header::HOST)
         .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| state.security.hosts.contains(v) || state.security.addressed_by_ip(v))
+        .is_some_and(|v| {
+            state.security.hosts.contains(v)
+                || state.security.addressed_by_ip(v)
+                || via_tailnet && state.tailnet.serves_host(v)
+        })
     {
         return error(
             StatusCode::FORBIDDEN,
@@ -310,10 +356,11 @@ pub async fn guard(State(state): State<AppState>, request: Request, next: Next) 
         );
     }
     if let Some(origin) = headers.get(header::ORIGIN)
-        && !origin
-            .to_str()
-            .ok()
-            .is_some_and(|v| state.security.origins.contains(v) || state.security.own_origin(v))
+        && !origin.to_str().ok().is_some_and(|v| {
+            state.security.origins.contains(v)
+                || state.security.own_origin(v)
+                || via_tailnet && state.tailnet.serves_origin(v)
+        })
     {
         return error(StatusCode::FORBIDDEN, "Untrusted Origin");
     }
@@ -330,7 +377,7 @@ pub async fn guard(State(state): State<AppState>, request: Request, next: Next) 
         // rest of the API still takes the deployment's own credentials.
         let agent_path = path.starts_with("/api/agent/");
         let agent = agent_path && crate::agent::is_agent_request(&state, headers);
-        if !public && !agent && !state.security.authenticated(headers) {
+        if !public && !agent && !state.security.authenticated(headers, via_tailnet) {
             return error(StatusCode::UNAUTHORIZED, "Authentication required");
         }
         if !matches!(
@@ -349,7 +396,7 @@ pub async fn guard(State(state): State<AppState>, request: Request, next: Next) 
             .get(header::UPGRADE)
             .is_some_and(|v| v == "websocket")
             && headers.get(header::ORIGIN).is_none()
-            && state.security.token.is_some()
+            && state.security.required(via_tailnet)
             && headers.get(header::AUTHORIZATION).is_none()
         {
             return error(
@@ -374,31 +421,39 @@ pub async fn guard(State(state): State<AppState>, request: Request, next: Next) 
 
 pub async fn status(
     State(state): State<AppState>,
+    via: Option<axum::Extension<ViaTailnet>>,
     headers: axum::http::HeaderMap,
 ) -> Json<serde_json::Value> {
-    Json(
-        serde_json::json!({"required":state.security.token.is_some(),"authenticated":state.security.authenticated(&headers)}),
-    )
+    let via_tailnet = via.is_some();
+    Json(serde_json::json!({
+        "required": state.security.required(via_tailnet),
+        "authenticated": state.security.authenticated(&headers, via_tailnet),
+        "via_tailnet": via_tailnet,
+    }))
 }
 #[derive(Deserialize)]
 pub struct Login {
     token: String,
 }
-pub async fn login(State(state): State<AppState>, Json(input): Json<Login>) -> Response {
-    if state
-        .security
-        .token
-        .as_ref()
-        .is_some_and(|t| !equal(t, &input.token))
+pub async fn login(
+    State(state): State<AppState>,
+    via: Option<axum::Extension<ViaTailnet>>,
+    Json(input): Json<Login>,
+) -> Response {
+    let via_tailnet = via.is_some();
+    let expected = if via_tailnet {
+        &state.security.access_token
+    } else {
+        &state.security.token
+    };
+    if via_tailnet && expected.is_none()
+        || expected.as_ref().is_some_and(|t| !equal(t, &input.token))
     {
         return error(StatusCode::UNAUTHORIZED, "Invalid access token");
     }
-    let secure = if state
-        .security
-        .origins
-        .iter()
-        .any(|v| v.starts_with("https://"))
-    {
+    // Decided per request: the tailnet is HTTPS while a LAN address beside it
+    // is not, and a Secure cookie on plain HTTP is one the browser drops.
+    let secure = if via_tailnet || state.security.secure_cookies {
         "; Secure"
     } else {
         ""
@@ -419,6 +474,8 @@ impl Security {
     pub fn for_test(address: SocketAddr, token: Option<&str>) -> Self {
         Self {
             token: token.map(str::to_owned),
+            access_token: token.map(str::to_owned),
+            secure_cookies: false,
             cookie: "test-cookie".into(),
             origins: [format!("http://{address}"), "http://127.0.0.1:5173".into()].into(),
             hosts: [address.to_string(), "127.0.0.1:5173".into()].into(),
@@ -569,5 +626,58 @@ mod tests {
     #[test]
     fn a_loopback_binding_still_needs_nothing() {
         assert!(rejection("127.0.0.1:28789".parse().unwrap(), None).is_empty());
+    }
+
+    fn bearer(token: &str) -> axum::http::HeaderMap {
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            format!("Bearer {token}").parse().unwrap(),
+        );
+        headers
+    }
+
+    /// The tailnet listener is reached from 127.0.0.1 like everything else on
+    /// this machine, so a loopback binding's open door must not extend to it.
+    #[test]
+    fn the_tailnet_always_needs_the_token_while_this_machine_still_does_not() {
+        let loopback: SocketAddr = "127.0.0.1:28789".parse().unwrap();
+        let security = Security::new(loopback, None)
+            .ok()
+            .unwrap()
+            .with_access_token(Some("qwe41235".into()))
+            .with_session_secret(&"s".repeat(32));
+        let none = axum::http::HeaderMap::new();
+        assert!(security.authenticated(&none, false));
+        assert!(!security.authenticated(&none, true));
+        assert!(security.authenticated(&bearer("qwe41235"), true));
+        assert!(!security.authenticated(&bearer("guess"), true));
+        assert!((security.required(true), security.required(false)) == (true, false));
+        // With no token at all, the tailnet stays shut rather than open.
+        let tokenless = Security::new(loopback, None).ok().unwrap();
+        assert!(!tokenless.authenticated(&bearer(""), true));
+    }
+
+    /// Browsers signed in to a network binding stay signed in: the access token
+    /// is that binding's own token, and the session is derived from it as before.
+    #[test]
+    fn a_network_bindings_sessions_are_unchanged_by_the_access_token() {
+        let network: SocketAddr = "0.0.0.0:28789".parse().unwrap();
+        let secret = "s".repeat(32);
+        let session = |access: Option<&str>| {
+            Security::new(network, Some("qwe41235".into()))
+                .ok()
+                .unwrap()
+                .with_access_token(access.map(str::to_owned))
+                .with_session_secret(&secret)
+                .cookie
+        };
+        assert_eq!(session(None), session(Some("another")));
+        assert!(
+            Security::new(network, Some("qwe41235".into()))
+                .ok()
+                .unwrap()
+                .authenticated(&bearer("qwe41235"), true)
+        );
     }
 }

@@ -1,3 +1,5 @@
+// First, so the sign-in token leaves the address before the router reads it.
+import { linkSignIn } from "./features/link-sign-in";
 import { createApp } from "vue";
 import "@fontsource-variable/instrument-sans";
 import "@fontsource-variable/jetbrains-mono";
@@ -10,4 +12,4 @@ import { router } from "./router";
 
 installMenuDismissal();
 installContextMenuPolicy();
-createApp(App).use(router).mount("#root");
+void linkSignIn.then(() => createApp(App).use(router).mount("#root"));

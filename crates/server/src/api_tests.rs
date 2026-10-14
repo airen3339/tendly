@@ -81,6 +81,7 @@ impl Fixture {
             watches: file_watch::FileWatches::default(),
             accounts: accounts::AccountManager::default(),
             security: security::Security::for_test(address, token),
+            tailnet: crate::tailscale::Tailnet::disabled(),
             claude_manual_mode: true,
             operations: Arc::new(tokio::sync::Mutex::new(())),
             agents: agent::AgentRegistry::default(),
@@ -3331,6 +3332,69 @@ async fn shared_canvas_keeps_legal_unix_backslashes_in_relative_filenames() {
     );
 }
 
+/// Tailscale forwards from 127.0.0.1, so the tailnet listener has to ask for
+/// the token even where this machine's own browser is asked for nothing, and a
+/// signed-in phone must not get what only this machine may have.
+#[tokio::test]
+async fn the_tailnet_listener_needs_the_token_where_this_machine_does_not() {
+    let mut f = Fixture::new("127.0.0.1:8787".parse().unwrap(), None);
+    f.state.security = security::Security::for_test("127.0.0.1:8787".parse().unwrap(), None)
+        .with_access_token(Some("fixture-token-long-enough".into()));
+    f.state.tailnet = crate::tailscale::Tailnet::new(&f.path, 8790);
+    let tailnet = |method: &str, path: &str, token: Option<&str>| {
+        let mut request = Request::builder()
+            .method(method)
+            .uri(path)
+            .header("host", "127.0.0.1:8790")
+            .header("x-agentdock-client", "web")
+            .header("content-type", "application/json");
+        if let Some(token) = token {
+            request = request.header("authorization", format!("Bearer {token}"));
+        }
+        // Everything Tailscale forwards comes from loopback.
+        let app = f
+            .app()
+            .layer(axum::Extension(security::ViaTailnet))
+            .layer(axum::Extension(axum::extract::ConnectInfo::<SocketAddr>(
+                "127.0.0.1:50000".parse().unwrap(),
+            )));
+        let request = request.body(Body::from("{}")).unwrap();
+        async move { app.oneshot(request).await.unwrap().status() }
+    };
+    assert_eq!(
+        call(f.app(), "GET", "/api/workspaces", Value::Null).await.0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        tailnet("GET", "/api/workspaces", None).await,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        tailnet("GET", "/api/workspaces", Some("guess")).await,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        tailnet("GET", "/api/workspaces", Some("fixture-token-long-enough")).await,
+        StatusCode::OK
+    );
+    let (_, auth) = call(f.app(), "GET", "/api/auth", Value::Null).await;
+    assert_eq!(
+        (auth["required"].clone(), auth["via_tailnet"].clone()),
+        (json!(false), json!(false))
+    );
+    // Resuming hands out a launch plan with resolved keys: this machine only.
+    assert_eq!(
+        tailnet(
+            "POST",
+            &format!("/api/sessions/{}/launch-plan", Uuid::new_v4()),
+            Some("fixture-token-long-enough")
+        )
+        .await,
+        StatusCode::FORBIDDEN
+    );
+    std::fs::remove_dir_all(&f.path).ok();
+}
+
 #[tokio::test]
 async fn shared_canvas_uses_existing_authentication_and_health_capabilities() {
     let f = Fixture::new(
@@ -3360,6 +3424,9 @@ async fn shared_canvas_uses_existing_authentication_and_health_capabilities() {
         ("GET", "/api/update"),
         ("POST", "/api/update"),
         ("POST", "/api/update/restart"),
+        ("GET", "/api/tailnet"),
+        ("PUT", "/api/tailnet"),
+        ("GET", "/api/tailnet/login-code"),
     ] {
         assert_eq!(
             call(f.app(), method, path, json!({"value":"x"})).await.0,
@@ -3392,7 +3459,8 @@ async fn shared_canvas_uses_existing_authentication_and_health_capabilities() {
             "stored_secrets",
             "agent_tools",
             "self_update",
-            "resource_monitoring"
+            "resource_monitoring",
+            "tailnet"
         ])
     );
     let allowed = Request::builder()

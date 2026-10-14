@@ -33,6 +33,7 @@ const paths: Record<string, string> = {
   gauge: "M3 17a9 9 0 1 1 18 0 M12 17l4.5-5.5",
   chart: "M4 20V10 M10 20V4 M16 20v-7 M3 20h18",
   // What stands between a tool and the work. The composer's approval chip.
+  globe: "M2 12a10 10 0 1 0 20 0a10 10 0 1 0-20 0 M2 12h20 M12 2a15 15 0 0 1 0 20 M12 2a15 15 0 0 0 0 20",
   shield: "M12 3l7 3v6c0 4.2-2.9 7.4-7 9-4.1-1.6-7-4.8-7-9V6z",
   image: "M3 3h18v18H3z m0 13 5-5 5 6 3-3 5 6 M14 7h.01",
   info: "M2 12a10 10 0 1 0 20 0a10 10 0 1 0-20 0 M12 11v6 M12 7h.01",

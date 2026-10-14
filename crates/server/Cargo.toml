@@ -31,6 +31,7 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 sysinfo = { version = "0.38.4", default-features = false, features = ["system", "disk", "network", "component"] }
 dunce = "1"
 notify = "8"
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 
 [dev-dependencies]
 tokio-tungstenite = "0.29"
