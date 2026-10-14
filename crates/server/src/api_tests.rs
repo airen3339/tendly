@@ -55,6 +55,7 @@ impl Fixture {
             vec!["init", "-q"],
             vec!["config", "user.name", "AgentDock test"],
             vec!["config", "user.email", "test@agentdock.invalid"],
+            vec!["config", "core.autocrlf", "false"],
         ] {
             assert!(
                 Command::new("git")
