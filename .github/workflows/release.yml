@@ -53,6 +53,12 @@ jobs:
         if: matrix.zig
         with:
           version: 0.14.1
+      # Per target. A tag's own cache is visible to that tag alone, so this is
+      # saved by the dry run from main and read by the release that follows.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: taiki-e/install-action@v2
         if: matrix.zig
         with:

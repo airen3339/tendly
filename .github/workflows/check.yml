@@ -1,5 +1,22 @@
 name: Check
-on: [push, pull_request]
+on:
+  # Branches only: a release tag points at a commit already checked here, and
+  # the release workflow builds it again anyway.
+  push:
+    branches: ['**']
+  pull_request:
+
+# A newer push to the same branch makes the running check moot.
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Tests read panics, not a debugger: without debug info the compile and link
+  # are faster and the cache below is a fraction of the size.
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
+
 jobs:
   test:
     strategy:
@@ -14,6 +31,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      # Dependencies are most of every build and change rarely. Keyed on the
+      # lockfile and toolchain; saved from main only, so branches read it and
+      # do not each store their own.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: pnpm/action-setup@v4
         with:
           version: '10.30.3'
