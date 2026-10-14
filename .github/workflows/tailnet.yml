@@ -1,0 +1,108 @@
+name: Tailnet
+
+# Remote access through Tailscale, end to end, on a real machine of each kind.
+#
+# Each runner joins the tailnet as an ephemeral node, starts AgentDock the way
+# a person does (`agentdock --tailscale`), and checks what a phone would see:
+# the HTTPS address answers with a real certificate, the tailnet needs the
+# token while this machine does not, and `agentdock stop` takes the address
+# down again (on Windows that last part is done by the CLI, not the gateway).
+#
+# Run by hand from the Actions tab. It needs, once, in the Tailscale admin
+# console:
+#   - Access controls: a tag the CI owns, e.g. "tagOwners": {"tag:ci": ["autogroup:admin"]}
+#   - Settings → OAuth clients: a client with the Auth Keys write scope for
+#     tag:ci; its id and secret go in this repository's secrets as
+#     TS_OAUTH_CLIENT_ID and TS_OAUTH_SECRET
+#   - DNS: MagicDNS and HTTPS Certificates on
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+    env:
+      AGENTDOCK_HOME: ${{ github.workspace }}/.agentdock-ci
+      BIN: target/debug/agentdock-server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '10.30.3'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # The server embeds apps/web/dist, so the web build comes first.
+      - run: pnpm build:web
+      - run: cargo build -p agentdock-server
+
+      - name: Join the tailnet
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          hostname: agentdock-ci-${{ runner.os }}-${{ github.run_id }}
+      # tailscaled runs as root; changing serve as the runner user needs this,
+      # which is also what the settings page tells a person on Linux.
+      - name: Allow this user to configure Tailscale
+        if: runner.os == 'Linux'
+        run: sudo tailscale set --operator="$USER"
+
+      - name: Start with --tailscale
+        run: |
+          "$BIN" --tailscale start | tee start.txt
+          grep -q "Tailnet  https://" start.txt
+
+      - name: Check what a phone would see
+        run: |
+          status=$(curl -fsS http://127.0.0.1:28789/api/tailnet)
+          echo "$status" | jq .
+          test "$(echo "$status" | jq -r .phase)" = live
+          name=$(echo "$status" | jq -r .machine.name)
+          ip=$(echo "$status" | jq -r .machine.ip)
+          token=$(cat "$AGENTDOCK_HOME/token")
+          # The runner's own DNS is not what is under test; the certificate is,
+          # and --resolve still checks it against the name.
+          resolve=(--resolve "$name:443:$ip")
+          code() { curl -s -o /dev/null -w '%{http_code}' "${resolve[@]}" "$@"; }
+
+          curl -fsS "${resolve[@]}" "https://$name/api/health" | jq -e .ok
+          test "$(code "https://$name/api/workspaces")" = 401
+          test "$(code -H "Authorization: Bearer wrong" "https://$name/api/workspaces")" = 401
+          test "$(code -H "Authorization: Bearer $token" "https://$name/api/workspaces")" = 200
+          # This machine still needs nothing.
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:28789/api/workspaces)" = 200
+          curl -fsS http://127.0.0.1:28789/api/tailnet/login-code | jq -e '.svg | contains("<svg")'
+          if [ "$(echo "$status" | jq -r .verified)" != true ]; then
+            echo "::warning::The gateway could not reach its own address (verified=false); the checks above reached it with --resolve"
+          fi
+          echo "TARGET=$(echo "$status" | jq -r .target)" >> "$GITHUB_ENV"
+
+      - name: Stop takes the address down
+        run: |
+          "$BIN" stop
+          tailscale serve status --json | tee serve.json
+          if grep -q "$TARGET" serve.json; then
+            echo "::error::$TARGET is still published after agentdock stop"
+            exit 1
+          fi
+
+      - name: Gateway log
+        if: always()
+        run: cat "$AGENTDOCK_HOME/agentdock.log" 2>/dev/null || true

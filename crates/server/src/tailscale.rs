@@ -51,29 +51,45 @@ pub fn enabled() -> bool {
         .is_ok_and(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
 }
 
-/// The CLI to run. An explicit path wins; otherwise `tailscale` on PATH, and on
-/// macOS the one inside the app, which the App Store build does not put on
-/// PATH.
+/// The CLI to run. An explicit path wins; otherwise `tailscale` on PATH, and
+/// where the installer puts it when it is not: inside the app on macOS, which
+/// the App Store build does not put on PATH, and under Program Files on
+/// Windows, which a gateway started before the install does not see on PATH.
 fn program() -> String {
     if let Ok(explicit) = std::env::var("AGENTDOCK_TAILSCALE_BIN")
         && !explicit.is_empty()
     {
         return explicit;
     }
-    #[cfg(target_os = "macos")]
+    if which("tailscale").is_none()
+        && let Some(installed) = installed_elsewhere().filter(|path| path.is_file())
     {
-        let bundled = "/Applications/Tailscale.app/Contents/MacOS/Tailscale";
-        if which("tailscale").is_none() && std::path::Path::new(bundled).exists() {
-            return bundled.to_owned();
-        }
+        return installed.to_string_lossy().into_owned();
     }
     "tailscale".to_owned()
 }
 
-#[cfg(target_os = "macos")]
-fn which(name: &str) -> Option<std::path::PathBuf> {
+fn installed_elsewhere() -> Option<PathBuf> {
+    if cfg!(target_os = "macos") {
+        return Some("/Applications/Tailscale.app/Contents/MacOS/Tailscale".into());
+    }
+    if cfg!(windows) {
+        let programs =
+            std::env::var_os("ProgramFiles").unwrap_or_else(|| r"C:\Program Files".into());
+        return Some(
+            PathBuf::from(programs)
+                .join("Tailscale")
+                .join("tailscale.exe"),
+        );
+    }
+    None
+}
+
+/// `name` on PATH, as the shell would find it (with `.exe` on Windows).
+fn which(name: &str) -> Option<PathBuf> {
+    let file = format!("{name}{}", std::env::consts::EXE_SUFFIX);
     std::env::split_paths(&std::env::var_os("PATH")?)
-        .map(|dir| dir.join(name))
+        .map(|dir| dir.join(&file))
         .find(|path| path.is_file())
 }
 
@@ -122,8 +138,10 @@ fn not_installed(program: &str) -> Problem {
         problem
             .command("brew install --cask tailscale")
             .link("https://tailscale.com/download/mac")
-    } else if cfg!(target_os = "windows") {
-        problem.link("https://tailscale.com/download/windows")
+    } else if cfg!(windows) {
+        problem
+            .command("winget install --id tailscale.tailscale -e")
+            .link("https://tailscale.com/download/windows")
     } else {
         problem
             .command("curl -fsSL https://tailscale.com/install.sh | sh")
@@ -132,11 +150,15 @@ fn not_installed(program: &str) -> Problem {
 }
 
 /// How to start a daemon that is installed but not running, where that is a
-/// command: a service on Linux, and on macOS the Homebrew formula, which is a
-/// CLI and daemon without the app.
+/// command: a service on Linux and Windows (from an administrator PowerShell
+/// there), and on macOS the Homebrew formula, which is a CLI and daemon
+/// without the app.
 fn daemon_command() -> Option<&'static str> {
     if cfg!(target_os = "linux") {
         return Some("sudo systemctl enable --now tailscaled");
+    }
+    if cfg!(windows) {
+        return Some("Start-Service Tailscale");
     }
     #[cfg(target_os = "macos")]
     if !std::path::Path::new("/Applications/Tailscale.app").exists()
@@ -198,7 +220,12 @@ fn consent_link(output: &str) -> Option<String> {
 /// the wait ends as soon as it shows up.
 async fn tailscale(args: &[&str], limit: Duration) -> std::result::Result<String, Problem> {
     let program = program();
-    let mut child = Command::new(&program)
+    let mut command = Command::new(&program);
+    // The gateway runs without a console on Windows; without this every call
+    // would flash one up.
+    #[cfg(windows)]
+    command.creation_flags(agentdock_runtime::process::CREATE_NO_WINDOW);
+    let mut child = command
         .args(args)
         .kill_on_drop(true)
         .stdin(Stdio::null())
@@ -699,21 +726,66 @@ impl Tailnet {
     }
 
     fn save(&self, change: impl FnOnce(&mut Saved)) {
-        let path = self.inner.state_dir.join(STATE_FILE);
-        let mut saved = read_saved(&self.inner.state_dir);
-        change(&mut saved);
-        if let Err(error) = serde_json::to_string_pretty(&saved)
-            .map_err(std::io::Error::other)
-            .and_then(|text| std::fs::write(&path, text))
-        {
-            tracing::warn!(%error, path = %path.display(), "could not save the tailnet setting");
-        }
+        save(&self.inner.state_dir, change);
     }
 
     #[cfg(test)]
     pub fn disabled() -> Self {
         Self::new(&std::env::temp_dir().join("agentdock-no-tailnet"), 0)
     }
+}
+
+fn save(state_dir: &Path, change: impl FnOnce(&mut Saved)) {
+    let path = state_dir.join(STATE_FILE);
+    let mut saved = read_saved(state_dir);
+    change(&mut saved);
+    if let Err(error) = serde_json::to_string_pretty(&saved)
+        .map_err(std::io::Error::other)
+        .and_then(|text| std::fs::write(&path, text))
+    {
+        tracing::warn!(%error, path = %path.display(), "could not save the tailnet setting");
+    }
+}
+
+/// Remove what a gateway stopped from outside left published.
+///
+/// Windows has no signal a detached gateway can receive, so `agentdock stop`
+/// ends it without its shutdown, and the name would go on forwarding to a
+/// closed port: a phone would get an error page instead of nothing at all.
+/// Elsewhere the gateway withdrew on its way out and this finds nothing.
+pub async fn withdraw_left_behind(state_dir: &Path) {
+    let Some(published) = read_saved(state_dir).published else {
+        return;
+    };
+    let Ok(status) = tailscale(&["serve", "status", "--json"], Duration::from_secs(15)).await
+    else {
+        return;
+    };
+    if forwards_to(&status, &published) {
+        let https = format!("--https={HTTPS_PORT}");
+        if tailscale(&["serve", &https, "off"], Duration::from_secs(15))
+            .await
+            .is_err()
+        {
+            return;
+        }
+    }
+    save(state_dir, |saved| saved.published = None);
+}
+
+/// Whether any name serves `target` at 443.
+fn forwards_to(serve_status: &str, target: &str) -> bool {
+    let Ok(status) = serde_json::from_str::<Value>(serve_status) else {
+        return false;
+    };
+    status["Web"].as_object().is_some_and(|names| {
+        names.iter().any(|(host, web)| {
+            host.ends_with(&format!(":{HTTPS_PORT}"))
+                && web["Handlers"]["/"]["Proxy"]
+                    .as_str()
+                    .is_some_and(|proxy| proxy.trim_end_matches('/') == target)
+        })
+    })
 }
 
 fn read_saved(state_dir: &Path) -> Saved {
@@ -925,6 +997,10 @@ mod tests {
             None
         );
         assert!(serves_target(leftover, name, "http://127.0.0.1:51000"));
+        // Found without knowing the name, which a stopped gateway no longer has.
+        assert!(forwards_to(leftover, "http://127.0.0.1:51000"));
+        assert!(!forwards_to(leftover, "http://127.0.0.1:52000"));
+        assert!(!forwards_to("{}", "http://127.0.0.1:51000"));
         assert!(!serves_target(leftover, name, "http://127.0.0.1:52000"));
     }
 

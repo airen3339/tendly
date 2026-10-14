@@ -431,13 +431,14 @@ async fn tailnet_line(address: SocketAddr, wait: bool) -> Option<String> {
     }
 }
 
-fn gateway_stop(
+async fn gateway_stop(
     state_dir: &std::path::Path,
 ) -> std::result::Result<(), Box<dyn std::error::Error>> {
     match daemon::stop(state_dir, Duration::from_secs(20))? {
         Some(pid) => println!("Stopped AgentDock (pid {pid})"),
         None => println!("AgentDock is not running"),
     }
+    tailscale::withdraw_left_behind(state_dir).await;
     Ok(())
 }
 
@@ -664,12 +665,12 @@ async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
         Err(_) => DEFAULT_ADDRESS.parse()?,
     };
     match action.as_str() {
-        "stop" => return gateway_stop(&state_dir),
+        "stop" => return gateway_stop(&state_dir).await,
         "status" => return gateway_status(&state_dir, address).await,
         "logs" => return Ok(daemon::print_log(&state_dir, 80)?),
         "start" | "restart" => {
             if action == "restart" {
-                gateway_stop(&state_dir)?;
+                gateway_stop(&state_dir).await?;
             }
             return gateway_start(&state_dir, address).await;
         }
