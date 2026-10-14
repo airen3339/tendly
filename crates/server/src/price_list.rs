@@ -26,7 +26,7 @@ const SCHEMA_VERSION: u32 = 1;
 /// are and without signing in.
 const MIRRORS: [&str; 3] = [
     "https://cdn.jsdelivr.net/gh/wnzzer/tendly@main/data/prices.json",
-    "https://api.gitcode.com/api/v5/repos/wnzzer/agentdock/raw/data%2Fprices.json?ref=main",
+    "https://api.gitcode.com/api/v5/repos/wnzzer/tendly/raw/data%2Fprices.json?ref=main",
     "https://raw.githubusercontent.com/wnzzer/tendly/main/data/prices.json",
 ];
 const REFRESH_AFTER: Duration = Duration::from_secs(24 * 3600);
@@ -210,7 +210,7 @@ fn cache_path(state_dir: &Path) -> PathBuf {
 async fn fetch() -> Option<(Vec<u8>, PriceList)> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
-        .user_agent(concat!("agentdock/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("tendly/", env!("CARGO_PKG_VERSION")))
         .build()
         .ok()?;
     for url in MIRRORS {

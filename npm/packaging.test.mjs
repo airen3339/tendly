@@ -66,18 +66,15 @@ test('a built release installs as one coherent set', async (t) => {
 
   const manifest = async (pkg) => JSON.parse(await readFile(path.join(out, pkg, 'package.json'), 'utf8'));
   const main = await manifest('tendly');
-  const legacy = await manifest('agentdock');
   const order = (await readFile(path.join(out, 'publish-order.txt'), 'utf8')).trim().split('\n');
 
   // An optional dependency npm cannot find is skipped in silence, so a name or
   // version that does not match a package actually built degrades into the
   // "is not installed" path for every user rather than failing the publish.
   const built = (await readdir(out, { withFileTypes: true }))
-    .filter((entry) => entry.isDirectory() && entry.name !== 'tendly' && entry.name !== 'agentdock')
+    .filter((entry) => entry.isDirectory() && entry.name !== 'tendly')
     .map((entry) => `@wnzzer/${entry.name}`);
   assert.deepEqual(new Set(Object.keys(main.optionalDependencies)), new Set(built));
-  // The old name installs the very same binaries, so its installs keep updating.
-  assert.deepEqual(legacy.optionalDependencies, main.optionalDependencies);
   for (const [name, range] of Object.entries(main.optionalDependencies)) {
     assert.equal(range, version, `${name} must be pinned exactly, not to a range`);
   }
@@ -100,14 +97,14 @@ test('a built release installs as one coherent set', async (t) => {
   }
 
   // The registry must know every dependency before the package that names them.
-  assert.deepEqual(order.slice(-2), ['tendly', 'agentdock'], 'the main packages publish last');
+  assert.equal(order.at(-1), 'tendly', 'the main package publishes last');
   assert.equal(new Set(order).size, order.length, 'no package is published twice');
-  assert.equal(order.length, built.length + 2);
+  assert.equal(order.length, built.length + 1);
 
   // The binary embeds the web bundle, which embeds MIT-licensed brand vectors.
   // Publishing is redistribution, and that licence requires the notice to come
   // along; shipping only our own LICENSE would leave the obligation unmet.
-  for (const pkg of ['tendly', 'agentdock', 'tendly-darwin-arm64']) {
+  for (const pkg of ['tendly', 'tendly-darwin-arm64']) {
     const files = await readdir(path.join(out, pkg));
     assert.ok(files.includes('THIRD-PARTY-NOTICES.md'), `${pkg} omits the third-party notice`);
     assert.ok(files.includes('LICENSE'));
@@ -128,8 +125,6 @@ test('a built release installs as one coherent set', async (t) => {
   // The path the shim computes from the resolved manifest.
   assert.ok((await read('shim.cjs')).includes("path.join(path.dirname(manifest), 'bin', BINARY)"));
   assert.deepEqual(main.bin, { tendly: 'bin/tendly.js' });
-  // Both commands under the old name, so what the program prints still runs.
-  assert.deepEqual(legacy.bin, { agentdock: 'bin/tendly.js', tendly: 'bin/tendly.js' });
 });
 
 // npm inherits stdin. A loop fed by `done < list` hands it the remaining

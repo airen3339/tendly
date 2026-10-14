@@ -1,9 +1,9 @@
 //! References to existing native client homes. Never parses or copies credentials.
 use crate::{ApiError, AppState};
-use agentdock_domain::{NativeConfigReference, ProviderKind};
-use agentdock_runtime::SpawnSpec;
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, env, fs, path::PathBuf};
+use tendly_domain::{NativeConfigReference, ProviderKind};
+use tendly_runtime::SpawnSpec;
 
 pub fn source_views(state: &AppState) -> Vec<crate::native_history::SourceView> {
     state
@@ -138,7 +138,7 @@ fn quote(value: &str) -> String {
 /// Whether the operator allowed Tendly to add its usage capture to the
 /// status line of Claude sessions it launches. Off unless explicitly enabled.
 pub fn usage_capture_enabled() -> bool {
-    env::var("AGENTDOCK_CLAUDE_USAGE_CAPTURE")
+    env::var("TENDLY_CLAUDE_USAGE_CAPTURE")
         .map(|value| matches!(value.trim(), "1" | "true" | "on"))
         .unwrap_or(false)
 }
@@ -166,7 +166,7 @@ pub fn claude_config_home(config_env: Option<&str>) -> Option<PathBuf> {
 /// looks like.
 ///
 /// It is still an override of the account's own configuration, so it is opt-in:
-/// without `AGENTDOCK_CLAUDE_USAGE_CAPTURE=1` a session launches exactly as the
+/// without `TENDLY_CLAUDE_USAGE_CAPTURE=1` a session launches exactly as the
 /// native client would launch it, and an explicit usage check simply reports
 /// that nothing has been captured.
 pub fn claude_statusline(
@@ -198,7 +198,7 @@ pub fn claude_statusline(
         })
         .filter(|command| !command.trim().is_empty() && !command.contains("statusline-capture.mjs"))
     {
-        environment.insert("AGENTDOCK_STATUSLINE_DELEGATE".into(), existing);
+        environment.insert("TENDLY_STATUSLINE_DELEGATE".into(), existing);
     }
     (vec!["--settings".into(), overlay.to_string()], environment)
 }
@@ -214,7 +214,7 @@ pub fn launch_environment(
     // Preserve the host's native environment and config precedence. Tendly's
     // own secret references/access token never become native client overrides.
     // Shell aliases/functions and interactive shell startup files are not loaded.
-    let mut remove: Vec<String> = crate::bridge::agentdock_secrets()
+    let mut remove: Vec<String> = crate::bridge::tendly_secrets()
         .chain(env::var_os("CLAUDECODE").map(|_| "CLAUDECODE".to_owned()))
         .collect();
     if config_env.is_none() {

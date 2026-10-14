@@ -5,12 +5,12 @@ import { appendFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 
 assert.deepEqual(process.argv.slice(2), ['app-server']);
-assert.equal(process.env.AGENTDOCK_SECRET_TEST_TOKEN, undefined);
-assert.equal(process.env.AGENTDOCK_TOKEN, undefined);
+assert.equal(process.env.TENDLY_SECRET_TEST_TOKEN, undefined);
+assert.equal(process.env.TENDLY_TOKEN, undefined);
 let page = 0;
 for await (const line of createInterface({ input: process.stdin })) {
   const request = JSON.parse(line);
-  appendFileSync(process.env.AGENTDOCK_HISTORY_TEST_LOG, request.method + '\n');
+  appendFileSync(process.env.TENDLY_HISTORY_TEST_LOG, request.method + '\n');
   if (request.method === 'initialized') continue;
   let result;
   if (request.method === 'initialize') result = { userAgent: 'fixture' };
@@ -24,7 +24,7 @@ for await (const line of createInterface({ input: process.stdin })) {
     const row = { id: 'history-1', name: '修复 🦊 布局', cwd: request.params.cwd, updatedAt: 1700000000 };
     result = {
       data: [row, { ...row, id: 'foreign', cwd: '/foreign' }, { id: 'unscoped', updatedAt: 1700000000 }],
-      nextCursor: page++ === 0 || process.env.AGENTDOCK_HISTORY_TEST_REPEAT === '1' ? 'next' : null,
+      nextCursor: page++ === 0 || process.env.TENDLY_HISTORY_TEST_REPEAT === '1' ? 'next' : null,
     };
   }
   const encoded = Buffer.from(JSON.stringify({ id: request.id, result }) + '\n');

@@ -1,4 +1,4 @@
--- Sessions an agent started through AgentDock's own tools (agentdock_spawn),
+-- Sessions an agent started through Tendly's own tools (tendly_spawn),
 -- each with the session that started it. A session may read and message only
 -- the sessions it started, and a started session cannot start more; this is
 -- what those rules look up. Kept apart from `sessions` because it describes

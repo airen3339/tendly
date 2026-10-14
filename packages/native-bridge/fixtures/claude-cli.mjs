@@ -5,7 +5,7 @@
 import { createInterface } from 'node:readline';
 import { appendFileSync } from 'node:fs';
 // The parity suite reads what the client received; run by hand, nothing is logged.
-const log=value=>{if(process.env.AGENTDOCK_CHAT_TEST_LOG)appendFileSync(process.env.AGENTDOCK_CHAT_TEST_LOG,JSON.stringify(value)+'\n');};
+const log=value=>{if(process.env.TENDLY_CHAT_TEST_LOG)appendFileSync(process.env.TENDLY_CHAT_TEST_LOG,JSON.stringify(value)+'\n');};
 const send=message=>process.stdout.write(JSON.stringify(message)+'\n');
 log({event:'args',args:process.argv.slice(2)});
 const session='claude-fixture-session';

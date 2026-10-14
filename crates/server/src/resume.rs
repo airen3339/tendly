@@ -58,14 +58,14 @@ async fn fetch(id: &str, force: bool) -> Result<Plan, Box<dyn std::error::Error>
             "{url}/api/sessions/{id}/launch-plan{}",
             if force { "?force=true" } else { "" }
         ))
-        .header("x-agentdock-client", "cli");
+        .header("x-tendly-client", "cli");
     if let Some(token) = crate::security::existing_token() {
         request = request.bearer_auth(token);
     }
     let response = request
         .send()
         .await
-        .map_err(|_| format!("Tendly is not answering at {url}. Start it with `agentdock`."))?;
+        .map_err(|_| format!("Tendly is not answering at {url}. Start it with `tendly`."))?;
     let status = response.status();
     if !status.is_success() {
         let body: serde_json::Value = response.json().await.unwrap_or_default();

@@ -10,7 +10,6 @@
 //! place an agent's token opens: an agent cannot see, answer or undo its own
 //! requests. Only a signed-in browser can.
 use crate::{ApiError, AppState, db};
-use agentdock_domain::EndpointProfile;
 use axum::{
     Json, Router,
     extract::{
@@ -27,6 +26,7 @@ use std::{
     sync::{Arc, Mutex},
     time::Duration,
 };
+use tendly_domain::EndpointProfile;
 use tokio::sync::{broadcast, oneshot};
 use uuid::Uuid;
 

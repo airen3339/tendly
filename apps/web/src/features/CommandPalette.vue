@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
-import type { ProviderKind } from '@agentdock/protocol';
+import type { ProviderKind } from '@tendly/protocol';
 import { fuzzyFilter } from './fuzzy-search';
 import Icon from './Icon.vue';
 import ProviderIcon from './ProviderIcon.vue';

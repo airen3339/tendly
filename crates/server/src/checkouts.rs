@@ -7,7 +7,6 @@
 //! workspaces of their own -- so switching is a property of one session and
 //! never moves the others.
 use crate::{ApiError, AppState, Result, db, directories, root, session_record, workspace_io};
-use agentdock_domain::{Session, SessionId, WorkspaceId};
 use axum::{
     Json, Router,
     extract::{Path, State},
@@ -15,6 +14,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use tendly_domain::{Session, SessionId, WorkspaceId};
 
 /// A checkout, chosen by branch or by an existing worktree's directory.
 #[derive(Debug, Default, Deserialize)]
@@ -93,7 +93,7 @@ pub async fn resolve(
                 let parent = planned.parent().and_then(|p| p.parent()).map(PathBuf::from);
                 if !parent.is_some_and(|p| directories::within_roots(&state.workspace_roots, &p)) {
                     return Err(ApiError::bad(
-                        "The worktree would sit outside the roots this server may use. Set AGENTDOCK_WORKSPACE_ROOTS to allow it.",
+                        "The worktree would sit outside the roots this server may use. Set TENDLY_WORKSPACE_ROOTS to allow it.",
                     ));
                 }
                 let create = choice.create && !listed.branches.contains(&branch);
@@ -113,7 +113,7 @@ pub async fn resolve(
     }
     if !directories::within_roots(&state.workspace_roots, &canonical) {
         return Err(ApiError::bad(
-            "That worktree is outside the roots this server may use. Set AGENTDOCK_WORKSPACE_ROOTS to allow it.",
+            "That worktree is outside the roots this server may use. Set TENDLY_WORKSPACE_ROOTS to allow it.",
         ));
     }
     Ok(Checkout {

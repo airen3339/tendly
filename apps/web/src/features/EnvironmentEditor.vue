@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import type { EnvironmentOverrides } from "@agentdock/protocol";
+import type { EnvironmentOverrides } from "@tendly/protocol";
 import { newEnvironmentRow, parseEnvironmentRows, type EnvironmentRow } from "./environment-model";
 import Icon from "./Icon.vue";
 import { useI18n } from "../i18n";
@@ -27,7 +27,7 @@ function remove(id: string) { if (!props.disabled && props.supported) emit("upda
     <div v-for="row in modelValue" :key="row.id" class="environment-row">
       <label><span>{{ t('Variable name') }}</span><input :value="row.name" :disabled="disabled||!supported" placeholder="HTTPS_PROXY" autocomplete="off" spellcheck="false" @input="update(row.id,{name:($event.target as HTMLInputElement).value})"/></label>
       <label><span>{{ t('Value type') }}</span><select :value="row.kind" :disabled="disabled||!supported" @change="update(row.id,{kind:($event.target as HTMLSelectElement).value as EnvironmentRow['kind']})"><option value="literal">{{ t('Plain value') }}</option><option value="secret_ref">{{ t('Secret reference') }}</option><option value="unset">{{ t('Remove inherited value') }}</option><option value="main_model">{{ t('Main model') }}</option><option value="main_model_context">{{ t('Main model\'s context window') }}</option></select></label>
-      <label class="environment-value"><span>{{ t('Value') }}</span><input :value="row.value" :disabled="disabled||!supported||row.kind==='unset'||row.kind==='main_model'||row.kind==='main_model_context'" :placeholder="row.kind==='secret_ref'?'env:AGENTDOCK_SECRET_NAME':row.kind==='unset'?t('No value needed'):row.kind==='main_model'?t('Follows the main model'):row.kind==='main_model_context'?t('Follows the main model\'s context window'):'http://127.0.0.1:7890'" autocomplete="off" spellcheck="false" @input="update(row.id,{value:($event.target as HTMLInputElement).value})"/></label>
+      <label class="environment-value"><span>{{ t('Value') }}</span><input :value="row.value" :disabled="disabled||!supported||row.kind==='unset'||row.kind==='main_model'||row.kind==='main_model_context'" :placeholder="row.kind==='secret_ref'?'env:TENDLY_SECRET_NAME':row.kind==='unset'?t('No value needed'):row.kind==='main_model'?t('Follows the main model'):row.kind==='main_model_context'?t('Follows the main model\'s context window'):'http://127.0.0.1:7890'" autocomplete="off" spellcheck="false" @input="update(row.id,{value:($event.target as HTMLInputElement).value})"/></label>
       <button type="button" class="icon-button" :disabled="disabled||!supported" :aria-label="t('Remove environment override')" @click="remove(row.id)"><Icon name="close" :size="14"/></button>
     </div>
     <div v-for="message in validation.errors" :key="message" class="inline-error" role="alert">{{ t(message) }}</div>

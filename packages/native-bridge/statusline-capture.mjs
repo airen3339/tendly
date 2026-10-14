@@ -22,7 +22,7 @@ const MAX_PAYLOAD = 262144;
 // load every bridge module on each status line refresh.
 function captureDirectory() {
   const configured = process.env.CLAUDE_CONFIG_DIR;
-  return join(configured && configured.trim() ? configured : join(homedir(), '.claude'), 'agentdock');
+  return join(configured && configured.trim() ? configured : join(homedir(), '.claude'), 'tendly');
 }
 
 function store(raw) {
@@ -39,7 +39,7 @@ function store(raw) {
 }
 
 function delegate(raw) {
-  const command = process.env.AGENTDOCK_STATUSLINE_DELEGATE;
+  const command = process.env.TENDLY_STATUSLINE_DELEGATE;
   if (!command || !command.trim()) return Promise.resolve();
   return new Promise(resolve => {
     const child = spawn(command, { shell: true, stdio: ['pipe', 'inherit', 'ignore'] });

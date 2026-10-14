@@ -1,4 +1,4 @@
--- Whether one session gets AgentDock's own agent tools, overriding the
+-- Whether one session gets Tendly's own agent tools, overriding the
 -- preference for all sessions. No row means the session follows the
 -- preference; a row says on (1) or off (0). Applied at the session's next
 -- launch, when the tools are injected.

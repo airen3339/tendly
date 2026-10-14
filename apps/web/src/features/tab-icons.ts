@@ -1,5 +1,5 @@
-import type { AgentProviderKind, ProviderKind } from "@agentdock/protocol";
-import type { LeafPaneKind } from "@agentdock/protocol/layout";
+import type { AgentProviderKind, ProviderKind } from "@tendly/protocol";
+import type { LeafPaneKind } from "@tendly/protocol/layout";
 import { AGENT_CLIENTS, clientInfo, isProviderKind } from "./clients";
 import { ICON_PALETTE } from "./icon-palette";
 import { mediaKind } from "./media-kind";

@@ -3,9 +3,9 @@
 use super::{AccountOperations, CatalogStep, ClientAdapter, EndpointLaunch};
 use crate::usage::{Call, FileState, Source, Tokens, empty, number, timestamp};
 use crate::{ApiError, AppState};
-use agentdock_domain::{EndpointProfile, ProviderKind};
 use serde_json::Value;
 use std::{collections::BTreeMap, sync::Arc};
+use tendly_domain::{EndpointProfile, ProviderKind};
 
 pub struct ClaudeCode;
 
@@ -20,7 +20,7 @@ impl ClientAdapter for ClaudeCode {
         "claude"
     }
     fn bin_override(&self) -> &'static str {
-        "AGENTDOCK_CLAUDE_BIN"
+        "TENDLY_CLAUDE_BIN"
     }
     fn config_key(&self) -> &'static str {
         "CLAUDE_CONFIG_DIR"
@@ -29,7 +29,7 @@ impl ClientAdapter for ClaudeCode {
         ".claude"
     }
     fn history_source(&self) -> (&'static str, &'static str) {
-        ("claude-default", "AGENTDOCK_CLAUDE_HISTORY_DIR")
+        ("claude-default", "TENDLY_CLAUDE_HISTORY_DIR")
     }
     fn source_order(&self) -> u8 {
         1
@@ -131,7 +131,7 @@ impl ClientAdapter for ClaudeCode {
     fn equip_tools(
         &self,
         state: &AppState,
-        session: agentdock_domain::SessionId,
+        session: tendly_domain::SessionId,
         program: &str,
         identity: &[(String, String)],
         args: &mut Vec<String>,
@@ -142,7 +142,7 @@ impl ClientAdapter for ClaudeCode {
             .iter()
             .map(|(key, value)| (key.clone(), Value::from(value.as_str())))
             .collect();
-        let config = serde_json::json!({ "mcpServers": { "agentdock": {
+        let config = serde_json::json!({ "mcpServers": { "tendly": {
             "type": "stdio", "command": program, "args": ["mcp"], "env": environment,
         } } });
         crate::security::write_owner_only(&path, &config.to_string())
@@ -150,7 +150,7 @@ impl ClientAdapter for ClaudeCode {
         // `=` form: both flags take several values and would swallow the
         // argument after them.
         args.push(format!("--mcp-config={}", path.to_string_lossy()));
-        args.push("--allowedTools=mcp__agentdock".into());
+        args.push("--allowedTools=mcp__tendly".into());
         Ok(())
     }
 
@@ -214,13 +214,13 @@ impl ClientAdapter for ClaudeCode {
         ]
     }
     fn catalog_opening(&self) -> &'static str {
-        "{\"type\":\"control_request\",\"request_id\":\"agentdock-models\",\"request\":{\"subtype\":\"initialize\"}}\n"
+        "{\"type\":\"control_request\",\"request_id\":\"tendly-models\",\"request\":{\"subtype\":\"initialize\"}}\n"
     }
     fn catalog_step(&self, packet: &Value, _stage: &mut u8) -> CatalogStep {
         let Some(response) = packet.get("response") else {
             return CatalogStep::Wait;
         };
-        if response.get("request_id").and_then(Value::as_str) != Some("agentdock-models") {
+        if response.get("request_id").and_then(Value::as_str) != Some("tendly-models") {
             return CatalogStep::Wait;
         }
         CatalogStep::Done(

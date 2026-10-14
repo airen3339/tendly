@@ -4,7 +4,7 @@ import { setTerminalThemePreference, setThemePreference, terminalThemePreference
 import { RECENT_DAY_CHOICES, recentDays, setRecentDays, type RecentDays } from './recent-sessions';
 import { CHAT_FONTS, INTERFACE_FONTS, PALETTES, TEXT_SCALES, chatFont, interfaceFont, palette, setChatFont, setInterfaceFont, setPalette, setTextScale, textScale, type ChatFont, type InterfaceFont, type Palette, type TextScale } from './appearance';
 import { desktopNotifications, notificationSupport, setDesktopNotifications } from './attention';
-import type { EndpointProfile } from '@agentdock/protocol';
+import type { EndpointProfile } from '@tendly/protocol';
 import ProviderIcon from './ProviderIcon.vue';
 import Icon from './Icon.vue';
 import { errorMessage, json, providerLabel, request } from './api';

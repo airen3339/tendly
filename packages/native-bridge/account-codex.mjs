@@ -113,7 +113,7 @@ async function readCodex(client, refresh, signal) {
 export async function codexAccount(job, { emit = () => {}, clientFactory = value => new RpcClient(value, env), signal, authorizeReset = async () => {}, env }) {
   const client = clientFactory(job);
   try {
-    await client.request('initialize', { clientInfo: { name: 'agentdock_accounts', title: 'Tendly account management', version: '0.1.0' } }, signal);
+    await client.request('initialize', { clientInfo: { name: 'tendly_accounts', title: 'Tendly account management', version: '0.1.0' } }, signal);
     client.notify('initialized');
     if (job.action === 'login') {
       if (!['device', 'browser'].includes(job.mode)) throw new Error('Choose a supported login mode.');

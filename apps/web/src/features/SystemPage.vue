@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import type { Session } from '@agentdock/protocol';
+import type { Session } from '@tendly/protocol';
 import { ApiError, errorMessage, providerLabel, request } from './api';
 import PageShell from './PageShell.vue';
 import ProviderIcon from './ProviderIcon.vue';
@@ -17,7 +17,7 @@ import { formatBytes, formatDuration, formatRate, levelFor, pushSample, sparkPat
  * history here in the browser so each figure shows which way it is heading.
  */
 interface SystemDetail {
-  host: { hostname: string | null; os: string | null; kernel: string | null; arch: string; uptime_seconds: number; agentdock_version: string; agentdock_uptime_seconds: number };
+  host: { hostname: string | null; os: string | null; kernel: string | null; arch: string; uptime_seconds: number; tendly_version: string; tendly_uptime_seconds: number };
   load: { one: number; five: number; fifteen: number } | null;
   cpu: { percent: number; count: number; brand: string | null; frequency_mhz: number | null; cores: number[] };
   memory: { used_bytes: number; total_bytes: number; available_bytes: number; swap_used_bytes: number; swap_total_bytes: number };
@@ -153,7 +153,7 @@ const subtitle = computed(() => {
       <template v-if="detail">
         <div class="system-facts">
           <span><Icon name="clock" :size="14" />{{ t('Up {time}', { time: formatDuration(detail.host.uptime_seconds) }) }}</span>
-          <span><Icon name="spark" :size="14" />Tendly {{ detail.host.agentdock_version }} · {{ t('running {time}', { time: formatDuration(detail.host.agentdock_uptime_seconds) }) }}</span>
+          <span><Icon name="spark" :size="14" />Tendly {{ detail.host.tendly_version }} · {{ t('running {time}', { time: formatDuration(detail.host.tendly_uptime_seconds) }) }}</span>
           <span v-if="detail.cpu.brand"><Icon name="gauge" :size="14" />{{ detail.cpu.brand }}<template v-if="detail.cpu.frequency_mhz && !clocks"> · {{ (detail.cpu.frequency_mhz / 1000).toFixed(1) }} GHz</template></span>
           <span v-if="clocks" :title="t('Clock while running, over the last moment')"><Icon name="gauge" :size="14" />{{ clocks }}</span>
         </div>

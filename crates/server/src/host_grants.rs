@@ -132,7 +132,7 @@ mod tests {
 
     #[test]
     fn a_grant_covers_a_file_or_its_folder_and_never_the_root_or_credentials() {
-        let base = std::env::temp_dir().join(format!("agentdock-grant-{}", uuid::Uuid::new_v4()));
+        let base = std::env::temp_dir().join(format!("tendly-grant-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(base.join("logs")).unwrap();
         std::fs::write(base.join("logs/app.log"), "line").unwrap();
         let file = base.join("logs/app.log");

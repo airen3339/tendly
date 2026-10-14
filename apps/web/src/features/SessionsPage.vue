@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import type { ProviderKind, Session, Workspace } from '@agentdock/protocol';
+import type { ProviderKind, Session, Workspace } from '@tendly/protocol';
 import { providerLabel } from './api';
 import { PROVIDER_KINDS } from './clients';
 import { filterSessionList, isEphemeralSession, isSessionArchived } from './session-list';

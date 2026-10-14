@@ -1,7 +1,7 @@
 use super::*;
-use agentdock_domain::InteractionMode;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use tendly_domain::InteractionMode;
 
 fn content_hash(content: &str) -> String {
     format!("{:x}", Sha256::digest(content.as_bytes()))
@@ -227,7 +227,7 @@ impl Store {
             .as_ref()
             .map(|p| p.environment.clone())
             .unwrap_or_default();
-        agentdock_domain::validate_environment(&environment)
+        tendly_domain::validate_environment(&environment)
             .map_err(|_| rusqlite::Error::InvalidQuery)?;
         let encoded = snapshot
             .as_ref()
@@ -742,7 +742,7 @@ mod tests {
 
     #[test]
     fn every_message_the_user_sends_becomes_the_sessions_preview() {
-        let path = std::env::temp_dir().join(format!("agentdock-preview-{}.db", Uuid::new_v4()));
+        let path = std::env::temp_dir().join(format!("tendly-preview-{}.db", Uuid::new_v4()));
         let store = Store::open(&path).unwrap();
         let workspace = store.create_workspace("Fixture", "/fixture").unwrap();
         let session = store
@@ -783,8 +783,7 @@ mod tests {
     }
     #[test]
     fn transcript_receipts_and_sequence_survive_reopen_and_restart_does_not_replay_messages() {
-        let path =
-            std::env::temp_dir().join(format!("agentdock-conversation-{}.db", Uuid::new_v4()));
+        let path = std::env::temp_dir().join(format!("tendly-conversation-{}.db", Uuid::new_v4()));
         let id;
         {
             let store = Store::open(&path).unwrap();
@@ -1023,7 +1022,7 @@ mod tests {
     #[test]
     fn a_message_finished_after_a_restart_is_compacted_too() {
         let path =
-            std::env::temp_dir().join(format!("agentdock-restart-deltas-{}.db", Uuid::new_v4()));
+            std::env::temp_dir().join(format!("tendly-restart-deltas-{}.db", Uuid::new_v4()));
         let id = {
             let store = Store::open(&path).unwrap();
             let id = chat(&store);
@@ -1119,7 +1118,7 @@ mod tests {
 
     #[test]
     fn the_first_message_names_the_session_and_a_rename_is_never_overwritten() {
-        let path = std::env::temp_dir().join(format!("agentdock-title-{}.db", Uuid::new_v4()));
+        let path = std::env::temp_dir().join(format!("tendly-title-{}.db", Uuid::new_v4()));
         let store = Store::open(&path).unwrap();
         let workspace = store.create_workspace("Fixture", "/fixture").unwrap();
         let user = |text: &str| json!({"type":"message","role":"user","text":text});

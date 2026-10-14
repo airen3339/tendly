@@ -1,4 +1,4 @@
-import type { GitCommit, GitFile } from "@agentdock/protocol";
+import type { GitCommit, GitFile } from "@tendly/protocol";
 
 /** Both sides changed it and Git could not combine them: DD, AU, UD, UA, DU, AA or UU. */
 export const isConflictedFile = (file: GitFile) => file.index === "U" || file.worktree === "U" || (file.index === "A" && file.worktree === "A") || (file.index === "D" && file.worktree === "D");

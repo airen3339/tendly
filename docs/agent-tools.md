@@ -4,18 +4,18 @@ Claude Code and Codex sessions can look at Tendly and, with your say, configure 
 
 ## How agents reach it
 
-Every Claude Code and Codex session Tendly launches carries an `agentdock` MCP server, added through that launch's own flags (`--mcp-config` for Claude, `-c mcp_servers.agentdock.*` for Codex). Your `~/.claude`, `~/.codex` and any host configuration a profile points at are never written. Terminals get only the environment variables below.
+Every Claude Code and Codex session Tendly launches carries an `tendly` MCP server, added through that launch's own flags (`--mcp-config` for Claude, `-c mcp_servers.tendly.*` for Codex). Your `~/.claude`, `~/.codex` and any host configuration a profile points at are never written. Terminals get only the environment variables below.
 
 The MCP server is `tendly mcp`, a stdio relay: it forwards tool calls to the running Tendly server, which decides everything. To use the same tools from a client you run yourself, outside Tendly:
 
 ```sh
-claude mcp add agentdock -- tendly mcp
-codex mcp add agentdock -- tendly mcp
+claude mcp add tendly -- tendly mcp
+codex mcp add tendly -- tendly mcp
 ```
 
 Such a caller is *external*: it has no session of its own, so the session tools below are not available to it.
 
-Each launch also gets `AGENTDOCK_URL`, `AGENTDOCK_SESSION_ID` and its own `AGENTDOCK_AGENT_TOKEN`. The token is good only while that session's process runs, and only for `/api/agent/`.
+Each launch also gets `TENDLY_URL`, `TENDLY_SESSION_ID` and its own `TENDLY_AGENT_TOKEN`. The token is good only while that session's process runs, and only for `/api/agent/`.
 
 Turn it off for every session under **Settings → Preferences → Tendly tools for agents**, or for one session from its **⋯** menu (**Tendly tools: Default / On / Off**; one session's choice wins over the preference). Either applies from the session's next start, when the tools are injected. A session cannot change its own setting: the switch is not reachable with its agent token.
 
@@ -23,16 +23,16 @@ Turn it off for every session under **Settings → Preferences → Tendly tools 
 
 | Tool | What it does | Asks you first |
 | --- | --- | --- |
-| `agentdock_status` | Which session, workspace, directory and endpoint is calling | — |
-| `agentdock_list` | Workspaces, sessions (metadata only), endpoint profiles (whether a key is set, never the key), installed clients | — |
-| `agentdock_endpoint` | Create, change, delete, test, or import a host configuration as an endpoint profile | Yes, except `test` |
-| `agentdock_preferences` | New-session defaults per client: endpoint, effort, permission; the interface and terminal theme | Only a switch to running tools without asking |
-| `agentdock_workspace` | Add a directory as a workspace | — |
-| `agentdock_spawn` | Start a Claude Code or Codex session with a first message, optionally on its own branch | The first time per session |
-| `agentdock_session` | Follow sessions it started (`list`, `result`, `wait`, `message`); rename or keep its own | — |
-| `agentdock_show` | Open a file at a line, the Git changes, or a session in your window | — |
-| `agentdock_usage` | The quota its official account last reported | — |
-| `agentdock_canvas` | List the tabs on the canvas; close some or all | Only when it would discard a temporary session still working |
+| `tendly_status` | Which session, workspace, directory and endpoint is calling | — |
+| `tendly_list` | Workspaces, sessions (metadata only), endpoint profiles (whether a key is set, never the key), installed clients | — |
+| `tendly_endpoint` | Create, change, delete, test, or import a host configuration as an endpoint profile | Yes, except `test` |
+| `tendly_preferences` | New-session defaults per client: endpoint, effort, permission; the interface and terminal theme | Only a switch to running tools without asking |
+| `tendly_workspace` | Add a directory as a workspace | — |
+| `tendly_spawn` | Start a Claude Code or Codex session with a first message, optionally on its own branch | The first time per session |
+| `tendly_session` | Follow sessions it started (`list`, `result`, `wait`, `message`); rename or keep its own | — |
+| `tendly_show` | Open a file at a line, the Git changes, or a session in your window | — |
+| `tendly_usage` | The quota its official account last reported | — |
+| `tendly_canvas` | List the tabs on the canvas; close some or all | Only when it would discard a temporary session still working |
 
 ## What you see
 

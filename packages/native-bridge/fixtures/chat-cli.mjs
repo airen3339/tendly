@@ -4,12 +4,12 @@ import { createInterface } from 'node:readline';
 import { appendFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 const codex=process.argv.includes('app-server');
-const log=value=>appendFileSync(process.env.AGENTDOCK_CHAT_TEST_LOG,JSON.stringify(value)+'\n');
+const log=value=>appendFileSync(process.env.TENDLY_CHAT_TEST_LOG,JSON.stringify(value)+'\n');
 const send=message=>process.stdout.write(JSON.stringify(message)+'\n');
 const native=(method,params)=>send({method,params});
 let turn=0,thread='fixture-thread',mode='',activeTurn,requestId;
-assert.equal(process.env.AGENTDOCK_CHAT_TEST_INHERITED,'kept');
-process.stderr.write(process.env.AGENTDOCK_SECRET_TEST_CREDENTIAL+' diagnostic must not reach the host\n');
+assert.equal(process.env.TENDLY_CHAT_TEST_INHERITED,'kept');
+process.stderr.write(process.env.TENDLY_SECRET_TEST_CREDENTIAL+' diagnostic must not reach the host\n');
 log({event:'args',args:process.argv.slice(2)});
 
 function completed(status='completed') {

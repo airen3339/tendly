@@ -1,6 +1,5 @@
 #!/usr/bin/env node
-// Entry point for `@wnzzer/tendly` (and `@wnzzer/agentdock`, its name before).
-// The real program is a Rust binary that
+// Entry point for `@wnzzer/tendly`. The real program is a Rust binary that
 // ships in a per-platform package; npm installs only the one matching this
 // machine, via the `os`/`cpu` fields on those packages. This file finds it and
 // hands over.
@@ -56,22 +55,6 @@ function locate() {
     );
   }
   return path.join(path.dirname(manifest), 'bin', BINARY);
-}
-
-// Installed under the old name: say once per terminal command what to run
-// instead. Only to a person at a terminal, never into a service's log.
-function installedAs() {
-  try {
-    return require('../package.json').name;
-  } catch {
-    return undefined;
-  }
-}
-if (installedAs() === '@wnzzer/agentdock' && process.stderr.isTTY) {
-  process.stderr.write(
-    'AgentDock is now Tendly. Move to the new package when convenient:\n' +
-      '  npm uninstall -g @wnzzer/agentdock && npm install -g @wnzzer/tendly\n\n',
-  );
 }
 
 const child = spawn(locate(), process.argv.slice(2), { stdio: 'inherit' });

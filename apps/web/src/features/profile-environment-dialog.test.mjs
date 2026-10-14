@@ -93,7 +93,7 @@ test('capability loss blocks save and navigation asks before discarding raw envi
 
 test('duplicating opens the short copy form, which creates a profile sharing the key by reference', async () => {
   capabilities.environment = true;
-  const original = { ...profile(), endpoint_url: 'https://relay.example/v1', model: 'gpt-fixture', secret_ref: 'env:AGENTDOCK_SECRET_FIXTURE' };
+  const original = { ...profile(), endpoint_url: 'https://relay.example/v1', model: 'gpt-fixture', secret_ref: 'env:TENDLY_SECRET_FIXTURE' };
   const { state } = await setup([original]);
   state.duplicate(original);
   assert.equal(state.copySource.value.id, original.id);
@@ -119,7 +119,7 @@ test('duplicating opens the short copy form, which creates a profile sharing the
   assert.equal(sent[0].body.name, 'Fixture 副本');
   assert.equal(sent[0].body.endpoint_url, 'https://relay.example/v1');
   assert.equal(sent[0].body.model, 'gpt-other');
-  assert.equal(sent[0].body.secret_ref, 'env:AGENTDOCK_SECRET_FIXTURE');
+  assert.equal(sent[0].body.secret_ref, 'env:TENDLY_SECRET_FIXTURE');
   assert.deepEqual(sent[0].body.environment, { MODE: { kind: 'literal', value: 'old' } });
   assert.equal(created[0].id, 'copy-fixture');
 });

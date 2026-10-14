@@ -9,7 +9,7 @@
  * same cards; answering in one clears it in all.
  */
 import { onBeforeUnmount, reactive, ref, watch } from "vue";
-import type { ProviderKind } from "@agentdock/protocol";
+import type { ProviderKind } from "@tendly/protocol";
 import { errorMessage, json, request } from "./api";
 import ProviderIcon from "./ProviderIcon.vue";
 import Icon from "./Icon.vue";

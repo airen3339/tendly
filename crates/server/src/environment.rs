@@ -1,10 +1,10 @@
 //! Explicit overrides only. No host environment snapshot is persisted or exposed.
 use crate::ApiError;
-use agentdock_domain::{EnvironmentOverrides, EnvironmentValue};
-use agentdock_runtime::SpawnSpec;
+use tendly_domain::{EnvironmentOverrides, EnvironmentValue};
+use tendly_runtime::SpawnSpec;
 
 pub fn validate(values: &EnvironmentOverrides) -> Result<(), ApiError> {
-    agentdock_domain::validate_environment(values).map_err(ApiError::bad)
+    tendly_domain::validate_environment(values).map_err(ApiError::bad)
 }
 
 /// What a launch knows that an environment value can follow: the session's
@@ -104,14 +104,14 @@ mod tests {
             (
                 "OPENAI_API_KEY".into(),
                 EnvironmentValue::SecretRef {
-                    reference: "env:AGENTDOCK_SECRET_FIXTURE".into(),
+                    reference: "env:TENDLY_SECRET_FIXTURE".into(),
                 },
             ),
             ("REMOVE".into(), EnvironmentValue::Unset),
         ]
         .into();
         apply_with(&mut spec, &values, Launch::default(), |key| {
-            assert_eq!(key, "AGENTDOCK_SECRET_FIXTURE");
+            assert_eq!(key, "TENDLY_SECRET_FIXTURE");
             Some("synthetic-secret-value".into())
         })
         .unwrap();
@@ -140,7 +140,7 @@ mod tests {
         let values = [(
             "OPENAI_API_KEY".into(),
             EnvironmentValue::SecretRef {
-                reference: "env:AGENTDOCK_SECRET_FIXTURE".into(),
+                reference: "env:TENDLY_SECRET_FIXTURE".into(),
             },
         )]
         .into();

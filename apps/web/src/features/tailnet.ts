@@ -58,10 +58,7 @@ export function tailnetSteps(status: TailnetStatus): { id: TailnetStep; state: S
 
 /** The token a sign-in link carries in its fragment (`#tendly-token=…`). */
 export const LOGIN_FRAGMENT = "tendly-token";
-/** What a link printed or scanned before the rename to Tendly carries. */
-const FORMER_LOGIN_FRAGMENT = "agentdock-token";
 export function tokenFromHash(hash: string): string | null {
-  const params = new URLSearchParams(hash.replace(/^#/, ""));
-  const value = params.get(LOGIN_FRAGMENT) ?? params.get(FORMER_LOGIN_FRAGMENT);
+  const value = new URLSearchParams(hash.replace(/^#/, "")).get(LOGIN_FRAGMENT);
   return value?.trim() || null;
 }

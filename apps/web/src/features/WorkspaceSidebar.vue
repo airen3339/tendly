@@ -2,7 +2,7 @@
 import WorkspaceBranchMenu from "./WorkspaceBranchMenu.vue";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { ComponentPublicInstance } from "vue";
-import type { ProviderKind, Session, Workspace } from "@agentdock/protocol";
+import type { ProviderKind, Session, Workspace } from "@tendly/protocol";
 import { providerLabel } from "./api";
 import { emptyWorkspaceGroupPreferences, groupWorkspaces, loadWorkspaceGroupPreferences, saveWorkspaceGroupPreferences, workspaceGroupStorageKey } from "./workspace-groups";
 import type { WorkspaceGroup } from "./workspace-groups";

@@ -24,7 +24,7 @@ async function runCodexFixture(repeatedCursor=false) {
   await chmod(fixture,0o755);
   const log=join(root,'requests.log');
   const child=spawn(process.execPath,[fileURLToPath(new URL('./history.mjs',import.meta.url))],{
-    env:{...process.env,AGENTDOCK_CODEX_BIN:fixture,AGENTDOCK_SECRET_TEST_TOKEN:'fake-test-secret',AGENTDOCK_TOKEN:'fake-test-token',AGENTDOCK_HISTORY_TEST_LOG:log,AGENTDOCK_HISTORY_TEST_REPEAT:repeatedCursor?'1':'0'},
+    env:{...process.env,TENDLY_CODEX_BIN:fixture,TENDLY_SECRET_TEST_TOKEN:'fake-test-secret',TENDLY_TOKEN:'fake-test-token',TENDLY_HISTORY_TEST_LOG:log,TENDLY_HISTORY_TEST_REPEAT:repeatedCursor?'1':'0'},
     stdio:['pipe','pipe','pipe'],
   });
   const chunks=[];child.stdout.on('data',chunk=>chunks.push(chunk));child.stderr.resume();

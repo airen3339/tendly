@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed,onBeforeUnmount,onMounted,ref,watch } from "vue";
-import type { NativeHistoryItem,NativeHistorySource,Session,Workspace } from "@agentdock/protocol";
+import type { NativeHistoryItem,NativeHistorySource,Session,Workspace } from "@tendly/protocol";
 import { useI18n } from "../i18n";
 import { errorMessage,json,request,workspacePath } from "./api";
 import { fuzzyFilter } from "./fuzzy-search";

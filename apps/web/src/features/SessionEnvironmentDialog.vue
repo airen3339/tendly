@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import type { Session } from "@agentdock/protocol";
+import type { Session } from "@tendly/protocol";
 import ModalDialog from "./ModalDialog.vue";
 import EnvironmentEditor from "./EnvironmentEditor.vue";
 import { environmentRows, parseEnvironmentRows } from "./environment-model";

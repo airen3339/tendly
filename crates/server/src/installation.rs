@@ -1,11 +1,11 @@
 //! Installation/state paths are independent of the selected project workspace.
-use agentdock_persistence::Store;
 use std::{
     env, fs, io,
     net::SocketAddr,
     path::{Path, PathBuf},
     sync::Arc,
 };
+use tendly_persistence::Store;
 use tokio::net::TcpListener;
 
 /// Keep this value alive until the server has shut down. The store drops before
@@ -88,7 +88,7 @@ impl OwnershipLocks {
                     io::Error::new(io::ErrorKind::InvalidInput, "Invalid database path")
                 })?
                 .to_os_string();
-            lock_name.push(".agentdock.lock");
+            lock_name.push(".tendly.lock");
             Some(lock_file(&canonical.with_file_name(lock_name), "database")?)
         };
         Ok(Self {
@@ -151,7 +151,7 @@ fn lock_file(path: &Path, resource: &str) -> io::Result<OwnershipLock> {
         fs::TryLockError::WouldBlock => io::Error::new(
             io::ErrorKind::WouldBlock,
             format!(
-                "Tendly {resource} is already in use by another server or initialization. Stop that instance or choose a separate AGENTDOCK_HOME and AGENTDOCK_DB."
+                "Tendly {resource} is already in use by another server or initialization. Stop that instance or choose a separate TENDLY_HOME and TENDLY_DB."
             ),
         ),
         fs::TryLockError::Error(error) => io::Error::new(
@@ -165,8 +165,8 @@ fn lock_file(path: &Path, resource: &str) -> io::Result<OwnershipLock> {
 }
 
 pub fn state_directory() -> Result<PathBuf, Box<dyn std::error::Error>> {
-    let explicit = env::var_os("AGENTDOCK_STATE_DIR")
-        .or_else(|| env::var_os("AGENTDOCK_HOME"))
+    let explicit = env::var_os("TENDLY_STATE_DIR")
+        .or_else(|| env::var_os("TENDLY_HOME"))
         .map(PathBuf::from);
     let home = env::var_os("HOME")
         .or_else(|| env::var_os("USERPROFILE"))
@@ -185,29 +185,24 @@ fn choose_state(
             cwd.join(path)
         });
     }
-    let legacy = cwd.join(".agentdock");
-    if legacy.join("agentdock.db").is_file() {
+    let legacy = cwd.join(".tendly");
+    if legacy.join("tendly.db").is_file() {
         return Ok(legacy);
     }
-    let home = home.ok_or("No user home available; set AGENTDOCK_HOME")?;
-    // Tendly was AgentDock: state made under that name stays where it is, so
-    // an upgrade keeps its sessions, token and settings without a move.
-    let former = home.join(".agentdock");
-    if former.is_dir() {
-        return Ok(former);
-    }
-    Ok(home.join(".tendly"))
+    Ok(home
+        .ok_or("No user home available; set TENDLY_HOME")?
+        .join(".tendly"))
 }
 pub fn web_directory(state_dir: &Path) -> PathBuf {
     asset_path(
-        "AGENTDOCK_WEB_DIR",
+        "TENDLY_WEB_DIR",
         state_dir.join("web"),
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../apps/web/dist"),
     )
 }
 pub fn native_bridge(state_dir: &Path) -> PathBuf {
     asset_path(
-        "AGENTDOCK_NATIVE_BRIDGE",
+        "TENDLY_NATIVE_BRIDGE",
         state_dir.join("native-bridge/history.mjs"),
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packages/native-bridge/history.mjs"),
     )
@@ -216,10 +211,10 @@ pub fn native_bridge(state_dir: &Path) -> PathBuf {
 ///
 /// They are Node modules launched as child processes, so a single-file release
 /// still has to place them on disk. A host that pinned its own copy through
-/// `AGENTDOCK_NATIVE_BRIDGE` keeps it: that override is a deliberate choice and
+/// `TENDLY_NATIVE_BRIDGE` keeps it: that override is a deliberate choice and
 /// is never overwritten.
 pub fn place_native_bridge(state_dir: &Path) -> std::io::Result<()> {
-    if env::var_os("AGENTDOCK_NATIVE_BRIDGE").is_some() {
+    if env::var_os("TENDLY_NATIVE_BRIDGE").is_some() {
         return Ok(());
     }
     crate::embedded::extract_bridge(&state_dir.join("native-bridge")).map(|_| ())
@@ -237,7 +232,7 @@ fn asset_path(key: &str, installed: PathBuf, development: PathBuf) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agentdock_domain::{ProviderKind, SessionId, SessionStatus};
+    use tendly_domain::{ProviderKind, SessionId, SessionStatus};
 
     struct TempInstallation {
         path: PathBuf,
@@ -246,7 +241,7 @@ mod tests {
     }
     impl TempInstallation {
         fn new() -> Self {
-            let path = env::temp_dir().join(format!("agentdock-startup-{}", uuid::Uuid::new_v4()));
+            let path = env::temp_dir().join(format!("tendly-startup-{}", uuid::Uuid::new_v4()));
             let state = path.join("state");
             fs::create_dir_all(&state).unwrap();
             let database = path.join("sessions.db");
@@ -316,23 +311,13 @@ mod tests {
         );
     }
     #[test]
-    fn state_from_before_the_rename_stays_in_use() {
-        let home = std::env::temp_dir().join(format!("tendly-home-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(home.join(".agentdock")).unwrap();
-        assert_eq!(
-            choose_state(None, Some(home.clone()), Path::new("/other")).unwrap(),
-            home.join(".agentdock")
-        );
-        std::fs::remove_dir_all(home).unwrap();
-    }
-    #[test]
     fn existing_local_state_is_never_silently_moved() {
-        let base = std::env::temp_dir().join(format!("agentdock-paths-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(base.join(".agentdock")).unwrap();
-        std::fs::write(base.join(".agentdock/agentdock.db"), b"test").unwrap();
+        let base = std::env::temp_dir().join(format!("tendly-paths-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(base.join(".tendly")).unwrap();
+        std::fs::write(base.join(".tendly/tendly.db"), b"test").unwrap();
         assert_eq!(
             choose_state(None, Some("/home/tester".into()), &base).unwrap(),
-            base.join(".agentdock")
+            base.join(".tendly")
         );
         std::fs::remove_dir_all(base).unwrap();
     }

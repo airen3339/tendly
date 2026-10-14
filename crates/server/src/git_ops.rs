@@ -14,7 +14,6 @@ use crate::{
         is_protected_path, run_git, safe_relative, valid_branch, valid_rev,
     },
 };
-use agentdock_domain::WorkspaceId;
 use axum::{
     Json, Router,
     extract::{Path, Query, State},
@@ -23,6 +22,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::{path::PathBuf, time::Duration};
+use tendly_domain::WorkspaceId;
 
 /// Fetch, pull and push wait on a remote that may be slow or far away.
 const NETWORK_TIMEOUT: Duration = Duration::from_secs(300);
@@ -1311,7 +1311,7 @@ async fn apply(
     if input.patch.len() > MAX_PATCH || input.patch.matches("diff --git ").count() != 1 {
         return Err(ApiError::bad("A patch for exactly one file is required"));
     }
-    let file = std::env::temp_dir().join(format!("agentdock-hunk-{}.patch", uuid::Uuid::new_v4()));
+    let file = std::env::temp_dir().join(format!("tendly-hunk-{}.patch", uuid::Uuid::new_v4()));
     tokio::fs::write(&file, input.patch.as_bytes())
         .await
         .map_err(IoError::from)?;

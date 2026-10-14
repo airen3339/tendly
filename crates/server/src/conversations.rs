@@ -2,8 +2,6 @@
 //! execution; this module only supervises JSONL, persistence and UI decisions.
 use crate::chat_adapter::{BridgeAdapter, ChatCommand, ChatInit, ClientAdapter, dispatch};
 use crate::{ApiError, AppState, Result, db, providers, session_record};
-use agentdock_domain::{InteractionMode, ProviderKind, Session, SessionId, SessionStatus};
-use agentdock_persistence::MessageSubmission;
 use axum::{
     Json, Router,
     extract::{
@@ -25,6 +23,8 @@ use std::{
     },
     time::Duration,
 };
+use tendly_domain::{InteractionMode, ProviderKind, Session, SessionId, SessionStatus};
+use tendly_persistence::MessageSubmission;
 use tokio::sync::{Notify, broadcast, mpsc};
 
 #[derive(Clone, Default)]

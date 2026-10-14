@@ -39,6 +39,7 @@ mod pi_chat;
 mod preferences;
 mod price_list;
 mod providers;
+mod rename;
 mod resources;
 mod resume;
 mod secrets;
@@ -50,12 +51,6 @@ mod update;
 mod usage;
 mod workspace_io;
 
-use agentdock_domain::{
-    EndpointProfile, InteractionMode, ProviderKind, Session, SessionId, SessionStatus, Workspace,
-    WorkspaceId,
-};
-use agentdock_persistence::Store;
-use agentdock_runtime::{RuntimeEvent, RuntimeManager, RuntimeSession};
 use axum::{
     Json, Router,
     extract::{
@@ -71,6 +66,12 @@ use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{collections::HashSet, env, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use tendly_domain::{
+    EndpointProfile, InteractionMode, ProviderKind, Session, SessionId, SessionStatus, Workspace,
+    WorkspaceId,
+};
+use tendly_persistence::Store;
+use tendly_runtime::{RuntimeEvent, RuntimeManager, RuntimeSession};
 #[cfg(test)]
 use tokio::net::TcpListener;
 use tower_http::{
@@ -102,7 +103,7 @@ struct AppState {
     agents: agent::AgentRegistry,
     activity: activity::Activity,
     /// Resource history; absent when its database could not be opened.
-    metrics: Option<Arc<agentdock_persistence::metrics::MetricsStore>>,
+    metrics: Option<Arc<tendly_persistence::metrics::MetricsStore>>,
 }
 
 #[derive(Debug)]
@@ -163,7 +164,7 @@ struct CreateWorkspace {
 struct CreateSession {
     interaction_mode: Option<InteractionMode>,
     #[serde(default)]
-    environment: agentdock_domain::EnvironmentOverrides,
+    environment: tendly_domain::EnvironmentOverrides,
     provider: ProviderKind,
     title: String,
     endpoint_profile_id: Option<Uuid>,
@@ -200,7 +201,7 @@ struct PathQuery {
 #[serde(deny_unknown_fields)]
 struct CreateProfile {
     #[serde(default)]
-    environment: agentdock_domain::EnvironmentOverrides,
+    environment: tendly_domain::EnvironmentOverrides,
     name: String,
     provider: ProviderKind,
     endpoint_url: Option<String>,
@@ -503,7 +504,7 @@ const HELP: &str = r#"Tendly — a host workspace for Claude Code and Codex
   tendly serve              Run in the foreground instead (no background process)
   tendly init               Create user state without starting anything
   tendly mcp                Tendly's agent tools as a stdio MCP server, e.g.
-                            claude mcp add agentdock -- tendly mcp
+                            claude mcp add tendly -- tendly mcp
   tendly resume <id>        Continue a Tendly session in this terminal, with
                             its client, endpoint, model and checkout; <id> is
                             the Tendly session ID (Copy resume command)
@@ -516,18 +517,17 @@ file:
 
   lan = true              # reachable from other machines (same as --lan)
   port = 28789            # or addr = "192.168.0.9:28789"
-  token = "..."           # AGENTDOCK_TOKEN
+  token = "..."           # TENDLY_TOKEN
   tailscale = true        # publish to the tailnet (same as --tailscale)
 
-Any other key names the AGENTDOCK_ variable it spells: shell, claude-bin,
+Any other key names the TENDLY_ variable it spells: shell, claude-bin,
 instance-label, allowed-origins = ["http://..."], and so on.
 
 Listens on 127.0.0.1:28789 otherwise. A binding that reaches other machines
 needs an access token; one is generated and kept in the state directory unless a
-token is given, and `status` prints it again. State lives in ~/.tendly (or in
-~/.agentdock, kept from before Tendly was renamed);
-AGENTDOCK_HOME or AGENTDOCK_STATE_DIR override it (that one cannot come from the
-file, which lives inside it), and existing project-local .agentdock databases
+token is given, and `status` prints it again. State lives in ~/.tendly;
+TENDLY_HOME or TENDLY_STATE_DIR override it (that one cannot come from the
+file, which lives inside it), and existing project-local .tendly databases
 are preserved."#;
 
 /// Print failures as text and exit non-zero.
@@ -537,6 +537,10 @@ are preserved."#;
 /// carries a log tail arrived as one unreadable line. A supervisor also needs
 /// the non-zero status to tell a failed start from a successful one.
 fn main() {
+    if let Err(error) = move_agentdock_state() {
+        eprintln!("{error}");
+        std::process::exit(1);
+    }
     // The configuration file is read before the runtime is built, because
     // seeding the environment from it is only sound while this is the only
     // thread — and a runtime is what ends that.
@@ -564,6 +568,35 @@ fn main() {
     }
 }
 
+/// Bring `~/.agentdock` over on the first start after the rename (`rename`).
+/// Not for `--version` or `--help`: an update asks the new binary its version
+/// while the old gateway still runs from that directory.
+fn move_agentdock_state() -> std::result::Result<(), String> {
+    let informational = env::args()
+        .skip(1)
+        .any(|argument| matches!(argument.as_str(), "--version" | "-V" | "--help" | "-h"));
+    if informational
+        || env::var_os("TENDLY_STATE_DIR").is_some()
+        || env::var_os("TENDLY_HOME").is_some()
+    {
+        return Ok(());
+    }
+    let Some(home) = env::var_os("HOME")
+        .or_else(|| env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+    else {
+        return Ok(());
+    };
+    if let Some(old) = rename::from_agentdock(&home, &home.join(".tendly"))? {
+        eprintln!(
+            "Moved AgentDock's state from {} to {}.",
+            old.display(),
+            home.join(".tendly").display()
+        );
+    }
+    Ok(())
+}
+
 /// Let the file say what the environment has not.
 ///
 /// A variable that is already set wins, because whoever set it did so later and
@@ -577,7 +610,7 @@ fn apply_settings() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let lan = env::args().any(|argument| argument == "--lan");
     if env::args().any(|argument| argument == "--tailscale") {
         // Sound here and nowhere later: no other thread exists yet.
-        unsafe { env::set_var("AGENTDOCK_TAILSCALE", "1") };
+        unsafe { env::set_var("TENDLY_TAILSCALE", "1") };
     }
     for (key, value) in settings::pairs(&state_dir, lan)? {
         if env::var_os(&key).is_none() {
@@ -636,14 +669,14 @@ async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
         // Before an update can replace the file this path names.
         update::remember_executable();
         tracing_subscriber::fmt()
-            .with_env_filter(env::var("RUST_LOG").unwrap_or_else(|_| "agentdock=info".into()))
+            .with_env_filter(env::var("RUST_LOG").unwrap_or_else(|_| "tendly=info".into()))
             .init();
     }
     let state_dir =
         providers::private_dir(&installation::state_directory()?).map_err(|e| e.message)?;
-    let database = env::var("AGENTDOCK_DB")
+    let database = env::var("TENDLY_DB")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| state_dir.join("agentdock.db"));
+        .unwrap_or_else(|_| state_dir.join("tendly.db"));
     if action == "init" {
         let _database = installation::open_database(&state_dir, &database)?;
         println!(
@@ -656,7 +689,7 @@ async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
     // `--lan` is the whole configuration for reaching this from another machine:
     // the bind, the token and the addresses to answer for all follow from it.
     let lan = env::args().any(|argument| argument == "--lan");
-    let address: SocketAddr = match env::var("AGENTDOCK_ADDR") {
+    let address: SocketAddr = match env::var("TENDLY_ADDR") {
         Ok(value) => value.parse()?,
         Err(_) if lan => format!(
             "0.0.0.0:{}",
@@ -697,7 +730,7 @@ async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
     // arrives on it is known to come from the tailnet.
     let tailnet_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let tailnet = tailscale::Tailnet::new(&state_dir, tailnet_listener.local_addr()?.port());
-    let claude_bin = clients::program(&state_dir, &agentdock_domain::ProviderKind::ClaudeCode);
+    let claude_bin = clients::program(&state_dir, &tendly_domain::ProviderKind::ClaudeCode);
     let help = tokio::time::timeout(
         Duration::from_secs(3),
         tokio::process::Command::new(claude_bin)
@@ -714,7 +747,7 @@ async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
         store,
         runtime: RuntimeManager::new(),
         native_bridge: installation::native_bridge(&state_dir),
-        chat_bridge: bridge::script(&state_dir, "AGENTDOCK_CHAT_BRIDGE", "chat.mjs"),
+        chat_bridge: bridge::script(&state_dir, "TENDLY_CHAT_BRIDGE", "chat.mjs"),
         chats: conversations::ChatManager::default(),
         watches: file_watch::FileWatches::default(),
         accounts: accounts::AccountManager::new(),
@@ -779,13 +812,13 @@ async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Beside the main database, so a test or custom `AGENTDOCK_DB` gets its own.
+/// Beside the main database, so a test or custom `TENDLY_DB` gets its own.
 /// History is disposable: if it cannot be opened the server runs without it.
 fn open_metrics(
     database: &std::path::Path,
-) -> Option<Arc<agentdock_persistence::metrics::MetricsStore>> {
-    let path = database.with_file_name("agentdock-metrics.db");
-    match agentdock_persistence::metrics::MetricsStore::open(&path) {
+) -> Option<Arc<tendly_persistence::metrics::MetricsStore>> {
+    let path = database.with_file_name("tendly-metrics.db");
+    match tendly_persistence::metrics::MetricsStore::open(&path) {
         Ok(store) => Some(Arc::new(store)),
         Err(error) => {
             tracing::warn!(%error, path=%path.display(), "resource history disabled");
@@ -995,7 +1028,7 @@ async fn db<T: Send + 'static>(
 }
 // Keep rusqlite out of HTTP details while permitting typed persistence closures.
 mod rusqlite_result {
-    pub type Result<T> = std::result::Result<T, agentdock_persistence::DbError>;
+    pub type Result<T> = std::result::Result<T, tendly_persistence::DbError>;
 }
 async fn workspace(state: &AppState, id: WorkspaceId) -> Result<Workspace> {
     db(state, move |s| s.get_workspace(id))
@@ -1030,7 +1063,7 @@ fn optional(value: Option<String>) -> Option<String> {
 }
 async fn health() -> Json<Value> {
     Json(
-        json!({"ok":true,"service":"agentdock-server","platform":env::consts::OS,"mode":"trusted-single-user","api_version":2,"capabilities":["shared_canvas","native_configurations","native_history","host_directories","endpoint_models","session_environment","structured_chat","official_accounts","session_configuration","session_archive","account_import_native","agent_clients","ephemeral_sessions","session_model","workspace_file_search","session_terminal_escape","stored_secrets","agent_tools","self_update","resource_monitoring","tailnet"],"instance_label":env::var("AGENTDOCK_INSTANCE_LABEL").ok(),"version":env!("CARGO_PKG_VERSION")}),
+        json!({"ok":true,"service":"tendly-server","platform":env::consts::OS,"mode":"trusted-single-user","api_version":2,"capabilities":["shared_canvas","native_configurations","native_history","host_directories","endpoint_models","session_environment","structured_chat","official_accounts","session_configuration","session_archive","account_import_native","agent_clients","ephemeral_sessions","session_model","workspace_file_search","session_terminal_escape","stored_secrets","agent_tools","self_update","resource_monitoring","tailnet"],"instance_label":env::var("TENDLY_INSTANCE_LABEL").ok(),"version":env!("CARGO_PKG_VERSION")}),
     )
 }
 
@@ -1076,7 +1109,7 @@ struct HistoryQuery {
 #[serde(deny_unknown_fields)]
 struct HistoryImport {
     #[serde(default)]
-    environment: Option<agentdock_domain::EnvironmentOverrides>,
+    environment: Option<tendly_domain::EnvironmentOverrides>,
     source_id: String,
     native_id: String,
     confirmed_original_config: bool,
@@ -1235,7 +1268,7 @@ async fn create_workspace(
     // already exist are untouched: this is a rule about new ones.
     if !directories::within_roots(&state.workspace_roots, &canonical) {
         return Err(ApiError::bad(
-            "That directory is outside the roots this server may use. Set AGENTDOCK_WORKSPACE_ROOTS to allow it.",
+            "That directory is outside the roots this server may use. Set TENDLY_WORKSPACE_ROOTS to allow it.",
         ));
     }
     let path = canonical.to_string_lossy().into_owned();
@@ -1334,7 +1367,7 @@ async fn create_session(
                 if interaction_mode == InteractionMode::Structured {
                     s.set_interaction_mode(session.id, interaction_mode)?;
                     s.get_session(session.id)?
-                        .ok_or(agentdock_persistence::DbError::QueryReturnedNoRows)
+                        .ok_or(tendly_persistence::DbError::QueryReturnedNoRows)
                 } else {
                     Ok(session)
                 }
@@ -1453,7 +1486,7 @@ async fn start_session(
             })
             .await?;
             return Err(ApiError::conflict(
-                "CLI could not start. Check executable installation or AGENTDOCK_*_BIN.",
+                "CLI could not start. Check executable installation or TENDLY_*_BIN.",
             ));
         }
     };
@@ -1600,7 +1633,7 @@ async fn update_session_archive(
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SessionEnvironmentPatch {
-    environment: agentdock_domain::EnvironmentOverrides,
+    environment: tendly_domain::EnvironmentOverrides,
 }
 
 async fn update_session_environment(

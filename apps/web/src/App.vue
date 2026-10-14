@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, provide, reactive, ref, watch } from "vue";
 import { shellHeight } from "./features/viewport-height";
-import type { EndpointProfile, FileEntry, GitStatus, LayoutDocument, LayoutNode, PaneNode, ProviderKind, Session, Workspace } from "@agentdock/protocol";
+import type { EndpointProfile, FileEntry, GitStatus, LayoutDocument, LayoutNode, PaneNode, ProviderKind, Session, Workspace } from "@tendly/protocol";
 import Canvas from "./components/Canvas.vue";
 import { randomId } from "./features/random-id";
 import { createDefaultLayoutDocument, flattenPanes, validateLayout } from "./layout/layout-engine";
@@ -173,7 +173,7 @@ async function agentCanvas(revision: number) {
     await nextTick(); suspendLayoutSave = false; cacheLayout(layout.value, false); layoutStatus.value = "Saved";
   } catch (cause) { report(cause); }
 }
-/** An agent pointed at something (agentdock_show), or a notice's Open. */
+/** An agent pointed at something (tendly_show), or a notice's Open. */
 async function agentShow(target: ShowTarget) {
   if (target.kind === "file") void openReference(target.workspace_id, { path: target.path, line: target.line ?? undefined, checkout: target.checkout });
   else if (target.kind === "changes") openChanges(target.workspace_id);
@@ -220,8 +220,8 @@ function report(cause: unknown) {
   if (cause instanceof ApiError && cause.status === 401) { showAuth.value = true; apiOnline.value = false; }
   else error.value = errorMessage(cause);
 }
-function rememberWorkspace(id: string) { try { storage?.setItem("agentdock:last-workspace", id); } catch { /* Optional preference. */ } }
-function rememberedWorkspace() { try { return storage?.getItem("agentdock:last-workspace"); } catch { return null; } }
+function rememberWorkspace(id: string) { try { storage?.setItem("tendly:last-workspace", id); } catch { /* Optional preference. */ } }
+function rememberedWorkspace() { try { return storage?.getItem("tendly:last-workspace"); } catch { return null; } }
 function copyLayout(document: LayoutDocument): LayoutDocument { return JSON.parse(JSON.stringify(document)); }
 function sameLayout(a: LayoutDocument, b: LayoutDocument) { return sameCanvasLayout(a, b); }
 function initialPane(node: LayoutNode): PaneNode | undefined {
@@ -868,7 +868,7 @@ function adaptDrawers() { const desktop = window.innerWidth > 1100; if (wasDeskt
  * needs depends on how many workspaces and sessions there are. Remembered in
  * this browser, and a double-click on the edge puts it back.
  */
-const SIDEBAR_WIDTH_KEY = "agentdock.sidebar-width.v1";
+const SIDEBAR_WIDTH_KEY = "tendly.sidebar-width.v1";
 const sidebarWidth = ref<number | undefined>((() => { try { const value = Number(storage?.getItem(SIDEBAR_WIDTH_KEY)); return value >= 184 && value <= 380 ? value : undefined; } catch { return undefined; } })());
 const bodyStyle = computed(() => sidebarWidth.value && sidebarRail.value && !sidebarCollapsed.value ? { "--rail-left": sidebarWidth.value + "px" } : undefined);
 function resizeSidebar(event: PointerEvent) {

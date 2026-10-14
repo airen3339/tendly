@@ -1,19 +1,15 @@
 [package]
-name = "agentdock-server"
+name = "tendly-server"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
-# The program is Tendly; the crates keep the name they were written under.
-[[bin]]
-name = "tendly-server"
-path = "src/main.rs"
-
 [dependencies]
-agentdock-domain.workspace = true
-agentdock-persistence.workspace = true
-agentdock-runtime.workspace = true
+tendly-domain.workspace = true
+tendly-persistence.workspace = true
+tendly-runtime.workspace = true
 axum.workspace = true
+rusqlite.workspace = true
 chrono.workspace = true
 futures-util.workspace = true
 libc.workspace = true

@@ -33,7 +33,7 @@ jobs:
             echo "GITCODE_TOKEN is not set; skipping the mirror"
             exit 0
           fi
-          REMOTE="https://wnzzer:${GITCODE_TOKEN}@gitcode.com/wnzzer/agentdock.git"
+          REMOTE="https://wnzzer:${GITCODE_TOKEN}@gitcode.com/wnzzer/tendly.git"
           git fetch origin main --quiet
           git push "$REMOTE" "refs/remotes/origin/main:refs/heads/main" --force
           git push "$REMOTE" --tags --force

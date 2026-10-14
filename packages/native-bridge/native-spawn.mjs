@@ -5,7 +5,7 @@
 // reparse the whole command line, so a session title such as `a & b` would run
 // `b`. Instead the shim is read for the script it starts and that script runs
 // under this same Node. A batch file that is not an npm shim is refused. This
-// mirrors `agentdock_runtime::process::launcher` on the server.
+// mirrors `tendly_runtime::process::launcher` on the server.
 import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
@@ -13,10 +13,10 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { delimiter, dirname, extname, join, resolve } from 'node:path';
 
 // Tendly's own credentials never reach a native client. The same rule as
-// `bridge::is_agentdock_secret` on the server, which already strips them from
+// `bridge::is_tendly_secret` on the server, which already strips them from
 // every bridge; repeated here so a bridge run by hand is held to it too.
-export const isAgentDockSecret = key => key.startsWith('AGENTDOCK_SECRET_') || key === 'AGENTDOCK_TOKEN';
-export const withoutAgentDockSecrets = env => Object.fromEntries(Object.entries(env).filter(([key]) => !isAgentDockSecret(key)));
+export const isTendlySecret = key => key.startsWith('TENDLY_SECRET_') || key === 'TENDLY_TOKEN';
+export const withoutTendlySecrets = env => Object.fromEntries(Object.entries(env).filter(([key]) => !isTendlySecret(key)));
 
 const isFile = path => { try { return statSync(path).isFile(); } catch { return false; } };
 

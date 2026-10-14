@@ -22,7 +22,7 @@ export const CHAT_FONTS: readonly ChatFont[] = ["interface", "lora", "serif"];
 export const TEXT_SCALES: readonly TextScale[] = ["small", "default", "large", "larger"];
 const SCALE_VALUES: Record<TextScale, number> = { small: 0.92, default: 1, large: 1.08, larger: 1.16 };
 
-const KEYS = { palette: "agentdock.palette", font: "agentdock.font", chatFont: "agentdock.chat-font", textScale: "agentdock.text-scale" } as const;
+const KEYS = { palette: "tendly.palette", font: "tendly.font", chatFont: "tendly.chat-font", textScale: "tendly.text-scale" } as const;
 
 function read<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
   try {

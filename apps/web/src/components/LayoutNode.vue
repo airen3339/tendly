@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onMounted, onBeforeUnmount, ref, watch } from "vue";
-import type { LayoutNode, LeafPaneKind, PaneNode, SplitDirection } from "@agentdock/protocol/layout";
-import type { ProviderKind } from "@agentdock/protocol";
+import type { LayoutNode, LeafPaneKind, PaneNode, SplitDirection } from "@tendly/protocol/layout";
+import type { ProviderKind } from "@tendly/protocol";
 import { isPaneNode, normalizeRatio, snapRatio, SPLIT_GAP, type DockPosition } from "../layout/layout-engine";
 import { useI18n } from "../i18n";
 import TabIcon from "../features/TabIcon.vue";
@@ -221,9 +221,9 @@ function keyboardResize(event: KeyboardEvent) {
 function dragStart(event: DragEvent, pane: PaneNode) {
   if (!event.dataTransfer) return;
   event.dataTransfer.effectAllowed = "move";
-  event.dataTransfer.setData("application/agentdock-pane", JSON.stringify(pane));
+  event.dataTransfer.setData("application/tendly-pane", JSON.stringify(pane));
 }
-function isPaneDrag(event: DragEvent) { return event.dataTransfer?.types.includes("application/agentdock-pane"); }
+function isPaneDrag(event: DragEvent) { return event.dataTransfer?.types.includes("application/tendly-pane"); }
 function detectPosition(event: DragEvent): DockPosition {
   const bounds = paneElement.value?.getBoundingClientRect();
   if (!bounds) return "center";
@@ -254,7 +254,7 @@ function drop(event: DragEvent) {
   event.stopPropagation();
   const position = dropPosition.value ?? detectPosition(event);
   dropPosition.value = null;
-  const raw = event.dataTransfer?.getData("application/agentdock-pane");
+  const raw = event.dataTransfer?.getData("application/tendly-pane");
   if (!raw || raw.length > 32768) return;
   try { const pane: unknown = JSON.parse(raw); if (isPaneNode(pane)) emit("drop-pane", targetId.value, pane, position); } catch { /* Foreign or malformed drag payload. */ }
 }

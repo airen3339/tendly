@@ -1,5 +1,5 @@
 import { reactive } from "vue";
-import type { NativeHistoryItem } from "@agentdock/protocol";
+import type { NativeHistoryItem } from "@tendly/protocol";
 
 /** Consent is tied to one displayed history item, source and workspace. */
 export function createHistorySelection() {

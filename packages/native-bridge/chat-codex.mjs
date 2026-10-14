@@ -67,7 +67,7 @@ export class CodexChat extends ChatBase {
   async initialize() {
     this.launch=codexLaunch(this.job);this.tools=new Map();
     this.port=new NativeProcess(this.job.program,this.launch.args,this.job.cwd,message=>this.notification(message),message=>this.fatal(message),()=>this.fatal('Codex app-server exited.'),{...this.options,clientName:'Codex'});
-    await this.port.rpc('initialize',{clientInfo:{name:'agentdock',title:'Tendly',version:'0.1.0'}});
+    await this.port.rpc('initialize',{clientInfo:{name:'tendly',title:'Tendly',version:'0.1.0'}});
     this.port.send({method:'initialized',params:{}});this.announce();
     this.settings(undefined,this.launch.thread.model);
     // Asking for models must not hold up the session. A Codex build without
@@ -268,7 +268,7 @@ export class CodexChat extends ChatBase {
     if(method==='mcpServer/elicitation/request'){
       const schema=p.requestedSchema,fields=schema&&typeof schema==='object'&&schema.properties&&typeof schema.properties==='object'?Object.keys(schema.properties):[];
       if(!['form','openai/form','openaiForm'].includes(p.mode)||fields.length){this.reject(message,'This MCP server asked for a form Tendly cannot show.');return;}
-      if(p.serverName==='agentdock'){this.port.send({id:message.id,result:{action:'accept',content:{}}});return;}
+      if(p.serverName==='tendly'){this.port.send({id:message.id,result:{action:'accept',content:{}}});return;}
       const text=JSON.stringify({server:p.serverName,message:p.message});
       if(Buffer.byteLength(text)>MAX_TEXT){this.reject(message,'Native approval is too large to display safely.');return;}
       this.approval(key,{title:'Approve MCP tool call',text:clip(text),choices:['accept','decline','cancel']},decision=>{

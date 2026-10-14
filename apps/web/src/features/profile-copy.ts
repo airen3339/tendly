@@ -1,4 +1,4 @@
-import type { AgentProviderKind, EndpointProfile, EnvironmentOverrides } from "@agentdock/protocol";
+import type { AgentProviderKind, EndpointProfile, EnvironmentOverrides } from "@tendly/protocol";
 import { clientInfo, type ClientInfo } from "./clients";
 import { SLOTS } from "./claude-slots";
 

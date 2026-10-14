@@ -1,6 +1,6 @@
 import { randomId } from "./random-id";
 import { clientInfo } from "./clients";
-import type { AgentProviderKind } from '@agentdock/protocol';
+import type { AgentProviderKind } from '@tendly/protocol';
 
 export type AccountWindowKind = 'five_hour' | 'weekly';
 export type AccountWindowMappingBasis = 'duration_minutes' | 'status_line_window' | 'oauth_usage';
@@ -131,7 +131,7 @@ export function quotaResetOutcomeNotice(outcome?: AccountResetOutcome): string {
   return outcome === 'reset' ? 'Official quota reset completed.' : outcome === 'alreadyRedeemed' ? 'This reset credit was already redeemed. No new quota reset was performed.' : outcome === 'nothingToReset' ? 'The official provider reports nothing to reset. No quota reset was performed.' : outcome === 'noCredit' ? 'No official reset credit is available. No quota reset was performed.' : 'The reset request completed. The official status below is the source of truth.';
 }
 export interface QuotaResetAttempt { idempotency_key: string; credit_id?: string; outcome: 'pending' | 'unknown' }
-export const QUOTA_RESET_STORAGE_KEY = 'agentdock.pending-quota-resets.v1';
+export const QUOTA_RESET_STORAGE_KEY = 'tendly.pending-quota-resets.v1';
 export const QUOTA_RESET_STORAGE_WARNING = 'Pending reset protection is unavailable in this browser. Do not repeat a quota reset; refresh official quota first. New reset requests are blocked.';
 type ResetStorage = Pick<Storage, 'getItem' | 'setItem'>;
 export function createQuotaResetStore(uuid: () => string = randomId, storage?: ResetStorage | (() => ResetStorage | undefined), requirePersistence = false) {

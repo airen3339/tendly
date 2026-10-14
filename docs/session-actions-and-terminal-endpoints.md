@@ -22,7 +22,7 @@ Tendly 内终端接续现在直接复制原会话的有效配置快照、环境�
 | Codex | `CODEX_HOME` | 生成的 `config.toml` 指定 provider / base URL，环境提供 API key |
 | pi | `PI_CODING_AGENT_DIR` | 生成的 `models.json` 指定 provider / API / base URL，环境提供 API key |
 
-本机终端只执行原生 ID 的接续命令不能保证相同端点，也找不到对话（对话在会话自己的配置目录里）。`tendly resume <Tendly会话ID>` 负责这件事：CLI 不打开数据库，而是请求正在运行的服务 `POST /api/sessions/{id}/launch-plan`；服务用 `launch::continuation` 生成与网页"在终端打开"相同的启动计划（固定的配置版本、worktree、端点、模型、思考深度、权限和接续参数），但不创建会话记录；CLI 在当前终端 exec 该客户端，退出码即客户端的退出码。终端会话则在原工作目录打开 shell。接口只回应本机回环地址的连接（计划里有解析后的 Key 和本机路径），需要 `X-AgentDock-Client: cli`，并照常认证；Tendly 正在运行的会话默认拒绝，`--force` 才开第二个客户端。界面只复制该命令，命令里只有会话 ID。
+本机终端只执行原生 ID 的接续命令不能保证相同端点，也找不到对话（对话在会话自己的配置目录里）。`tendly resume <Tendly会话ID>` 负责这件事：CLI 不打开数据库，而是请求正在运行的服务 `POST /api/sessions/{id}/launch-plan`；服务用 `launch::continuation` 生成与网页"在终端打开"相同的启动计划（固定的配置版本、worktree、端点、模型、思考深度、权限和接续参数），但不创建会话记录；CLI 在当前终端 exec 该客户端，退出码即客户端的退出码。终端会话则在原工作目录打开 shell。接口只回应本机回环地址的连接（计划里有解析后的 Key 和本机路径），需要 `X-Tendly-Client: cli`，并照常认证；Tendly 正在运行的会话默认拒绝，`--force` 才开第二个客户端。界面只复制该命令，命令里只有会话 ID。
 
 ## 已抽出的共用启动层
 

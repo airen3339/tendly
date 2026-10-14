@@ -3,9 +3,9 @@
 //! process execution. Client-specific switches and files belong to adapters.
 use crate::providers::{private_dir, resolve_model, validate_profile};
 use crate::{ApiError, AppState};
-use agentdock_domain::{InteractionMode, ProviderKind, Session, SessionStatus};
-use agentdock_runtime::SpawnSpec;
 use std::{collections::BTreeMap, env, path::PathBuf};
+use tendly_domain::{InteractionMode, ProviderKind, Session, SessionStatus};
+use tendly_runtime::SpawnSpec;
 
 /// Resolve the recorded checkout and build configuration away from async I/O.
 /// This prepares a launch without starting a process.
@@ -147,8 +147,8 @@ fn resume_args(session: &Session) -> Result<Option<Vec<String>>, ApiError> {
 /// rather than going through the async helper.
 fn resume_source(
     state: &AppState,
-    id: agentdock_domain::SessionId,
-) -> Result<agentdock_domain::Session, ApiError> {
+    id: tendly_domain::SessionId,
+) -> Result<tendly_domain::Session, ApiError> {
     state
         .store
         .get_session(id)
@@ -203,16 +203,16 @@ fn build_base(state: &AppState, session: &Session, cwd: PathBuf) -> Result<Spawn
             return Err(ApiError::bad("This profile blocks session launch"));
         }
     }
-    let mut remove: Vec<String> = crate::bridge::agentdock_secrets()
+    let mut remove: Vec<String> = crate::bridge::tendly_secrets()
         .chain(env::var_os("CLAUDECODE").map(|_| "CLAUDECODE".to_owned()))
         .collect();
     let client = crate::adapters::adapter(session.provider);
     let program = match client {
         Some(_) => crate::clients::program(&state.state_dir, &session.provider),
-        None => env::var("AGENTDOCK_SHELL")
+        None => env::var("TENDLY_SHELL")
             .ok()
             .filter(|shell| !shell.is_empty())
-            .unwrap_or_else(agentdock_runtime::default_shell),
+            .unwrap_or_else(tendly_runtime::default_shell),
     };
     // POSIX shells need `-i` to stay interactive on a pipe-like PTY; neither
     // PowerShell nor cmd.exe accepts it.

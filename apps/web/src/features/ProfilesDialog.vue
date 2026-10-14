@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from "vue";
-import type { AgentProviderKind, EndpointProfile, ModelCatalog } from "@agentdock/protocol";
+import type { AgentProviderKind, EndpointProfile, ModelCatalog } from "@tendly/protocol";
 import { errorMessage, json, providerLabel, request } from "./api";
 import { parseModelAliases, formatModelAliases } from "./endpoint-models";
 import { sharesHostConfig, nativeProfileRenamePayload, nativeProfileUpdatePayload, profileEnvironmentPayload, profileEnvironmentDraftChanged } from "./native-profiles";
@@ -41,7 +41,7 @@ const environmentDirty = computed(() => profileEnvironmentDraftChanged(environme
 const environmentError = computed(() => { try { profileEnvironmentPayload(environmentDraft.value, backendCapabilities.environment, initialEnvironment.value); return ""; } catch (cause) { return errorMessage(cause); } });
 const pendingNavigation = ref<(() => void)>();
 const form = reactive({ name: "", provider: DEFAULT_CLIENT as AgentProviderKind, endpoint_url: "", api: "", model: "", effort: "", permission_mode: "native" as EndpointProfile["permission_mode"], secret_ref: "", proxy_url: "" });
-const secretValid = computed(() => secretMode.value === "stored" || !form.secret_ref || /^env:AGENTDOCK_SECRET_[A-Z0-9_]+$/.test(form.secret_ref));
+const secretValid = computed(() => secretMode.value === "stored" || !form.secret_ref || /^env:TENDLY_SECRET_[A-Z0-9_]+$/.test(form.secret_ref));
 /**
  * Where the endpoint's key lives. "stored": pasted here and kept by Tendly
  * in the state directory (secrets.rs), usable at once. "env": a variable set
@@ -360,8 +360,8 @@ onBeforeUnmount(()=>{discoveryRevision++;});
           </template>
           <template v-else>
             <div v-if="adoptable && backendCapabilities.storedSecrets" class="inline-notice secret-adopt"><span>{{ t("This profile reads its key from {name} in the server's environment.", { name: adoptable }) }}</span><button type="button" class="small-button" :disabled="adopting" @click="adoptKey">{{ t('Keep it in Tendly') }}</button></div>
-            <label>{{ t('Secret reference') }} <small>{{ t('never an API key') }}</small><input v-model="form.secret_ref" placeholder="env:AGENTDOCK_SECRET_PROVIDER_KEY" autocomplete="off" spellcheck="false" /></label>
-            <p :class="secretValid?'form-help':'inline-error'">{{ secretValid?t('Name a server environment variable such as env:AGENTDOCK_SECRET_WORK. Its value never reaches the browser.'):t('Enter an environment reference, not the secret itself.') }}</p>
+            <label>{{ t('Secret reference') }} <small>{{ t('never an API key') }}</small><input v-model="form.secret_ref" placeholder="env:TENDLY_SECRET_PROVIDER_KEY" autocomplete="off" spellcheck="false" /></label>
+            <p :class="secretValid?'form-help':'inline-error'">{{ secretValid?t('Name a server environment variable such as env:TENDLY_SECRET_WORK. Its value never reaches the browser.'):t('Enter an environment reference, not the secret itself.') }}</p>
             <button v-if="backendCapabilities.storedSecrets" type="button" class="text-button secret-switch" @click="secretMode='stored'">{{ t('Save the key in Tendly instead') }}</button>
           </template>
           <div class="model-fetch"><strong>{{ t('Model selection') }}</strong><button type="button" class="small-button" :disabled="discovering||!backendCapabilities.models||!secretValid||!!aliases.error" :title="!backendCapabilities.models?t('Backend upgrade required'):t('Reads the endpoint\'s model list. No model is run.')" @click="discover"><Icon name="refresh" :size="14" />{{ discovering?t('Loading models…'):t('Load models from endpoint') }}</button></div>

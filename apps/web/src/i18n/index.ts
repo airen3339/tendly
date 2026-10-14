@@ -2,7 +2,7 @@ import { readonly, ref } from "vue";
 
 export type Locale = "zh-CN" | "en";
 export type Interpolation = Record<string, string | number>;
-export const LOCALE_STORAGE_KEY = "agentdock.locale";
+export const LOCALE_STORAGE_KEY = "tendly.locale";
 export const DEFAULT_LOCALE: Locale = "zh-CN";
 
 /** Only application-owned copy is translated. File names, session titles,
@@ -302,7 +302,7 @@ export const zhCN: Readonly<Record<string, string>> = {
   "Shared with the host: sign-in, model and permissions come from this directory, and anything else that edits it changes this profile too. Tendly never copies or rewrites it.": "与宿主机共享：登录、模型和权限都来自这个目录，其他地方改动它也会影响这个配置。Tendly 不复制也不改写它。",
   "Applied on the server. Empty uses the host network.": "在服务器上生效，留空使用宿主机网络。",
   "Claude Code does not support SOCKS.": "Claude Code 不支持 SOCKS。",
-  "Name a server environment variable such as env:AGENTDOCK_SECRET_WORK. Its value never reaches the browser.": "填写服务器上的环境变量名，例如 env:AGENTDOCK_SECRET_WORK。密钥值不会传到浏览器。",
+  "Name a server environment variable such as env:TENDLY_SECRET_WORK. Its value never reaches the browser.": "填写服务器上的环境变量名，例如 env:TENDLY_SECRET_WORK。密钥值不会传到浏览器。",
   "Reads the endpoint's model list. No model is run.": "只读取端点的模型列表，不会调用模型。",
   "Sign in to official Claude Code or Codex accounts and watch their usage. Each account can be picked as a session configuration.": "登录官方 Claude Code 或 Codex 账号并查看用量；每个账号都能在新建会话时直接选用。",
   "Add an account to sign in, or link a Claude Code or Codex already set up on this host.": "添加一个账号来登录，或关联本机已配置好的 Claude Code / Codex。",
@@ -740,7 +740,7 @@ export const zhCN: Readonly<Record<string, string>> = {
   "Use a valid environment variable name.": "变量名须以字母或下划线开头，仅含字母、数字和下划线，最多 128 个字符。",
   "Environment variable names must be unique.": "环境变量名不能重复。",
   "Account directories, workspace identity and Tendly internal variables cannot be overridden.": "不能覆盖账号目录、工作区标识或 Tendly 内部变量。",
-  "Use env:AGENTDOCK_SECRET_NAME for a secret reference.": "密钥引用请使用 env:AGENTDOCK_SECRET_NAME 格式。",
+  "Use env:TENDLY_SECRET_NAME for a secret reference.": "密钥引用请使用 env:TENDLY_SECRET_NAME 格式。",
   "Environment values must be at most 8192 bytes and cannot contain NUL.": "变量值不能超过 8192 字节，也不能包含 NUL 字符。",
   "Sensitive variables require a secret reference, not a plain value.": "敏感变量必须使用密钥引用，不能填写普通值。",
   "URLs containing credentials require a secret reference.": "包含账号或密码的 URL 必须使用密钥引用。",
@@ -1614,7 +1614,7 @@ export const zhCN: Readonly<Record<string, string>> = {
   "Absolute host directory": "宿主机绝对路径",
   "/path/to/your/project": "/path/to/your/project",
   "This path is on the server, not your browser’s computer. No folder, container or repository will be created.": "此路径位于服务器上，不是浏览器所在电脑。不会创建目录、容器或仓库。",
-  "Deployment tip: set AGENTDOCK_BROWSE_ROOTS to choose the folders available in the browser.": "部署提示：设置 AGENTDOCK_BROWSE_ROOTS 可指定允许浏览的目录范围。",
+  "Deployment tip: set TENDLY_BROWSE_ROOTS to choose the folders available in the browser.": "部署提示：设置 TENDLY_BROWSE_ROOTS 可指定允许浏览的目录范围。",
   "This directory is already registered. We will open the existing workspace.": "此目录已注册，将直接打开已有工作区。",
   "Cancel": "取消",
   "Opening…": "打开中…",
@@ -1659,7 +1659,7 @@ export const zhCN: Readonly<Record<string, string>> = {
   "The proxy runs on the server, not in this browser. Empty uses the host network. Claude Code does not support SOCKS.": "代理运行在服务器上，而非浏览器中。留空使用宿主机网络。Claude Code 不支持 SOCKS。",
   "Secret reference": "密钥引用",
   "never an API key": "请勿填入 API 密钥",
-  "MVP supports env:AGENTDOCK_SECRET_NAME from the server environment. Secret values are not returned to the browser.": "MVP 支持引用服务端环境变量 env:AGENTDOCK_SECRET_NAME，密钥值不会返回浏览器。",
+  "MVP supports env:TENDLY_SECRET_NAME from the server environment. Secret values are not returned to the browser.": "MVP 支持引用服务端环境变量 env:TENDLY_SECRET_NAME，密钥值不会返回浏览器。",
   "Enter an environment reference, not the secret itself.": "请填写环境变量引用，不要输入密钥本身。",
   "Model selection": "模型选择",
   "Loading models…": "正在加载模型…",

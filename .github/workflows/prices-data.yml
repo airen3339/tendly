@@ -64,4 +64,4 @@ jobs:
             echo "GITCODE_TOKEN is not set; skipping the mirror"
             exit 0
           fi
-          git push "https://wnzzer:${GITCODE_TOKEN}@gitcode.com/wnzzer/agentdock.git" HEAD:main --force
+          git push "https://wnzzer:${GITCODE_TOKEN}@gitcode.com/wnzzer/tendly.git" HEAD:main --force

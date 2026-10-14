@@ -125,7 +125,7 @@ test('quota windows remain unmapped when the native duration is not an exact kno
 test('login URLs allow only official HTTPS domains and account environments drop other account credentials', () => {
   for (const url of ['javascript:alert(1)', 'https://auth.openai.com.evil.invalid/login', 'http://auth.openai.com/login', 'https://user:password@auth.openai.com/login', 'https://evilopenai.com/login']) assert.equal(safeLoginUrl(url), undefined);
   assert.equal(safeLoginUrl('https://chatgpt.com/auth/login'), 'https://chatgpt.com/auth/login');
-  assert.deepEqual(isolatedEnvironment({ PATH: '/fixture/bin', HTTP_PROXY: 'http://proxy.invalid', OPENAI_API_KEY: 'fake-a', ANTHROPIC_AUTH_TOKEN: 'fake-b', AGENTDOCK_TOKEN: 'fake-c', CLAUDE_CONFIG_DIR: '/other', CODEX_HOME: '/other', CLAUDECODE: '1' }, 'codex', '/fixture/account'), { PATH: '/fixture/bin', HTTP_PROXY: 'http://proxy.invalid', CODEX_HOME: '/fixture/account' });
+  assert.deepEqual(isolatedEnvironment({ PATH: '/fixture/bin', HTTP_PROXY: 'http://proxy.invalid', OPENAI_API_KEY: 'fake-a', ANTHROPIC_AUTH_TOKEN: 'fake-b', TENDLY_TOKEN: 'fake-c', CLAUDE_CONFIG_DIR: '/other', CODEX_HOME: '/other', CLAUDECODE: '1' }, 'codex', '/fixture/account'), { PATH: '/fixture/bin', HTTP_PROXY: 'http://proxy.invalid', CODEX_HOME: '/fixture/account' });
   assert.deepEqual(isolatedEnvironment({ PATH: '/fixture/bin', CODEX_HOME: '/default', OPENAI_API_KEY: 'fake-a' }, 'codex', '/fixture/account', null), { PATH: '/fixture/bin' });
   assert.deepEqual(normalizeLimits({}), {});
 });
@@ -153,9 +153,9 @@ test('Claude status line usage keeps official window names and never invents a p
   assert.equal(cpaLimits.secondary.used_percent, 72); assert.equal(cpaLimits.secondary.window_kind, 'weekly'); assert.equal(cpaLimits.primary.mapping_basis, undefined);
 });
 test('Claude usage reads only the local status line capture path beside the account configuration', async () => {
-  assert.equal(claudeStatusPath('/fixture/.claude', null), join('/fixture/.claude', 'agentdock', 'statusline.json'));
-  assert.equal(claudeStatusPath('/fixture/.claude', '/explicit/dir'), join('/explicit/dir', 'agentdock', 'statusline.json'));
-  const directory = await mkdtemp(join(tmpdir(), 'agentdock-usage-'));
+  assert.equal(claudeStatusPath('/fixture/.claude', null), join('/fixture/.claude', 'tendly', 'statusline.json'));
+  assert.equal(claudeStatusPath('/fixture/.claude', '/explicit/dir'), join('/explicit/dir', 'tendly', 'statusline.json'));
+  const directory = await mkdtemp(join(tmpdir(), 'tendly-usage-'));
   const program = join(directory, 'claude-fixture.mjs');
   await writeFile(program, '#!/usr/bin/env node\nprocess.stdout.write(\'{"loggedIn":true,"email":"fixture@example.invalid","subscriptionType":"pro"}\');\n', { mode: 0o755 });
   const usageJob = { provider: 'claude_code', action: 'usage', config_dir: directory, config_env: directory, program };
@@ -165,8 +165,8 @@ test('Claude usage reads only the local status line capture path beside the acco
   assert.equal(missing.capabilities.usage, true);
   assert.equal(missing.capabilities.quota, false);
   assert.equal(missing.capabilities.reset_quota, false);
-  await mkdir(join(directory, 'agentdock'), { recursive: true });
-  const capture = join(directory, 'agentdock', 'statusline.json');
+  await mkdir(join(directory, 'tendly'), { recursive: true });
+  const capture = join(directory, 'tendly', 'statusline.json');
   await writeFile(capture, JSON.stringify({ rate_limits: { five_hour: { used_percentage: 42, resets_at: 1900000000 } }, captured_at: 1899000000 }));
   const available = await executeAccount(usageJob, {});
   assert.equal(available.usage.availability, 'available');
@@ -185,7 +185,7 @@ test('Claude usage reads only the local status line capture path beside the acco
 });
 
 test('Claude usage query uses the native OAuth credential only after an explicit request', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'agentdock-usage-oauth-'));
+  const directory = await mkdtemp(join(tmpdir(), 'tendly-usage-oauth-'));
   const program = join(directory, 'claude-fixture.mjs');
   await writeFile(program, '#!/usr/bin/env node\nprocess.stdout.write(\'{"loggedIn":true,"email":"fixture@example.invalid","subscriptionType":"max"}\');\n', { mode: 0o755 });
   await writeFile(join(directory, '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'fixture-oauth-token' } }), { mode: 0o600 });
@@ -210,7 +210,7 @@ test('Claude usage query uses the native OAuth credential only after an explicit
 });
 
 test('a failed usage query reports why instead of silently showing nothing', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'agentdock-usage-failure-'));
+  const directory = await mkdtemp(join(tmpdir(), 'tendly-usage-failure-'));
   const program = join(directory, 'claude-fixture.mjs');
   await writeFile(program, '#!/usr/bin/env node\nprocess.stdout.write(\'{"loggedIn":true,"email":"fixture@example.invalid","subscriptionType":"max"}\');\n', { mode: 0o755 });
   await writeFile(join(directory, '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'fixture-oauth-token' } }), { mode: 0o600 });
@@ -240,12 +240,12 @@ test('a failed usage query reports why instead of silently showing nothing', asy
 });
 
 test('a rate-limited query still prefers a usable local capture over an error', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'agentdock-usage-fallback-'));
+  const directory = await mkdtemp(join(tmpdir(), 'tendly-usage-fallback-'));
   const program = join(directory, 'claude-fixture.mjs');
   await writeFile(program, '#!/usr/bin/env node\nprocess.stdout.write(\'{"loggedIn":true,"email":"fixture@example.invalid","subscriptionType":"max"}\');\n', { mode: 0o755 });
   await writeFile(join(directory, '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'fixture-oauth-token' } }), { mode: 0o600 });
   const capturePath = claudeStatusPath(directory, directory);
-  await mkdir(join(directory, 'agentdock'), { recursive: true });
+  await mkdir(join(directory, 'tendly'), { recursive: true });
   await writeFile(capturePath, JSON.stringify({ captured_at: 1899000000, rate_limits: { five_hour: { used_percentage: 12, resets_at: 4102444800 } } }));
   const originalFetch = globalThis.fetch;
   try {

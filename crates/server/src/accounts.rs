@@ -1,8 +1,6 @@
 //! Account metadata plus official native-client account operations. Credential
 //! contents are never parsed, copied into profiles, or returned by this module.
 use crate::{ApiError, AppState, Result};
-use agentdock_domain::{EndpointProfile, NativeConfigReference, ProviderKind, SessionStatus};
-use agentdock_runtime::{SpawnSpec, process::OwnedGroup};
 use axum::{
     Json, Router,
     extract::{Path as RoutePath, State},
@@ -18,6 +16,8 @@ use std::{
     sync::{Arc, Mutex},
     time::Duration,
 };
+use tendly_domain::{EndpointProfile, NativeConfigReference, ProviderKind, SessionStatus};
+use tendly_runtime::{SpawnSpec, process::OwnedGroup};
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     sync::oneshot,
@@ -606,7 +606,7 @@ fn isolated_environment(
         .unwrap_or_default();
     // Every client's variables, not only this one's: a key meant for one can
     // still reach another through a shared gateway or SDK.
-    let prefixes: Vec<&str> = std::iter::once("AGENTDOCK_")
+    let prefixes: Vec<&str> = std::iter::once("TENDLY_")
         .chain(
             crate::adapters::all()
                 .flat_map(|client| client.account_prefixes())
@@ -1041,12 +1041,12 @@ pub fn owns_profile(state: &AppState, profile_id: Uuid) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agentdock_persistence::Store;
-    use agentdock_runtime::RuntimeManager;
     use axum::{
         body::{Body, to_bytes},
         http::{Request, StatusCode},
     };
+    use tendly_persistence::Store;
+    use tendly_runtime::RuntimeManager;
     use tower::ServiceExt;
 
     struct Fixture {
@@ -1055,7 +1055,7 @@ mod tests {
     }
     impl Fixture {
         fn new() -> Self {
-            let root = env::temp_dir().join(format!("agentdock-account-test-{}", Uuid::new_v4()));
+            let root = env::temp_dir().join(format!("tendly-account-test-{}", Uuid::new_v4()));
             fs::create_dir(&root).unwrap();
             let root = dunce::canonicalize(root).unwrap();
             let state = AppState {
@@ -2467,7 +2467,7 @@ async fn bridge(
         job["config_dir"] = json!(reference.config_dir);
         job["config_env"] = json!(reference.config_env);
         job["program"] = json!(spec.program);
-        let script = crate::bridge::script(&state.state_dir, "AGENTDOCK_ACCOUNT_BRIDGE", "account.mjs");
+        let script = crate::bridge::script(&state.state_dir, "TENDLY_ACCOUNT_BRIDGE", "account.mjs");
         // --use-env-proxy makes the bridge's own fetch (the usage query) honour
         // the proxy; the same variables reach the native CLIs it spawns.
         let node_options: &[&str] = if record.proxy_url.is_some() { &["--use-env-proxy"] } else { &[] };

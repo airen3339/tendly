@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
-import type { EndpointProfile, ModelCatalog, ProviderKind, Session, Workspace } from "@agentdock/protocol";
+import type { EndpointProfile, ModelCatalog, ProviderKind, Session, Workspace } from "@tendly/protocol";
 import { errorMessage, json, providerLabel, request, workspacePath } from "./api";
 import { sessionEffortOverride, sessionModelOverride } from "./native-profiles";
 import { effortLabel, modelEfforts } from "./reasoning-effort";

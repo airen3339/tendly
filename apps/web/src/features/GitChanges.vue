@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
-import type { GitCommitDetail, GitDiff, GitFile } from "@agentdock/protocol";
+import type { GitCommitDetail, GitDiff, GitFile } from "@tendly/protocol";
 import { errorMessage } from "./api";
 import { gitGet, gitPost, useGit } from "./git-context";
 import { hunkPatch, isChangedFile, isConflictedFile, isStagedFile, pathsForGitFiles } from "./git-model";

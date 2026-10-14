@@ -89,7 +89,7 @@ mod tests {
 
     #[test]
     fn a_tiff_becomes_a_png_and_other_formats_are_left_alone() {
-        let dir = std::env::temp_dir().join(format!("agentdock-media-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("tendly-media-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let tiff = dir.join("scan.TIFF");
         image::RgbImage::from_pixel(3, 2, image::Rgb([200, 10, 10]))

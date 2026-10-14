@@ -2,13 +2,13 @@ mod conversations;
 pub use conversations::{ConversationPage, MessageSubmission, SearchHit, StoredConversation};
 pub mod metrics;
 
-use agentdock_domain::{
-    EndpointProfile, EnvironmentOverrides, NativeConfigReference, ProviderKind, Session, SessionId,
-    SessionStatus, Workspace, WorkspaceId,
-};
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension, Result, TransactionBehavior, params};
 use std::{path::Path, sync::Mutex};
+use tendly_domain::{
+    EndpointProfile, EnvironmentOverrides, NativeConfigReference, ProviderKind, Session, SessionId,
+    SessionStatus, Workspace, WorkspaceId,
+};
 use uuid::Uuid;
 pub type DbError = rusqlite::Error;
 
@@ -374,7 +374,7 @@ impl Store {
         resume_source_id: Option<SessionId>,
         provider_session_id: Option<String>,
     ) -> Result<Session> {
-        agentdock_domain::validate_environment(&overrides)
+        tendly_domain::validate_environment(&overrides)
             .map_err(|_| rusqlite::Error::InvalidQuery)?;
         let mut conn = self.connection.lock().expect("sqlite lock");
         let tx = conn.transaction()?;
@@ -425,7 +425,7 @@ impl Store {
             .map(|p| p.environment.clone())
             .unwrap_or_default();
         environment.extend(overrides);
-        agentdock_domain::validate_environment(&environment)
+        tendly_domain::validate_environment(&environment)
             .map_err(|_| rusqlite::Error::InvalidQuery)?;
         let environment_json = serde_json::to_string(&environment).map_err(conversion_error)?;
         let session = Session {
@@ -479,7 +479,7 @@ impl Store {
         {
             return Err(rusqlite::Error::InvalidQuery);
         }
-        agentdock_domain::validate_environment(&session.environment)
+        tendly_domain::validate_environment(&session.environment)
             .map_err(|_| rusqlite::Error::InvalidQuery)?;
         let snapshot = session
             .endpoint_snapshot
@@ -653,7 +653,7 @@ impl Store {
         id: SessionId,
         environment: &EnvironmentOverrides,
     ) -> Result<bool> {
-        agentdock_domain::validate_environment(environment)
+        tendly_domain::validate_environment(environment)
             .map_err(|_| rusqlite::Error::InvalidQuery)?;
         let encoded = serde_json::to_string(environment).map_err(conversion_error)?;
         Ok(self.connection.lock().expect("sqlite lock").execute(
@@ -889,7 +889,7 @@ impl Store {
         environment: Option<EnvironmentOverrides>,
     ) -> Result<Option<Session>> {
         if let Some(environment) = &environment {
-            agentdock_domain::validate_environment(environment)
+            tendly_domain::validate_environment(environment)
                 .map_err(|_| rusqlite::Error::InvalidQuery)?;
         }
         let mut conn = self.connection.lock().expect("sqlite lock");
@@ -918,7 +918,7 @@ fn conversion_error(error: impl std::error::Error + Send + Sync + 'static) -> ru
 }
 
 fn validate_native_profile(profile: &EndpointProfile) -> Result<()> {
-    agentdock_domain::validate_environment(&profile.environment)
+    tendly_domain::validate_environment(&profile.environment)
         .map_err(|_| rusqlite::Error::InvalidQuery)?;
     let Some(reference) = &profile.native_config else {
         return Ok(());
@@ -1017,8 +1017,8 @@ fn session_row(r: &rusqlite::Row<'_>) -> Result<Session> {
     };
     Ok(Session {
         interaction_mode: match r.get::<_, String>(14)?.as_str() {
-            "pty" => agentdock_domain::InteractionMode::Pty,
-            "structured" => agentdock_domain::InteractionMode::Structured,
+            "pty" => tendly_domain::InteractionMode::Pty,
+            "structured" => tendly_domain::InteractionMode::Structured,
             _ => return Err(rusqlite::Error::InvalidQuery),
         },
         configuration_revision: r.get(15)?,
@@ -1061,7 +1061,7 @@ fn session_row(r: &rusqlite::Row<'_>) -> Result<Session> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agentdock_domain::EnvironmentValue;
+    use tendly_domain::EnvironmentValue;
     #[path = "archive_tests.rs"]
     mod archive_tests;
 
@@ -1096,7 +1096,7 @@ mod tests {
                 (
                     "OPENAI_API_KEY".into(),
                     EnvironmentValue::SecretRef {
-                        reference: "env:AGENTDOCK_SECRET_FIXTURE".into(),
+                        reference: "env:TENDLY_SECRET_FIXTURE".into(),
                     },
                 ),
             ]
@@ -1758,7 +1758,7 @@ mod tests {
                 "provider" => changed.provider = ProviderKind::ClaudeCode,
                 "endpoint" => changed.endpoint_url = Some("https://example.invalid/v1".into()),
                 "model" => changed.model = Some("override-model".into()),
-                "secret" => changed.secret_ref = Some("env:AGENTDOCK_SECRET_FIXTURE".into()),
+                "secret" => changed.secret_ref = Some("env:TENDLY_SECRET_FIXTURE".into()),
                 "aliases" => {
                     changed
                         .model_aliases

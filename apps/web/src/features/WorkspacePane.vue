@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import type { EndpointProfile, GitStatus, PaneNode, ProviderKind, Session, Workspace } from "@agentdock/protocol";
+import type { EndpointProfile, GitStatus, PaneNode, ProviderKind, Session, Workspace } from "@tendly/protocol";
 import { paneString, paneSession, paneWorkspace } from "./pane-context";
 import NativeSessionPane from "./NativeSessionPane.vue";
 import CreateSessionDialog from "./CreateSessionDialog.vue";

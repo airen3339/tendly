@@ -145,7 +145,7 @@ export class NativeProcess {
    * connection. Such a call fails quietly and changes nothing.
    */
   rpc(method, params, optional = false) {
-    const id = `agentdock-${++this.sequence}`;
+    const id = `tendly-${++this.sequence}`;
     return new Promise((resolve,reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);reject(new Error('Native control request timed out.'));

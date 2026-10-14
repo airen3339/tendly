@@ -7,7 +7,7 @@ import { createSSRApp } from 'vue';
 import { renderToString } from 'vue/server-renderer';
 
 let server, Dialog, Editor, Sidebar, capabilities, i18n;
-const fixture = { id:'fixture-session', workspace_id:'fixture-workspace', provider:'claude_code', title:'Fixture session', status:'stopped', environment:{LANG:{kind:'literal',value:'zh_CN.UTF-8'},OPENAI_API_KEY:{kind:'secret_ref',reference:'env:AGENTDOCK_SECRET_FIXTURE'}}, created_at:'2026-01-01T00:00:00Z',updated_at:'2026-01-01T00:00:00Z' };
+const fixture = { id:'fixture-session', workspace_id:'fixture-workspace', provider:'claude_code', title:'Fixture session', status:'stopped', environment:{LANG:{kind:'literal',value:'zh_CN.UTF-8'},OPENAI_API_KEY:{kind:'secret_ref',reference:'env:TENDLY_SECRET_FIXTURE'}}, created_at:'2026-01-01T00:00:00Z',updated_at:'2026-01-01T00:00:00Z' };
 before(async () => {
   // Render actual SFCs without HTTP/HMR listeners, native clients or real credentials.
   server = await createServer({configFile:false,root:fileURLToPath(new URL('../../',import.meta.url)),plugins:[vue()],server:{middlewareMode:true,hmr:false,ws:false},appType:'custom',optimizeDeps:{noDiscovery:true}});
@@ -33,7 +33,7 @@ test('stopped session editor is expanded, bilingual and shows references only',a
     i18n.setLocale(locale);
     const {html}=await render(Dialog,{session:fixture});
     assert.ok(html.includes(label));assert.match(html,/<details\b[^>]*class="environment-editor"[^>]*\bopen\b/);
-    assert.ok(html.includes('env:AGENTDOCK_SECRET_FIXTURE'));
+    assert.ok(html.includes('env:TENDLY_SECRET_FIXTURE'));
     assert.ok(!/\bdisabled\b/.test(saveButton(html)));
   }
 });

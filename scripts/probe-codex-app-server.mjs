@@ -5,11 +5,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 
-const config = await mkdtemp(join(tmpdir(), "agentdock-codex-probe-"));
+const config = await mkdtemp(join(tmpdir(), "tendly-codex-probe-"));
 const environment = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
-  !/^(OPENAI_|CODEX_|ANTHROPIC_|CLAUDE_|AGENTDOCK_SECRET_)/.test(key) && key !== "AGENTDOCK_TOKEN"));
+  !/^(OPENAI_|CODEX_|ANTHROPIC_|CLAUDE_|TENDLY_SECRET_)/.test(key) && key !== "TENDLY_TOKEN"));
 environment.CODEX_HOME = config;
-const child = spawn(process.env.AGENTDOCK_CODEX_BIN || "codex", ["app-server", "-c", 'cli_auth_credentials_store="file"'], { env: environment, stdio: ["pipe", "pipe", "pipe"] });
+const child = spawn(process.env.TENDLY_CODEX_BIN || "codex", ["app-server", "-c", 'cli_auth_credentials_store="file"'], { env: environment, stdio: ["pipe", "pipe", "pipe"] });
 const lines=createInterface({ input:child.stdout });
 let timer, next=1;
 const pending=new Map();
@@ -24,7 +24,7 @@ function rpc(method,params) {return new Promise((resolve,reject)=>{const id=next
 try {
   const result=await Promise.race([
     (async()=>{
-      const init=await rpc("initialize",{clientInfo:{name:"agentdock_probe",title:"Tendly protocol probe",version:"0.1.0"}});
+      const init=await rpc("initialize",{clientInfo:{name:"tendly_probe",title:"Tendly protocol probe",version:"0.1.0"}});
       child.stdin.write(JSON.stringify({method:"initialized",params:{}})+"\n");
       const models=await rpc("model/list",{limit:20,includeHidden:false});
       return { initialized:!!init, model_count:Array.isArray(models?.data)?models.data.length:0, transport:"native app-server JSONL", inference_requested:false };

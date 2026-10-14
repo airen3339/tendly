@@ -49,12 +49,12 @@ struct Fixture {
 }
 impl Fixture {
     fn new(address: SocketAddr, token: Option<&str>) -> Self {
-        let path = std::env::temp_dir().join(format!("agentdock-api-{}", Uuid::new_v4()));
+        let path = std::env::temp_dir().join(format!("tendly-api-{}", Uuid::new_v4()));
         fs::create_dir_all(path.join("repo")).unwrap();
         for args in [
             vec!["init", "-q"],
             vec!["config", "user.name", "Tendly test"],
-            vec!["config", "user.email", "test@agentdock.invalid"],
+            vec!["config", "user.email", "test@tendly.invalid"],
             vec!["config", "core.autocrlf", "false"],
         ] {
             assert!(
@@ -143,7 +143,7 @@ async fn call(app: Router, method: &str, path: &str, value: Value) -> (StatusCod
         .method(method)
         .uri(path)
         .header("host", "127.0.0.1:8787")
-        .header("x-agentdock-client", "web")
+        .header("x-tendly-client", "web")
         .header("content-type", "application/json")
         .body(Body::from(value.to_string()))
         .unwrap();
@@ -179,7 +179,7 @@ async fn workspace_file_git_layout_workflow() {
             f.app(),
             "POST",
             "/api/workspaces",
-            json!({"name":"bad","root_path":"/not-an-agentdock-directory"})
+            json!({"name":"bad","root_path":"/not-an-tendly-directory"})
         )
         .await
         .0,
@@ -460,17 +460,17 @@ async fn workspace_file_git_layout_workflow() {
 
 /// A launch's arguments without the ones that give it Tendly's own tools
 /// (agent::equip), for tests about everything else a launch carries.
-fn without_agentdock(args: &[String]) -> Vec<String> {
+fn without_tendly(args: &[String]) -> Vec<String> {
     let mut kept = Vec::new();
     let mut index = 0;
     while index < args.len() {
         let arg = &args[index];
-        if arg.starts_with("--mcp-config=") || arg == "--allowedTools=mcp__agentdock" {
+        if arg.starts_with("--mcp-config=") || arg == "--allowedTools=mcp__tendly" {
             index += 1;
         } else if arg == "-c"
             && args
                 .get(index + 1)
-                .is_some_and(|value| value.starts_with("mcp_servers.agentdock."))
+                .is_some_and(|value| value.starts_with("mcp_servers.tendly."))
         {
             index += 2;
         } else {
@@ -482,7 +482,7 @@ fn without_agentdock(args: &[String]) -> Vec<String> {
 }
 
 #[tokio::test]
-async fn every_client_launch_carries_agentdock_tools_unless_turned_off() {
+async fn every_client_launch_carries_tendly_tools_unless_turned_off() {
     let f = Fixture::new("127.0.0.1:8787".parse().unwrap(), None);
     let workspace = f
         .state
@@ -496,21 +496,18 @@ async fn every_client_launch_carries_agentdock_tools_unless_turned_off() {
         .create_session(workspace.id, ProviderKind::ClaudeCode, "claude")
         .unwrap();
     let spec = launch::build(&f.state, &claude, cwd.clone()).unwrap();
-    let token = spec.env["AGENTDOCK_AGENT_TOKEN"].clone();
+    let token = spec.env["TENDLY_AGENT_TOKEN"].clone();
     let config = spec
         .args
         .iter()
         .find_map(|arg| arg.strip_prefix("--mcp-config="))
         .expect("mcp config flag");
-    assert!(
-        spec.args
-            .contains(&"--allowedTools=mcp__agentdock".to_owned())
-    );
+    assert!(spec.args.contains(&"--allowedTools=mcp__tendly".to_owned()));
     let written: Value = serde_json::from_str(&fs::read_to_string(config).unwrap()).unwrap();
-    let server = &written["mcpServers"]["agentdock"];
+    let server = &written["mcpServers"]["tendly"];
     assert_eq!(server["args"], json!(["mcp"]));
-    assert_eq!(server["env"]["AGENTDOCK_AGENT_TOKEN"], token);
-    assert_eq!(server["env"]["AGENTDOCK_SESSION_ID"], claude.id.to_string());
+    assert_eq!(server["env"]["TENDLY_AGENT_TOKEN"], token);
+    assert_eq!(server["env"]["TENDLY_SESSION_ID"], claude.id.to_string());
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -521,7 +518,7 @@ async fn every_client_launch_carries_agentdock_tools_unless_turned_off() {
     }
     // A relaunch replaces the token; the old one names no one.
     let again = launch::build(&f.state, &claude, cwd.clone()).unwrap();
-    assert_ne!(again.env["AGENTDOCK_AGENT_TOKEN"], token);
+    assert_ne!(again.env["TENDLY_AGENT_TOKEN"], token);
 
     let codex = f
         .state
@@ -532,21 +529,21 @@ async fn every_client_launch_carries_agentdock_tools_unless_turned_off() {
     assert_eq!(spec.args[0], "-c");
     assert_eq!(
         spec.args[1],
-        "mcp_servers.agentdock.command=".to_owned()
+        "mcp_servers.tendly.command=".to_owned()
             + &serde_json::to_string(&std::env::current_exe().unwrap().to_string_lossy()).unwrap()
     );
     let env = spec
         .args
         .iter()
-        .find(|arg| arg.starts_with("mcp_servers.agentdock.env="))
+        .find(|arg| arg.starts_with("mcp_servers.tendly.env="))
         .unwrap();
     assert!(env.contains(&format!(
-        "AGENTDOCK_AGENT_TOKEN={}",
-        serde_json::to_string(&spec.env["AGENTDOCK_AGENT_TOKEN"]).unwrap()
+        "TENDLY_AGENT_TOKEN={}",
+        serde_json::to_string(&spec.env["TENDLY_AGENT_TOKEN"]).unwrap()
     )));
     assert!(
         spec.args
-            .contains(&"mcp_servers.agentdock.tool_timeout_sec=600".to_owned())
+            .contains(&"mcp_servers.tendly.tool_timeout_sec=600".to_owned())
     );
 
     let terminal = f
@@ -555,8 +552,8 @@ async fn every_client_launch_carries_agentdock_tools_unless_turned_off() {
         .create_session(workspace.id, ProviderKind::Terminal, "shell")
         .unwrap();
     let spec = launch::build(&f.state, &terminal, cwd.clone()).unwrap();
-    assert!(spec.env.contains_key("AGENTDOCK_AGENT_TOKEN"));
-    assert_eq!(without_agentdock(&spec.args), spec.args);
+    assert!(spec.env.contains_key("TENDLY_AGENT_TOKEN"));
+    assert_eq!(without_tendly(&spec.args), spec.args);
 
     let (status, _) = call(
         f.app(),
@@ -569,8 +566,8 @@ async fn every_client_launch_carries_agentdock_tools_unless_turned_off() {
     let (_, preferences) = call(f.app(), "GET", "/api/preferences", Value::Null).await;
     assert_eq!(preferences["agent_tools"], false);
     let spec = launch::build(&f.state, &claude, cwd).unwrap();
-    assert!(!spec.env.keys().any(|key| key.starts_with("AGENTDOCK_")));
-    assert_eq!(without_agentdock(&spec.args), spec.args);
+    assert!(!spec.env.keys().any(|key| key.starts_with("TENDLY_")));
+    assert_eq!(without_tendly(&spec.args), spec.args);
 }
 
 /// A request to the agent tools the way `tendly mcp` makes one.
@@ -591,7 +588,7 @@ async fn agent_request(
         request = request.header("authorization", format!("Bearer {token}"));
     }
     if let Some(client) = client {
-        request = request.header("x-agentdock-client", client);
+        request = request.header("x-tendly-client", client);
     }
     let response = app
         .oneshot(request.body(Body::from(body.to_string())).unwrap())
@@ -624,10 +621,10 @@ async fn agent_tools_know_their_caller_and_a_session_token_opens_nothing_else() 
         .create_session(workspace.id, ProviderKind::Terminal, "worker")
         .unwrap();
     let spec = launch::build(&f.state, &session, f.path.join("repo")).unwrap();
-    let token = spec.env["AGENTDOCK_AGENT_TOKEN"].clone();
-    assert_eq!(spec.env["AGENTDOCK_SESSION_ID"], session.id.to_string());
-    assert_eq!(spec.env["AGENTDOCK_URL"], "http://127.0.0.1:8787");
-    let status = json!({"name":"agentdock_status"});
+    let token = spec.env["TENDLY_AGENT_TOKEN"].clone();
+    assert_eq!(spec.env["TENDLY_SESSION_ID"], session.id.to_string());
+    assert_eq!(spec.env["TENDLY_URL"], "http://127.0.0.1:8787");
+    let status = json!({"name":"tendly_status"});
 
     // Issued but not running: the token identifies no one yet.
     let (code, _) = agent_request(
@@ -645,7 +642,7 @@ async fn agent_tools_know_their_caller_and_a_session_token_opens_nothing_else() 
         .runtime
         .start(
             session.id.to_string(),
-            agentdock_runtime::SpawnSpec {
+            tendly_runtime::SpawnSpec {
                 program: waiting_process(&["-i"]).0,
                 args: waiting_process(&["-i"]).1,
                 cwd: f.path.join("repo"),
@@ -670,7 +667,7 @@ async fn agent_tools_know_their_caller_and_a_session_token_opens_nothing_else() 
         tools["instructions"]
             .as_str()
             .unwrap()
-            .contains("agentdock_status")
+            .contains("tendly_status")
     );
     let names: Vec<_> = tools["tools"]
         .as_array()
@@ -678,7 +675,7 @@ async fn agent_tools_know_their_caller_and_a_session_token_opens_nothing_else() 
         .iter()
         .map(|tool| tool["name"].as_str().unwrap())
         .collect();
-    assert!(names.contains(&"agentdock_status") && names.contains(&"agentdock_list"));
+    assert!(names.contains(&"tendly_status") && names.contains(&"tendly_list"));
 
     let (code, result) = agent_request(
         f.app(),
@@ -753,7 +750,7 @@ async fn agent_tools_know_their_caller_and_a_session_token_opens_nothing_else() 
         "/api/agent/call",
         Some(DEPLOYMENT),
         Some("agent"),
-        json!({"name":"agentdock_nothing"}),
+        json!({"name":"tendly_nothing"}),
     )
     .await;
     assert_eq!(unknown["isError"], true);
@@ -761,11 +758,11 @@ async fn agent_tools_know_their_caller_and_a_session_token_opens_nothing_else() 
     // Listing endpoints says how a key is set, never what it is.
     crate::secrets::store(
         &f.state.state_dir,
-        "AGENTDOCK_SECRET_AGENT_LIST",
+        "TENDLY_SECRET_AGENT_LIST",
         "sk-never-listed",
     )
     .unwrap();
-    let (_, profile) = agent_request(f.app(), "POST", "/api/endpoint-profiles", Some(DEPLOYMENT), Some("web"), json!({"name":"listed","provider":"codex","endpoint_url":"https://example.test/v1","secret_ref":"env:AGENTDOCK_SECRET_AGENT_LIST"})).await;
+    let (_, profile) = agent_request(f.app(), "POST", "/api/endpoint-profiles", Some(DEPLOYMENT), Some("web"), json!({"name":"listed","provider":"codex","endpoint_url":"https://example.test/v1","secret_ref":"env:TENDLY_SECRET_AGENT_LIST"})).await;
     assert_eq!(profile.get("error"), None, "{profile}");
     let (_, listed) = agent_request(
         f.app(),
@@ -773,7 +770,7 @@ async fn agent_tools_know_their_caller_and_a_session_token_opens_nothing_else() 
         "/api/agent/call",
         Some(&token),
         Some("agent"),
-        json!({"name":"agentdock_list","arguments":{"what":"endpoints"}}),
+        json!({"name":"tendly_list","arguments":{"what":"endpoints"}}),
     )
     .await;
     assert!(!listed.to_string().contains("sk-never-listed"));
@@ -784,7 +781,7 @@ async fn agent_tools_know_their_caller_and_a_session_token_opens_nothing_else() 
         "/api/agent/call",
         Some(&token),
         Some("agent"),
-        json!({"name":"agentdock_list","arguments":{"what":"sessions"}}),
+        json!({"name":"tendly_list","arguments":{"what":"sessions"}}),
     )
     .await;
     assert_eq!(tool_text(&sessions)[0]["title"], "worker");
@@ -831,7 +828,7 @@ async fn next_event(events: &mut tokio::sync::broadcast::Receiver<Value>, kind: 
 #[tokio::test]
 async fn an_agent_endpoint_waits_for_the_person_and_its_key_never_passes_through_the_agent() {
     let f = Fixture::new("127.0.0.1:8787".parse().unwrap(), None);
-    let create = json!({"name":"agentdock_endpoint","arguments":{"action":"create","name":"Team relay","provider":"codex","endpoint_url":"https://relay.example.test/v1","model":"gpt-test"}});
+    let create = json!({"name":"tendly_endpoint","arguments":{"action":"create","name":"Team relay","provider":"codex","endpoint_url":"https://relay.example.test/v1","model":"gpt-test"}});
 
     // No window open: nobody can answer, so the agent is told at once.
     let (_, result) = agent_request(
@@ -880,19 +877,19 @@ async fn an_agent_endpoint_waits_for_the_person_and_its_key_never_passes_through
         f.app(),
         "POST",
         &format!("/api/agent-activity/requests/{id}"),
-        json!({"approve":true,"secret":"sk-typed-in-agentdock"}),
+        json!({"approve":true,"secret":"sk-typed-in-tendly"}),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
     let (_, result) = pending.await.unwrap();
     assert_eq!(result["isError"], false, "{result}");
-    assert!(!result.to_string().contains("sk-typed-in-agentdock"));
+    assert!(!result.to_string().contains("sk-typed-in-tendly"));
     let created = &tool_text(&result)["created"];
     assert_eq!(created["key"], "saved");
     assert_eq!(created["model"], "gpt-test");
     assert_eq!(
-        crate::secrets::resolve(&f.state.state_dir, "AGENTDOCK_SECRET_TEAM_RELAY").as_deref(),
-        Some("sk-typed-in-agentdock")
+        crate::secrets::resolve(&f.state.state_dir, "TENDLY_SECRET_TEAM_RELAY").as_deref(),
+        Some("sk-typed-in-tendly")
     );
     let notice = next_event(&mut events, "notice").await;
     assert_eq!(notice["message"], "Created endpoint profile “{name}”");
@@ -913,7 +910,7 @@ async fn an_agent_endpoint_waits_for_the_person_and_its_key_never_passes_through
     assert_eq!(status, StatusCode::OK);
     let (_, profiles) = call(f.app(), "GET", "/api/endpoint-profiles", Value::Null).await;
     assert_eq!(profiles, json!([]));
-    assert!(crate::secrets::resolve(&f.state.state_dir, "AGENTDOCK_SECRET_TEAM_RELAY").is_none());
+    assert!(crate::secrets::resolve(&f.state.state_dir, "TENDLY_SECRET_TEAM_RELAY").is_none());
 
     // Declining changes nothing, and says so.
     let app = f.app();
@@ -948,7 +945,7 @@ async fn an_agent_endpoint_waits_for_the_person_and_its_key_never_passes_through
 async fn defaults_change_at_once_with_an_undo_and_only_running_unasked_is_confirmed() {
     let f = Fixture::new("127.0.0.1:8787".parse().unwrap(), None);
     let mut events = f.state.activity.subscribe();
-    let (_, result) = agent_request(f.app(), "POST", "/api/agent/call", None, Some("agent"), json!({"name":"agentdock_preferences","arguments":{"action":"set","provider":"claude_code","effort":"high"}})).await;
+    let (_, result) = agent_request(f.app(), "POST", "/api/agent/call", None, Some("agent"), json!({"name":"tendly_preferences","arguments":{"action":"set","provider":"claude_code","effort":"high"}})).await;
     assert_eq!(result["isError"], false, "{result}");
     assert_eq!(tool_text(&result)["saved"]["claude_code"]["effort"], "high");
     let notice = next_event(&mut events, "notice").await;
@@ -967,7 +964,7 @@ async fn defaults_change_at_once_with_an_undo_and_only_running_unasked_is_confir
 
     let app = f.app();
     let danger = tokio::spawn(async move {
-        agent_request(app, "POST", "/api/agent/call", None, Some("agent"), json!({"name":"agentdock_preferences","arguments":{"action":"set","provider":"codex","permission":"danger"}})).await
+        agent_request(app, "POST", "/api/agent/call", None, Some("agent"), json!({"name":"tendly_preferences","arguments":{"action":"set","provider":"codex","permission":"danger"}})).await
     });
     let request = next_event(&mut events, "request").await;
     assert_eq!(request["values"]["client"], "Codex");
@@ -984,17 +981,25 @@ async fn defaults_change_at_once_with_an_undo_and_only_running_unasked_is_confir
     assert_eq!(danger.await.unwrap().1["isError"], false);
 
     // The appearance needs no client, and following is stored as nothing.
-    let (_, themed) = agent_request(f.app(), "POST", "/api/agent/call", None, Some("agent"), json!({"name":"agentdock_preferences","arguments":{"action":"set","terminal_appearance":"dark","appearance":"system"}})).await;
+    let (_, themed) = agent_request(f.app(), "POST", "/api/agent/call", None, Some("agent"), json!({"name":"tendly_preferences","arguments":{"action":"set","terminal_appearance":"dark","appearance":"system"}})).await;
     assert_eq!(themed["isError"], false, "{themed}");
     assert_eq!(tool_text(&themed)["saved"]["terminal_appearance"], "dark");
     assert_eq!(tool_text(&themed)["saved"]["appearance"], "system");
     let (_, preferences) = call(f.app(), "GET", "/api/preferences", Value::Null).await;
     assert_eq!(preferences["terminal_appearance"], "dark");
     assert_eq!(preferences.get("appearance"), None);
-    let (_, wrong) = agent_request(f.app(), "POST", "/api/agent/call", None, Some("agent"), json!({"name":"agentdock_preferences","arguments":{"action":"set","terminal_appearance":"sepia"}})).await;
+    let (_, wrong) = agent_request(f.app(), "POST", "/api/agent/call", None, Some("agent"), json!({"name":"tendly_preferences","arguments":{"action":"set","terminal_appearance":"sepia"}})).await;
     assert_eq!(wrong["isError"], true);
 
-    let (_, added) = agent_request(f.app(), "POST", "/api/agent/call", None, Some("agent"), json!({"name":"agentdock_workspace","arguments":{"action":"add","path":f.path.join("repo")}})).await;
+    let (_, added) = agent_request(
+        f.app(),
+        "POST",
+        "/api/agent/call",
+        None,
+        Some("agent"),
+        json!({"name":"tendly_workspace","arguments":{"action":"add","path":f.path.join("repo")}}),
+    )
+    .await;
     assert_eq!(tool_text(&added)["added"]["name"], "repo");
 }
 
@@ -1014,13 +1019,13 @@ async fn a_session_token_can_neither_see_nor_answer_the_persons_questions() {
         .unwrap();
     let token = launch::build(&f.state, &session, f.path.join("repo"))
         .unwrap()
-        .env["AGENTDOCK_AGENT_TOKEN"]
+        .env["TENDLY_AGENT_TOKEN"]
         .clone();
     f.state
         .runtime
         .start(
             session.id.to_string(),
-            agentdock_runtime::SpawnSpec {
+            tendly_runtime::SpawnSpec {
                 program: waiting_process(&["-i"]).0,
                 args: waiting_process(&["-i"]).1,
                 cwd: f.path.join("repo"),
@@ -1035,7 +1040,7 @@ async fn a_session_token_can_neither_see_nor_answer_the_persons_questions() {
     let asking = tokio::spawn({
         let token = token.clone();
         async move {
-            agent_request(app, "POST", "/api/agent/call", Some(&token), Some("agent"), json!({"name":"agentdock_endpoint","arguments":{"action":"create","name":"x","provider":"codex","key":"none"}})).await
+            agent_request(app, "POST", "/api/agent/call", Some(&token), Some("agent"), json!({"name":"tendly_endpoint","arguments":{"action":"create","name":"x","provider":"codex","key":"none"}})).await
         }
     });
     let request = next_event(&mut events, "request").await;
@@ -1080,10 +1085,10 @@ async fn a_session_token_can_neither_see_nor_answer_the_persons_questions() {
 }
 
 #[tokio::test]
-async fn a_key_saved_in_agentdock_reaches_the_client_and_never_comes_back() {
+async fn a_key_saved_in_tendly_reaches_the_client_and_never_comes_back() {
     let f = Fixture::new("127.0.0.1:8787".parse().unwrap(), None);
     let id = register(&f).await;
-    let name = "AGENTDOCK_SECRET_API_TEST_STORED";
+    let name = "TENDLY_SECRET_API_TEST_STORED";
     let (status, saved) = call(
         f.app(),
         "PUT",
@@ -1092,10 +1097,7 @@ async fn a_key_saved_in_agentdock_reaches_the_client_and_never_comes_back() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(
-        saved,
-        json!({"name":name,"source":"agentdock","stored":true})
-    );
+    assert_eq!(saved, json!({"name":name,"source":"tendly","stored":true}));
     let (status, listed) = call(f.app(), "GET", "/api/secrets", Value::Null).await;
     assert_eq!(status, StatusCode::OK);
     assert!(
@@ -1140,7 +1142,7 @@ async fn a_key_saved_in_agentdock_reaches_the_client_and_never_comes_back() {
 async fn a_pi_profile_becomes_a_provider_in_its_own_models_json() {
     let f = Fixture::new("127.0.0.1:8787".parse().unwrap(), None);
     let id = register(&f).await;
-    let name = "AGENTDOCK_SECRET_API_TEST_PI";
+    let name = "TENDLY_SECRET_API_TEST_PI";
     call(
         f.app(),
         "PUT",
@@ -1168,12 +1170,12 @@ async fn a_pi_profile_becomes_a_provider_in_its_own_models_json() {
     let session: Session = serde_json::from_value(created).unwrap();
     let spec = launch::build(&f.state, &session, f.path.join("repo")).unwrap();
     let args = spec.args.join(" ");
-    assert!(args.contains("--model agentdock/qwen-local"), "{args}");
+    assert!(args.contains("--model tendly/qwen-local"), "{args}");
     assert!(args.contains("--thinking high"), "{args}");
     assert!(args.contains("--name pi task"), "{args}");
     assert!(!args.contains("mcp"), "Pi has no MCP: {args}");
     assert_eq!(
-        spec.env.get("AGENTDOCK_PI_API_KEY").map(String::as_str),
+        spec.env.get("TENDLY_PI_API_KEY").map(String::as_str),
         Some("sk-pi-value")
     );
     let home = PathBuf::from(spec.env.get("PI_CODING_AGENT_DIR").expect("its own home"));
@@ -1190,8 +1192,8 @@ async fn a_pi_profile_becomes_a_provider_in_its_own_models_json() {
     );
     let config: Value = serde_json::from_str(&written).unwrap();
     assert_eq!(
-        config["providers"]["agentdock"],
-        json!({"baseUrl":"http://gateway.test/v1","api":"openai-completions","apiKey":"$AGENTDOCK_PI_API_KEY",
+        config["providers"]["tendly"],
+        json!({"baseUrl":"http://gateway.test/v1","api":"openai-completions","apiKey":"$TENDLY_PI_API_KEY",
             "models":[{"id":"qwen-local"},{"id":"zai-org/GLM-5.3","contextWindow":40000}]})
     );
 
@@ -1217,7 +1219,7 @@ async fn a_pi_profile_becomes_a_provider_in_its_own_models_json() {
     let home = PathBuf::from(spec.env.get("PI_CODING_AGENT_DIR").unwrap());
     let config: Value =
         serde_json::from_str(&fs::read_to_string(home.join("models.json")).unwrap()).unwrap();
-    assert_eq!(config["providers"]["agentdock"]["api"], "openai-responses");
+    assert_eq!(config["providers"]["tendly"]["api"], "openai-responses");
     for (provider, api) in [("pi", "soap"), ("claude_code", "openai-responses")] {
         let (status, _) = call(f.app(), "POST", "/api/endpoint-profiles", json!({"name":"wrong api","provider":provider,"endpoint_url":"http://gateway.test/v1","api":api})).await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{provider} {api}");
@@ -1283,7 +1285,7 @@ async fn profiles_validate_snapshot_and_session_states() {
         fs::read_to_string(PathBuf::from(&spec.env["CODEX_HOME"]).join("config.toml")).unwrap();
     let parsed: toml::Value = toml::from_str(&config).unwrap();
     assert_eq!(
-        parsed["model_providers"]["agentdock"]["base_url"].as_str(),
+        parsed["model_providers"]["tendly"]["base_url"].as_str(),
         Some("https://example.test/v1")
     );
     assert!(
@@ -1662,7 +1664,7 @@ async fn origin_auth_and_asset_range() {
         .uri("/api/workspaces")
         .header("host", "127.0.0.1:8787")
         .header("origin", "https://attacker.invalid")
-        .header("x-agentdock-client", "web")
+        .header("x-tendly-client", "web")
         .body(Body::empty())
         .unwrap();
     assert_eq!(
@@ -1673,7 +1675,7 @@ async fn origin_auth_and_asset_range() {
         .method("POST")
         .uri("/api/auth")
         .header("host", "127.0.0.1:8787")
-        .header("x-agentdock-client", "web")
+        .header("x-tendly-client", "web")
         .header("content-type", "application/json")
         .body(Body::from(
             json!({"token":"fixture-token-long-enough"}).to_string(),
@@ -1785,7 +1787,7 @@ async fn websocket_detach_reconnect_retains_native_process() {
         .runtime
         .start(
             s.id.to_string(),
-            agentdock_runtime::SpawnSpec {
+            tendly_runtime::SpawnSpec {
                 program: waiting_process(&["-i"]).0,
                 args: waiting_process(&["-i"]).1,
                 cwd: f.path.join("repo"),
@@ -2220,7 +2222,7 @@ async fn opening_a_structured_session_in_a_terminal_resumes_its_own_configuratio
     let record: Session = serde_json::from_value(terminal).unwrap();
     let spec = launch::build(&f.state, &record, cwd).unwrap();
     assert_eq!(
-        without_agentdock(&spec.args),
+        without_tendly(&spec.args),
         vec!["--resume", "11111111-2222-3333-4444-555555555555"]
     );
     // The whole point of the escape hatch: the resume points at the home the
@@ -2483,7 +2485,7 @@ async fn imported_native_profiles_create_new_sessions_without_copying_or_overrid
             assert!(matches!(session.status, SessionStatus::Stopped));
             let spec = launch::build(&f.state, &session, cwd.clone()).unwrap();
             assert!(
-                without_agentdock(&spec.args).is_empty(),
+                without_tendly(&spec.args).is_empty(),
                 "Do not inject login, endpoint, model, permission or resume flags"
             );
             assert_eq!(spec.cwd, cwd);
@@ -2492,7 +2494,7 @@ async fn imported_native_profiles_create_new_sessions_without_copying_or_overrid
             let own: Vec<_> = spec
                 .env
                 .keys()
-                .filter(|name| !name.starts_with("AGENTDOCK_"))
+                .filter(|name| !name.starts_with("TENDLY_"))
                 .collect();
             assert_eq!(own, [key]);
             assert_eq!(spec.env[key], config.to_str().unwrap());
@@ -2782,7 +2784,7 @@ async fn session_environment_api_merges_templates_and_only_edits_stopped_session
     );
     let id: Uuid = session["id"].as_str().unwrap().parse().unwrap();
     let url = format!("/api/sessions/{id}/environment");
-    let changes = json!({"environment":{"OPENAI_API_KEY":{"kind":"secret_ref","reference":"env:AGENTDOCK_SECRET_FIXTURE"}}});
+    let changes = json!({"environment":{"OPENAI_API_KEY":{"kind":"secret_ref","reference":"env:TENDLY_SECRET_FIXTURE"}}});
     let (status, patched) = call(f.app(), "PATCH", &url, changes.clone()).await;
     assert_eq!(status, StatusCode::OK, "{patched}");
     assert_eq!(patched["environment"], changes["environment"]);
@@ -2849,7 +2851,7 @@ async fn session_environment_rejects_live_runtime_even_if_database_says_stopped(
         .runtime
         .start(
             session.id.to_string(),
-            agentdock_runtime::SpawnSpec {
+            tendly_runtime::SpawnSpec {
                 program: waiting_process(&["-i"]).0,
                 args: waiting_process(&["-i"]).1,
                 cwd: f.path.join("repo"),
@@ -2873,7 +2875,7 @@ async fn session_environment_rejects_live_runtime_even_if_database_says_stopped(
 
 #[tokio::test]
 async fn native_and_history_build_apply_environment_without_mutating_native_configuration() {
-    use agentdock_domain::{EnvironmentOverrides, EnvironmentValue};
+    use tendly_domain::{EnvironmentOverrides, EnvironmentValue};
     let mut f = Fixture::new("127.0.0.1:8787".parse().unwrap(), None);
     let (source_id, config) = f.native_source(ProviderKind::Codex, Vec::new());
     let sentinel = config.join("config.toml");
@@ -3346,7 +3348,7 @@ async fn the_tailnet_listener_needs_the_token_where_this_machine_does_not() {
             .method(method)
             .uri(path)
             .header("host", "127.0.0.1:8790")
-            .header("x-agentdock-client", "web")
+            .header("x-tendly-client", "web")
             .header("content-type", "application/json");
         if let Some(token) = token {
             request = request.header("authorization", format!("Bearer {token}"));
@@ -3420,7 +3422,7 @@ async fn shared_canvas_uses_existing_authentication_and_health_capabilities() {
     );
     for (method, path) in [
         ("GET", "/api/secrets"),
-        ("PUT", "/api/secrets/AGENTDOCK_SECRET_X"),
+        ("PUT", "/api/secrets/TENDLY_SECRET_X"),
         ("GET", "/api/update"),
         ("POST", "/api/update"),
         ("POST", "/api/update/restart"),
@@ -3478,7 +3480,7 @@ async fn shared_canvas_uses_existing_authentication_and_health_capabilities() {
         .uri("/api/canvas/layout")
         .header("host", "127.0.0.1:8787")
         .header("authorization", "Bearer fixture-token-long-enough")
-        .header("x-agentdock-client", "web")
+        .header("x-tendly-client", "web")
         .header("origin", "https://attacker.invalid")
         .header("content-type", "application/json")
         .body(Body::from(
@@ -3591,7 +3593,7 @@ async fn claude_usage_capture_is_a_launch_overlay_that_preserves_an_existing_sta
     );
 
     // SAFETY: single-threaded assertion of this process-wide opt-in.
-    unsafe { std::env::set_var("AGENTDOCK_CLAUDE_USAGE_CAPTURE", "1") };
+    unsafe { std::env::set_var("TENDLY_CLAUDE_USAGE_CAPTURE", "1") };
     let (args, environment) = native_config::claude_statusline(&f.state, Some(config));
     assert_eq!(args[0], "--settings");
     let overlay: Value = serde_json::from_str(&args[1]).unwrap();
@@ -3602,7 +3604,7 @@ async fn claude_usage_capture_is_a_launch_overlay_that_preserves_an_existing_sta
     // is asserted or overridden by Tendly.
     assert_eq!(overlay.as_object().unwrap().len(), 1);
     // No status line of their own yet, so there is nothing to delegate to.
-    assert!(!environment.contains_key("AGENTDOCK_STATUSLINE_DELEGATE"));
+    assert!(!environment.contains_key("TENDLY_STATUSLINE_DELEGATE"));
     // No settings file belonging to the account is created or modified.
     assert!(!home.join("settings.json").exists());
 
@@ -3613,7 +3615,7 @@ async fn claude_usage_capture_is_a_launch_overlay_that_preserves_an_existing_sta
     .unwrap();
     let (_, environment) = native_config::claude_statusline(&f.state, Some(config));
     assert_eq!(
-        environment["AGENTDOCK_STATUSLINE_DELEGATE"],
+        environment["TENDLY_STATUSLINE_DELEGATE"],
         "my-own-status-line"
     );
     let untouched = fs::read_to_string(home.join("settings.json")).unwrap();
@@ -3629,7 +3631,7 @@ async fn claude_usage_capture_is_a_launch_overlay_that_preserves_an_existing_sta
     )
     .unwrap();
     let (_, environment) = native_config::claude_statusline(&f.state, Some(config));
-    assert!(!environment.contains_key("AGENTDOCK_STATUSLINE_DELEGATE"));
+    assert!(!environment.contains_key("TENDLY_STATUSLINE_DELEGATE"));
 
     for broken in [
         "not json",
@@ -3640,12 +3642,12 @@ async fn claude_usage_capture_is_a_launch_overlay_that_preserves_an_existing_sta
         let (args, environment) = native_config::claude_statusline(&f.state, Some(config));
         assert_eq!(args[0], "--settings", "{broken}");
         assert!(
-            !environment.contains_key("AGENTDOCK_STATUSLINE_DELEGATE"),
+            !environment.contains_key("TENDLY_STATUSLINE_DELEGATE"),
             "{broken}"
         );
     }
     // SAFETY: restores the default for every other test in this process.
-    unsafe { std::env::remove_var("AGENTDOCK_CLAUDE_USAGE_CAPTURE") };
+    unsafe { std::env::remove_var("TENDLY_CLAUDE_USAGE_CAPTURE") };
 }
 
 /// Client discovery is read-only, and installing is an explicit action that
@@ -3729,7 +3731,7 @@ async fn attachment_upload_stays_inside_its_own_workspace_directory() {
                 .method("POST")
                 .uri(uri)
                 .header("host", "127.0.0.1:8787")
-                .header("x-agentdock-client", "web")
+                .header("x-tendly-client", "web")
                 .header("content-type", "application/octet-stream")
                 .body(Body::from(body))
                 .unwrap();
@@ -3745,7 +3747,7 @@ async fn attachment_upload_stays_inside_its_own_workspace_directory() {
     let (status, saved) = upload("my holiday photo.JPG", b"fixture-bytes").await;
     assert_eq!(status, StatusCode::OK);
     let path = saved["path"].as_str().unwrap();
-    assert!(path.starts_with(".agentdock-files/"), "{path}");
+    assert!(path.starts_with(".tendly-files/"), "{path}");
     assert!(path.ends_with(".jpg"), "{path}");
     // The stored path is handed to an agent as text, so it carries no spaces.
     assert!(!path.contains(' '), "{path}");
@@ -3758,7 +3760,7 @@ async fn attachment_upload_stays_inside_its_own_workspace_directory() {
     // Uploads must not become pending Git changes in the user's repository,
     // and the ignore stays scoped to this directory.
     assert_eq!(
-        fs::read_to_string(f.path.join("repo/.agentdock-files/.gitignore")).unwrap(),
+        fs::read_to_string(f.path.join("repo/.tendly-files/.gitignore")).unwrap(),
         "*\n"
     );
     assert!(!f.path.join("repo/.gitignore").exists());
@@ -3776,7 +3778,7 @@ async fn attachment_upload_stays_inside_its_own_workspace_directory() {
             .iter()
             .any(|file| file["path"]
                 .as_str()
-                .is_some_and(|path| path.contains(".agentdock-files"))),
+                .is_some_and(|path| path.contains(".tendly-files"))),
         "{status:?}"
     );
 
@@ -3792,7 +3794,7 @@ async fn attachment_upload_stays_inside_its_own_workspace_directory() {
         traversal["path"]
             .as_str()
             .unwrap()
-            .starts_with(".agentdock-files/"),
+            .starts_with(".tendly-files/"),
         "{traversal:?}"
     );
     assert!(!f.path.join("etc").exists());
@@ -3969,7 +3971,7 @@ async fn an_agent_lists_and_closes_canvas_tabs_and_asks_before_discarding_a_work
         .runtime
         .start(
             temporary.id.to_string(),
-            agentdock_runtime::SpawnSpec {
+            tendly_runtime::SpawnSpec {
                 program: waiting_process(&["-i"]).0,
                 args: waiting_process(&["-i"]).1,
                 cwd: f.path.join("repo"),
@@ -3987,7 +3989,7 @@ async fn an_agent_lists_and_closes_canvas_tabs_and_asks_before_discarding_a_work
             "/api/agent/call",
             None,
             Some("agent"),
-            json!({"name":"agentdock_canvas","arguments":arguments}),
+            json!({"name":"tendly_canvas","arguments":arguments}),
         )
     };
     let listed = tool_text(&canvas(json!({"action":"list"})).await.1);
@@ -4039,7 +4041,7 @@ async fn an_agent_lists_and_closes_canvas_tabs_and_asks_before_discarding_a_work
             "/api/agent/call",
             None,
             Some("agent"),
-            json!({"name":"agentdock_canvas","arguments":{"action":"close","all":true}}),
+            json!({"name":"tendly_canvas","arguments":{"action":"close","all":true}}),
         )
         .await
         .1
@@ -4079,7 +4081,7 @@ async fn a_session_can_have_the_agent_tools_on_or_off_whatever_the_preference() 
         .create_session(workspace.id, ProviderKind::ClaudeCode, "claude")
         .unwrap();
     let cwd = f.path.join("repo");
-    let equipped = |spec: &agentdock_runtime::SpawnSpec| {
+    let equipped = |spec: &tendly_runtime::SpawnSpec| {
         spec.args.iter().any(|arg| arg.starts_with("--mcp-config="))
     };
     let web = |method: &'static str, path: String, body: Value| {
@@ -4102,7 +4104,7 @@ async fn a_session_can_have_the_agent_tools_on_or_off_whatever_the_preference() 
     let (_, view) = web("PUT", path.clone(), json!({"choice":false})).await;
     assert_eq!(view["enabled"], false);
     let spec = launch::build(&f.state, &claude, cwd.clone()).unwrap();
-    assert!(!equipped(&spec) && !spec.env.contains_key("AGENTDOCK_AGENT_TOKEN"));
+    assert!(!equipped(&spec) && !spec.env.contains_key("TENDLY_AGENT_TOKEN"));
 
     // On for this session, though the preference is off.
     web(
@@ -4135,12 +4137,12 @@ async fn a_session_can_have_the_agent_tools_on_or_off_whatever_the_preference() 
     // A session cannot switch its own tools: its token opens /api/agent/ only.
     web("PUT", path.clone(), json!({"choice":true})).await;
     let token =
-        launch::build(&f.state, &claude, cwd.clone()).unwrap().env["AGENTDOCK_AGENT_TOKEN"].clone();
+        launch::build(&f.state, &claude, cwd.clone()).unwrap().env["TENDLY_AGENT_TOKEN"].clone();
     f.state
         .runtime
         .start(
             claude.id.to_string(),
-            agentdock_runtime::SpawnSpec {
+            tendly_runtime::SpawnSpec {
                 program: waiting_process(&["-i"]).0,
                 args: waiting_process(&["-i"]).1,
                 cwd: cwd.clone(),
@@ -4297,7 +4299,7 @@ async fn a_file_pasted_into_a_terminal_lands_in_that_sessions_directory() {
         saved["path"]
             .as_str()
             .unwrap()
-            .starts_with(".agentdock-files/pastes/")
+            .starts_with(".tendly-files/pastes/")
     );
     let (status, _) = call(
         f.app(),
@@ -4315,7 +4317,7 @@ async fn a_file_pasted_into_a_terminal_lands_in_that_sessions_directory() {
 
 #[tokio::test]
 async fn resource_history_answers_from_the_metrics_database() {
-    use agentdock_persistence::metrics::{HostPoint, MetricsStore, SessionPoint};
+    use tendly_persistence::metrics::{HostPoint, MetricsStore, SessionPoint};
     let mut f = Fixture::new("127.0.0.1:8787".parse().unwrap(), None);
     let (status, _) = call(f.app(), "GET", "/api/host/resources/history", Value::Null).await;
     assert_eq!(
@@ -4389,7 +4391,7 @@ async fn resource_history_answers_from_the_metrics_database() {
 
 #[tokio::test]
 async fn resource_monitoring_can_be_turned_off_and_history_cleared() {
-    use agentdock_persistence::metrics::{HostPoint, MetricsStore};
+    use tendly_persistence::metrics::{HostPoint, MetricsStore};
     let mut f = Fixture::new("127.0.0.1:8787".parse().unwrap(), None);
     let store = Arc::new(MetricsStore::open(":memory:").unwrap());
     let now = chrono::Utc::now().timestamp();

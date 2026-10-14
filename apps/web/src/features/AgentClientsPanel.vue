@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import type { AgentProviderKind } from '@agentdock/protocol';
+import type { AgentProviderKind } from '@tendly/protocol';
 import { backendCapabilities } from './backend-capabilities';
 import { ApiError, errorMessage, json, providerLabel, request } from './api';
 import Icon from './Icon.vue';

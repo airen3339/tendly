@@ -9,7 +9,7 @@ Requires Rust stable (1.89+), **Node.js 24+** and **pnpm 10.30.3**. `.nvmrc` / `
 ```sh
 pnpm install --frozen-lockfile
 pnpm run build:web
-cargo run -p agentdock-server
+cargo run -p tendly-server
 ```
 
 Open **http://127.0.0.1:28789/**. The Rust server serves the built Web client and API on the same origin.
@@ -31,7 +31,7 @@ Choose an existing host directory in the workspace picker, then create/open a se
 | `packages/native-bridge` | Node JSONL bridge to Claude Code and Codex                   |
 | `packages/protocol`      | DTOs and layout model shared with the client                 |
 | `apps/web`               | Vue 3 + TypeScript client and layout engine                  |
-| `npm/`                   | Packaging for `@wnzzer/tendly`, the legacy `@wnzzer/agentdock`, and platform packages      |
+| `npm/`                   | Packaging for `@wnzzer/tendly` and platform packages      |
 
 ## Verify
 

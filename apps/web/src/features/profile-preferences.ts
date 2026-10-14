@@ -1,4 +1,4 @@
-import type { EndpointProfile, ProviderKind } from "@agentdock/protocol";
+import type { EndpointProfile, ProviderKind } from "@tendly/protocol";
 
 export const PROFILE_CHOICE_REQUIRED = "__choose_profile__";
 const ISOLATED_PROFILE = "__isolated_profile__";
@@ -19,7 +19,7 @@ function memory(storage: PreferenceStorage | undefined): Map<ProviderKind, Remem
   return choices;
 }
 
-function key(provider: ProviderKind): string { return `agentdock.profile-selection.v1:${provider}`; }
+function key(provider: ProviderKind): string { return `tendly.profile-selection.v1:${provider}`; }
 function decode(value: string | null | undefined): string | undefined {
   if (value === ISOLATED_PROFILE) return "";
   return typeof value === "string" && UUID.test(value) ? value : undefined;

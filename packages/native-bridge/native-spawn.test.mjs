@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { nativeCommand, shimTarget, spawnNative, withoutAgentDockSecrets } from './native-spawn.mjs';
+import { nativeCommand, shimTarget, spawnNative, withoutTendlySecrets } from './native-spawn.mjs';
 
 test('only Tendly credentials are withheld from a native client', () => {
-  const env = { PATH: '/bin', AGENTDOCK_SECRET_WORK: 's', AGENTDOCK_TOKEN: 't', AGENTDOCK_HOME: '/h', AGENTDOCK_TOKEN_FILE: 'f', OPENAI_API_KEY: 'k' };
-  assert.deepEqual(withoutAgentDockSecrets(env), { PATH: '/bin', AGENTDOCK_HOME: '/h', AGENTDOCK_TOKEN_FILE: 'f', OPENAI_API_KEY: 'k' });
+  const env = { PATH: '/bin', TENDLY_SECRET_WORK: 's', TENDLY_TOKEN: 't', TENDLY_HOME: '/h', TENDLY_TOKEN_FILE: 'f', OPENAI_API_KEY: 'k' };
+  assert.deepEqual(withoutTendlySecrets(env), { PATH: '/bin', TENDLY_HOME: '/h', TENDLY_TOKEN_FILE: 'f', OPENAI_API_KEY: 'k' });
 });
 
 test('outside Windows a client is started exactly as named', () => {
@@ -16,7 +16,7 @@ test('outside Windows a client is started exactly as named', () => {
 
 // `.cmd` shims, and the `\` separators they are written with, exist only on Windows.
 test('an npm shim runs its script with node and never passes through cmd.exe', { skip: process.platform !== 'win32' }, async t => {
-  const directory = await mkdtemp(join(tmpdir(), 'agentdock-shim-'));
+  const directory = await mkdtemp(join(tmpdir(), 'tendly-shim-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   await mkdir(join(directory, 'node_modules', '@scope', 'tool'), { recursive: true });
   const script = join(directory, 'node_modules', '@scope', 'tool', 'cli.js');
@@ -39,7 +39,7 @@ test('an npm shim runs its script with node and never passes through cmd.exe', {
 });
 
 test('a client that cannot be launched fails through the error event callers already handle', async () => {
-  const child = spawnNative(join(tmpdir(), 'agentdock-missing-client-does-not-exist'), []);
+  const child = spawnNative(join(tmpdir(), 'tendly-missing-client-does-not-exist'), []);
   const error = await new Promise(resolve => child.once('error', resolve));
   assert.ok(error instanceof Error);
 });

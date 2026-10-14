@@ -1,4 +1,4 @@
-import type { FileEntry } from "@agentdock/protocol";
+import type { FileEntry } from "@tendly/protocol";
 
 export interface TreeDirectory {
   entries: FileEntry[];

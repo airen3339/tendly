@@ -67,7 +67,7 @@ pub fn validate_environment(environment: &EnvironmentOverrides) -> Result<(), St
                 | "CODEX_HOME"
                 | "CLAUDE_CONFIG_DIR"
                 | "CLAUDECODE"
-        ) || upper.starts_with("AGENTDOCK_")
+        ) || upper.starts_with("TENDLY_")
         {
             return Err(format!("Environment key {key} is reserved"));
         }
@@ -118,7 +118,7 @@ pub fn validate_environment(environment: &EnvironmentOverrides) -> Result<(), St
             }
             EnvironmentValue::SecretRef { reference } => {
                 if !reference
-                    .strip_prefix("env:AGENTDOCK_SECRET_")
+                    .strip_prefix("env:TENDLY_SECRET_")
                     .is_some_and(|name| {
                         !name.is_empty()
                             && name
@@ -127,7 +127,7 @@ pub fn validate_environment(environment: &EnvironmentOverrides) -> Result<(), St
                     })
                 {
                     return Err(format!(
-                        "Environment secret reference for {key} must use env:AGENTDOCK_SECRET_NAME"
+                        "Environment secret reference for {key} must use env:TENDLY_SECRET_NAME"
                     ));
                 }
             }
@@ -358,8 +358,8 @@ mod environment_tests {
             "CODEX_HOME",
             "CLAUDE_CONFIG_DIR",
             "CLAUDECODE",
-            "AGENTDOCK_ADDR",
-            "AGENTDOCK_SECRET_TARGET",
+            "TENDLY_ADDR",
+            "TENDLY_SECRET_TARGET",
             "1KEY",
             "bad-key",
             "",
@@ -384,7 +384,7 @@ mod environment_tests {
                     &[(
                         key.into(),
                         EnvironmentValue::SecretRef {
-                            reference: "env:AGENTDOCK_SECRET_TEST".into()
+                            reference: "env:TENDLY_SECRET_TEST".into()
                         }
                     )]
                     .into()
@@ -395,8 +395,8 @@ mod environment_tests {
         for reference in [
             "plaintext-secret",
             "env:HOME",
-            "env:AGENTDOCK_SECRET_",
-            "env:AGENTDOCK_SECRET_lower",
+            "env:TENDLY_SECRET_",
+            "env:TENDLY_SECRET_lower",
         ] {
             assert!(
                 validate_environment(

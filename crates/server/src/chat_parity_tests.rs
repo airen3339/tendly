@@ -33,15 +33,12 @@ fn bridge_dir() -> PathBuf {
 fn environment(log: &std::path::Path) -> BTreeMap<String, String> {
     BTreeMap::from([
         (
-            "AGENTDOCK_CHAT_TEST_LOG".to_owned(),
+            "TENDLY_CHAT_TEST_LOG".to_owned(),
             log.to_string_lossy().into_owned(),
         ),
+        ("TENDLY_CHAT_TEST_INHERITED".to_owned(), "kept".to_owned()),
         (
-            "AGENTDOCK_CHAT_TEST_INHERITED".to_owned(),
-            "kept".to_owned(),
-        ),
-        (
-            "AGENTDOCK_SECRET_TEST_CREDENTIAL".to_owned(),
+            "TENDLY_SECRET_TEST_CREDENTIAL".to_owned(),
             "fixture-secret-value".to_owned(),
         ),
     ])
@@ -253,8 +250,7 @@ fn scenario_dir(name: &str) -> PathBuf {
     scenario_dir_for(&CODEX, name)
 }
 fn scenario_dir_for(client: &Client, name: &str) -> PathBuf {
-    let dir =
-        std::env::temp_dir().join(format!("agentdock-parity-{name}-{}", uuid::Uuid::new_v4()));
+    let dir = std::env::temp_dir().join(format!("tendly-parity-{name}-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
     let program = dir.join(client.fixture);
     std::fs::copy(bridge_dir().join("fixtures").join(client.fixture), &program).unwrap();
@@ -298,7 +294,7 @@ async fn both_for(client: &Client, name: &str, args: &[&str], steps: &[Step]) ->
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .kill_on_drop(true);
-        agentdock_runtime::process::own_group(command.as_std_mut());
+        tendly_runtime::process::own_group(command.as_std_mut());
         let adapter = BridgeAdapter::new(command.spawn().expect("node")).unwrap();
         let run = drive(adapter, init_for(client, &dir, args), steps, &log).await;
         let result = comparable(run, &dir.to_string_lossy());
@@ -805,7 +801,7 @@ async fn pi_interrupting_and_steering_a_running_turn() {
             Wait(|e| turn(e, "hold", "running")),
             Sleep(100),
             Send(json!({"type":"steer","id":"more","content":"also this"})),
-            Send(json!({"type":"model","model":"agentdock/qwen-local"})),
+            Send(json!({"type":"model","model":"tendly/qwen-local"})),
             Wait(|e| e["type"] == "error"),
             Send(json!({"type":"interrupt"})),
             Wait(|e| turn(e, "hold", "interrupted")),
@@ -919,8 +915,8 @@ async fn pi_the_depth_shown_is_the_one_pi_runs() {
                     && e["model"] == "kunlun/zai-org/GLM-5.3"
                     && e["effort"] == "high"
             }),
-            Send(json!({"type":"model","model":"agentdock/qwen-local"})),
-            Wait(|e| e["type"] == "settings" && e["model"] == "agentdock/qwen-local"),
+            Send(json!({"type":"model","model":"tendly/qwen-local"})),
+            Wait(|e| e["type"] == "settings" && e["model"] == "tendly/qwen-local"),
             Sleep(300),
         ],
     )
@@ -929,12 +925,12 @@ async fn pi_the_depth_shown_is_the_one_pi_runs() {
     assert!(
         !settings
             .iter()
-            .any(|e| e["model"] == "agentdock/qwen-local" && e.get("effort").is_some()),
+            .any(|e| e["model"] == "tendly/qwen-local" && e.get("effort").is_some()),
         "a depth was shown for a model Pi runs without one: {settings:?}"
     );
     assert_eq!(
         settings.last().map(|e| e["model"].clone()),
-        Some(json!("agentdock/qwen-local"))
+        Some(json!("tendly/qwen-local"))
     );
 }
 
@@ -1456,7 +1452,7 @@ async fn claude_a_dropped_adapter_stops_claude() {
 #[tokio::test]
 #[ignore]
 async fn real_claude_a_turn_and_an_interrupt_on_both_layers() {
-    let program = std::env::var("AGENTDOCK_REAL_CLAUDE").unwrap_or_else(|_| "claude".into());
+    let program = std::env::var("TENDLY_REAL_CLAUDE").unwrap_or_else(|_| "claude".into());
     async fn next<A: ClientAdapter>(adapter: &mut A, events: &mut Vec<Value>, wait: u64) -> bool {
         match tokio::time::timeout(Duration::from_secs(wait), adapter.next_event()).await {
             Ok(Some(Ok(event))) => {
@@ -1482,14 +1478,14 @@ async fn real_claude_a_turn_and_an_interrupt_on_both_layers() {
     }
     async fn run<A: ClientAdapter>(mut adapter: A, program: &str, layer: &str) -> Vec<Value> {
         let dir = std::env::temp_dir().join(format!(
-            "agentdock-real-claude-{layer}-{}",
+            "tendly-real-claude-{layer}-{}",
             uuid::Uuid::new_v4()
         ));
         std::fs::create_dir_all(&dir).unwrap();
         let init = ChatInit {
             provider: "claude_code".into(),
             program: program.into(),
-            args: std::env::var("AGENTDOCK_REAL_CLAUDE_ARGS").map_or_else(
+            args: std::env::var("TENDLY_REAL_CLAUDE_ARGS").map_or_else(
                 |_| vec!["--model".into(), "haiku".into()],
                 |args| args.split_whitespace().map(str::to_owned).collect(),
             ),
@@ -1526,7 +1522,7 @@ async fn real_claude_a_turn_and_an_interrupt_on_both_layers() {
         .await;
         // A tool call: approved here if the host's settings ask for it.
         let three = uuid(3);
-        dispatch(&mut adapter, ChatCommand::parse(&json!({"type":"message","id":three,"content":"Use the Bash tool to run exactly this command: touch agentdock-smoke.txt && echo agentdock-smoke. Then reply done."})).unwrap()).await.unwrap();
+        dispatch(&mut adapter, ChatCommand::parse(&json!({"type":"message","id":three,"content":"Use the Bash tool to run exactly this command: touch tendly-smoke.txt && echo tendly-smoke. Then reply done."})).unwrap()).await.unwrap();
         let deadline = std::time::Instant::now() + Duration::from_secs(180);
         let mut answered = 0;
         loop {
@@ -1567,7 +1563,7 @@ async fn real_claude_a_turn_and_an_interrupt_on_both_layers() {
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .kill_on_drop(true);
-        agentdock_runtime::process::own_group(command.as_std_mut());
+        tendly_runtime::process::own_group(command.as_std_mut());
         run(
             BridgeAdapter::new(command.spawn().expect("node")).unwrap(),
             &program,
@@ -1600,7 +1596,7 @@ async fn real_claude_a_turn_and_an_interrupt_on_both_layers() {
         // Each layer ran in its own temporary directory.
         let mut out = String::new();
         let mut rest = text;
-        while let Some(at) = rest.find("agentdock-real-claude-") {
+        while let Some(at) = rest.find("tendly-real-claude-") {
             out.push_str(&rest[..at]);
             let tail = &rest[at..];
             let end = tail.find(['"', '/', '\\']).unwrap_or(tail.len());
@@ -1660,7 +1656,7 @@ async fn real_claude_a_turn_and_an_interrupt_on_both_layers() {
                 && e["status"] == "completed"
                 && e["text"]
                     .as_str()
-                    .is_some_and(|t| t.contains("agentdock-smoke"))
+                    .is_some_and(|t| t.contains("tendly-smoke"))
         });
         assert!(
             ran,

@@ -1,6 +1,6 @@
 //! Endpoint secrets Tendly keeps itself.
 //!
-//! A profile names its key as `env:AGENTDOCK_SECRET_NAME`. That used to mean
+//! A profile names its key as `env:TENDLY_SECRET_NAME`. That used to mean
 //! only the server's environment, so adding a key meant setting a variable and
 //! restarting the server -- and nothing but a person at a shell could do it.
 //! The same name now also resolves from `<state>/secrets.toml`, a 0600 file
@@ -19,7 +19,7 @@ use std::{
 };
 
 const FILE: &str = "secrets.toml";
-const PREFIX: &str = "AGENTDOCK_SECRET_";
+const PREFIX: &str = "TENDLY_SECRET_";
 const MAX_VALUE: usize = 8192;
 /// One writer at a time: a read-modify-write of the file is not atomic.
 static WRITE: Mutex<()> = Mutex::new(());
@@ -121,7 +121,7 @@ pub fn resolve_reference(state_dir: &Path, reference: &str) -> Result<String, Ap
 pub fn store(state_dir: &Path, name: &str, value: &str) -> Result<(), ApiError> {
     if !valid_name(name) {
         return Err(ApiError::bad(
-            "Secret names are AGENTDOCK_SECRET_ followed by capitals, digits or _",
+            "Secret names are TENDLY_SECRET_ followed by capitals, digits or _",
         ));
     }
     if value.is_empty() || value.len() > MAX_VALUE || value.contains('\0') {
@@ -151,7 +151,7 @@ pub fn remove(state_dir: &Path, name: &str) -> Result<bool, ApiError> {
 pub struct SecretName {
     pub name: String,
     /// `environment` when the server's environment sets it (and so wins),
-    /// otherwise `agentdock`.
+    /// otherwise `tendly`.
     pub source: &'static str,
     /// Whether Tendly keeps a value of its own under this name: the one
     /// used once the server's environment no longer sets it.
@@ -161,10 +161,8 @@ pub struct SecretName {
 /// Every name that resolves, and from where. Never the values.
 pub fn list(state_dir: &Path) -> Vec<SecretName> {
     let stored: std::collections::BTreeSet<String> = read(state_dir).into_keys().collect();
-    let mut names: BTreeMap<String, &'static str> = stored
-        .iter()
-        .map(|name| (name.clone(), "agentdock"))
-        .collect();
+    let mut names: BTreeMap<String, &'static str> =
+        stored.iter().map(|name| (name.clone(), "tendly")).collect();
     for (name, value) in std::env::vars() {
         if valid_name(&name) && !value.is_empty() {
             names.insert(name, "environment");
@@ -224,11 +222,7 @@ async fn put_secret(
     let environment = std::env::var(&name).is_ok_and(|value| !value.is_empty());
     Ok(axum::Json(SecretName {
         name,
-        source: if environment {
-            "environment"
-        } else {
-            "agentdock"
-        },
+        source: if environment { "environment" } else { "tendly" },
         stored: true,
     }))
 }
@@ -239,7 +233,7 @@ async fn adopt_secret(
 ) -> Result<axum::Json<SecretName>, ApiError> {
     if !valid_name(&name) {
         return Err(ApiError::bad(
-            "Secret names are AGENTDOCK_SECRET_ followed by capitals, digits or _",
+            "Secret names are TENDLY_SECRET_ followed by capitals, digits or _",
         ));
     }
     let value = std::env::var(&name).ok();
@@ -259,7 +253,7 @@ mod tests {
     use super::*;
 
     fn directory() -> PathBuf {
-        let path = std::env::temp_dir().join(format!("agentdock-secrets-{}", uuid::Uuid::new_v4()));
+        let path = std::env::temp_dir().join(format!("tendly-secrets-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&path).unwrap();
         path
     }
@@ -267,14 +261,14 @@ mod tests {
     #[test]
     fn stored_secrets_resolve_and_are_private() {
         let dir = directory();
-        store(&dir, "AGENTDOCK_SECRET_FILE_ONLY_A", "sk-one").unwrap();
-        store(&dir, "AGENTDOCK_SECRET_FILE_ONLY_B", "sk-two").unwrap();
+        store(&dir, "TENDLY_SECRET_FILE_ONLY_A", "sk-one").unwrap();
+        store(&dir, "TENDLY_SECRET_FILE_ONLY_B", "sk-two").unwrap();
         assert_eq!(
-            resolve(&dir, "AGENTDOCK_SECRET_FILE_ONLY_A").as_deref(),
+            resolve(&dir, "TENDLY_SECRET_FILE_ONLY_A").as_deref(),
             Some("sk-one")
         );
         assert_eq!(
-            resolve_reference(&dir, "env:AGENTDOCK_SECRET_FILE_ONLY_B").unwrap(),
+            resolve_reference(&dir, "env:TENDLY_SECRET_FILE_ONLY_B").unwrap(),
             "sk-two"
         );
         #[cfg(unix)]
@@ -283,13 +277,13 @@ mod tests {
             let mode = fs::metadata(path(&dir)).unwrap().permissions().mode();
             assert_eq!(mode & 0o777, 0o600);
         }
-        assert!(remove(&dir, "AGENTDOCK_SECRET_FILE_ONLY_A").unwrap());
-        assert!(!remove(&dir, "AGENTDOCK_SECRET_FILE_ONLY_A").unwrap());
-        assert!(resolve(&dir, "AGENTDOCK_SECRET_FILE_ONLY_A").is_none());
+        assert!(remove(&dir, "TENDLY_SECRET_FILE_ONLY_A").unwrap());
+        assert!(!remove(&dir, "TENDLY_SECRET_FILE_ONLY_A").unwrap());
+        assert!(resolve(&dir, "TENDLY_SECRET_FILE_ONLY_A").is_none());
         let names = list(&dir);
         assert!(names.contains(&SecretName {
-            name: "AGENTDOCK_SECRET_FILE_ONLY_B".into(),
-            source: "agentdock",
+            name: "TENDLY_SECRET_FILE_ONLY_B".into(),
+            source: "tendly",
             stored: true,
         }));
         assert!(!fs::read_dir(&dir).unwrap().any(|entry| {
@@ -304,7 +298,7 @@ mod tests {
     #[test]
     fn a_key_from_the_environment_is_kept_once_adopted() {
         let dir = directory();
-        let name = "AGENTDOCK_SECRET_ADOPTED_ONLY";
+        let name = "TENDLY_SECRET_ADOPTED_ONLY";
         assert!(adopt(&dir, name, None).is_err(), "nothing to keep");
         assert!(adopt(&dir, name, Some(String::new())).is_err());
         let adopted = adopt(&dir, name, Some("sk-from-env".into())).unwrap();
@@ -325,26 +319,26 @@ mod tests {
         let dir = directory();
         for bad in [
             "HOME",
-            "AGENTDOCK_SECRET_",
-            "AGENTDOCK_SECRET_lower",
-            "AGENTDOCK_TOKEN",
+            "TENDLY_SECRET_",
+            "TENDLY_SECRET_lower",
+            "TENDLY_TOKEN",
         ] {
             assert!(store(&dir, bad, "x").is_err(), "{bad}");
         }
-        assert!(store(&dir, "AGENTDOCK_SECRET_X", "").is_err());
-        assert!(store(&dir, "AGENTDOCK_SECRET_X", "a\0b").is_err());
-        assert!(store(&dir, "AGENTDOCK_SECRET_X", &"x".repeat(8193)).is_err());
-        assert!(resolve_reference(&dir, "AGENTDOCK_SECRET_X").is_err());
-        assert!(resolve_reference(&dir, "env:AGENTDOCK_SECRET_MISSING_HERE").is_err());
+        assert!(store(&dir, "TENDLY_SECRET_X", "").is_err());
+        assert!(store(&dir, "TENDLY_SECRET_X", "a\0b").is_err());
+        assert!(store(&dir, "TENDLY_SECRET_X", &"x".repeat(8193)).is_err());
+        assert!(resolve_reference(&dir, "TENDLY_SECRET_X").is_err());
+        assert!(resolve_reference(&dir, "env:TENDLY_SECRET_MISSING_HERE").is_err());
     }
 
     #[test]
     fn a_corrupt_file_resolves_nothing_and_is_never_overwritten() {
         let dir = directory();
         fs::write(path(&dir), "not = [toml").unwrap();
-        assert!(resolve(&dir, "AGENTDOCK_SECRET_ANY").is_none());
-        assert!(store(&dir, "AGENTDOCK_SECRET_AFTER", "v").is_err());
-        assert!(remove(&dir, "AGENTDOCK_SECRET_AFTER").is_err());
+        assert!(resolve(&dir, "TENDLY_SECRET_ANY").is_none());
+        assert!(store(&dir, "TENDLY_SECRET_AFTER", "v").is_err());
+        assert!(remove(&dir, "TENDLY_SECRET_AFTER").is_err());
         assert_eq!(fs::read_to_string(path(&dir)).unwrap(), "not = [toml");
     }
 }

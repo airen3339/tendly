@@ -116,7 +116,7 @@ tendly             # starts in the background → http://127.0.0.1:28789/
 
 Then **pick a workspace** (any directory on the host), reuse your sign-in from *Settings → Official accounts → Import existing configuration*, and **create a session** or **load an existing one**.
 
-Prebuilt for macOS (arm64, x64), Linux (x64, arm64, static musl) and Windows (x64), with no postinstall step. Other platforms can [build from source](docs/development.md). On Windows, terminals open PowerShell (`AGENTDOCK_SHELL` picks another shell).
+Prebuilt for macOS (arm64, x64), Linux (x64, arm64, static musl) and Windows (x64), with no postinstall step. Other platforms can [build from source](docs/development.md). On Windows, terminals open PowerShell (`TENDLY_SHELL` picks another shell).
 
 | Command | Description |
 | --- | --- |
@@ -126,24 +126,14 @@ Prebuilt for macOS (arm64, x64), Linux (x64, arm64, static musl) and Windows (x6
 | `tendly update` · `--check` | Install the latest npm release (or only check); Settings → Updates does the same |
 | `tendly serve` | Run in the foreground, for systemd or another supervisor |
 
-### Coming from AgentDock
-
-Tendly was called AgentDock until 0.1.75. Nothing about your data changes: sessions, settings, the access token and stored secrets stay in `~/.agentdock`, which Tendly keeps using, and the `AGENTDOCK_*` variables still apply. To move to the new package:
-
-```bash
-npm uninstall -g @wnzzer/agentdock && npm install -g @wnzzer/tendly
-```
-
-An install under the old name keeps updating until then, and already answers to `tendly` as well as `agentdock`.
-
 ## Configuration and remote access
 
-State lives in `~/.tendly/` (or `~/.agentdock/`, kept from before the rename; SQLite, settings, logs), with no telemetry. Settings are read from `config.toml` there, and matching `AGENTDOCK_*` environment variables win:
+State lives in `~/.tendly/` (SQLite, settings, logs), with no telemetry. Settings are read from `config.toml` there, and matching `TENDLY_*` environment variables win:
 
 ```toml
 lan = true                  # same as --lan
 port = 28789                # or addr = "192.168.0.9:28789"
-token = "..."               # AGENTDOCK_TOKEN
+token = "..."               # TENDLY_TOKEN
 allowed-origins = ["https://dock.example.com"]
 ```
 

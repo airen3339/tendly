@@ -7,8 +7,6 @@
 //! winning, so installing here cannot silently change which binary a session
 //! has been using.
 use crate::{ApiError, AppState, Result};
-use agentdock_domain::ProviderKind;
-use agentdock_runtime::process::executable_in;
 use axum::{
     Json, Router,
     extract::{Path as RoutePath, State},
@@ -21,13 +19,15 @@ use std::{
     process::Stdio,
     time::Duration,
 };
+use tendly_domain::ProviderKind;
+use tendly_runtime::process::executable_in;
 
 /// Where a resolved program came from. Surfaced so the page can say which copy
 /// a session will actually run instead of only whether one exists.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProgramSource {
-    /// An explicit `AGENTDOCK_*_BIN` override on the server.
+    /// An explicit `TENDLY_*_BIN` override on the server.
     Override,
     /// Found on the server's `PATH`.
     Path,
@@ -260,7 +260,7 @@ mod tests {
 
     #[test]
     fn managed_copies_never_override_a_client_the_host_already_has() {
-        let root = env::temp_dir().join(format!("agentdock-clients-{}", uuid::Uuid::new_v4()));
+        let root = env::temp_dir().join(format!("tendly-clients-{}", uuid::Uuid::new_v4()));
         let bin = managed_root(&root).join("node_modules/.bin");
         fs::create_dir_all(&bin).unwrap();
         // npm installs a `.cmd` shim on Windows, where a bare name is not runnable.
@@ -317,7 +317,7 @@ mod tests {
                 &root,
                 &ProviderKind::Codex,
                 env(
-                    &[("AGENTDOCK_CODEX_BIN", "/explicit/codex")],
+                    &[("TENDLY_CODEX_BIN", "/explicit/codex")],
                     Some(host.clone())
                 )
             ),

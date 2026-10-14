@@ -64,7 +64,7 @@ test('the plain + button remembers the last provider and says which one it will 
   rememberQuickProvider('codex', store);
   assert.equal(lastQuickProvider(store), 'codex');
   // A junk or unknown stored value must not produce an invalid provider.
-  assert.equal(lastQuickProvider(storage({ 'agentdock.quick-provider.v1': 'not-a-provider' })), 'claude_code');
+  assert.equal(lastQuickProvider(storage({ 'tendly.quick-provider.v1': 'not-a-provider' })), 'claude_code');
   rememberQuickProvider('not-a-provider', store);
   assert.equal(lastQuickProvider(store), 'codex');
   // Denied storage keeps the choice for this session instead of throwing.

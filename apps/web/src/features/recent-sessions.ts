@@ -9,7 +9,7 @@ export const RECENT_DAY_CHOICES = [1, 3, 7, 14, 30, 0] as const;
 export type RecentDays = (typeof RECENT_DAY_CHOICES)[number];
 export const DEFAULT_RECENT_DAYS: RecentDays = 3;
 
-const KEY = "agentdock.recent-days";
+const KEY = "tendly.recent-days";
 
 function read(): RecentDays {
   try {

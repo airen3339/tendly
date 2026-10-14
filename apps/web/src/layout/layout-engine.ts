@@ -1,6 +1,6 @@
-import type { CollapsedLayout, LayoutDocument, LayoutNode, LeafPaneKind, PaneNode, SplitDirection, SplitNode, StackNode } from "@agentdock/protocol/layout";
+import type { CollapsedLayout, LayoutDocument, LayoutNode, LeafPaneKind, PaneNode, SplitDirection, SplitNode, StackNode } from "@tendly/protocol/layout";
 
-export type { CollapsedLayout, LayoutDocument, LayoutNode, LeafPaneKind, PaneKind, PaneNode, SplitDirection, SplitNode, StackNode } from "@agentdock/protocol/layout";
+export type { CollapsedLayout, LayoutDocument, LayoutNode, LeafPaneKind, PaneKind, PaneNode, SplitDirection, SplitNode, StackNode } from "@tendly/protocol/layout";
 
 /** Layout owns placement, never the lifetime of a session, editor, or process. */
 export const DEFAULT_LAYOUT_VERSION = 1;

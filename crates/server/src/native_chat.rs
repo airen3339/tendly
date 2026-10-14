@@ -11,7 +11,6 @@
 //! records what follows its answer (`Then`) instead of awaiting it, so no state
 //! is held across a wait.
 use crate::chat_adapter::{Answers, ChatInit, ClientAdapter, Decision, Failure};
-use agentdock_runtime::process::{self, OwnedGroup};
 use indexmap::IndexMap;
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
@@ -25,6 +24,7 @@ use std::{
     },
     time::Duration,
 };
+use tendly_runtime::process::{self, OwnedGroup};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     sync::mpsc,
@@ -326,7 +326,7 @@ impl<T, R, X: Default> Core<T, R, X> {
         for key in env_remove
             .iter()
             .cloned()
-            .chain(crate::bridge::agentdock_secrets())
+            .chain(crate::bridge::tendly_secrets())
         {
             environment.shift_remove(&key);
         }
@@ -425,7 +425,7 @@ impl<T, R, X: Default> Core<T, R, X> {
             .env_remove
             .iter()
             .cloned()
-            .chain(crate::bridge::agentdock_secrets())
+            .chain(crate::bridge::tendly_secrets())
         {
             command.env_remove(key);
         }
@@ -500,7 +500,7 @@ impl<T, R, X: Default> Core<T, R, X> {
         optional: bool,
     ) -> Result<(), (T, String)> {
         self.sequence += 1;
-        let id = format!("agentdock-{}", self.sequence);
+        let id = format!("tendly-{}", self.sequence);
         let timeout = if optional {
             PROBE_TIMEOUT.min(RPC_TIMEOUT)
         } else {
@@ -529,7 +529,7 @@ impl<T, R, X: Default> Core<T, R, X> {
     pub fn waiting(&mut self, then: T) {
         self.sequence += 1;
         self.pending.insert(
-            format!("agentdock-{}", self.sequence),
+            format!("tendly-{}", self.sequence),
             Pending {
                 then,
                 deadline: Instant::now() + RPC_TIMEOUT,

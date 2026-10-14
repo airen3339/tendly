@@ -346,7 +346,7 @@ async fn chat_conversion_and_configuration_do_not_take_over_a_live_pty_or_change
         .create_session(workspace.id, ProviderKind::Codex, "Existing PTY")
         .unwrap();
     let id = record.id;
-    let spec = agentdock_runtime::SpawnSpec {
+    let spec = tendly_runtime::SpawnSpec {
         program: waiting_process(&["-c", "read line"]).0,
         args: waiting_process(&["-c", "read line"]).1,
         cwd: fixture.path.join("repo"),
@@ -479,7 +479,7 @@ async fn actual_node_bridge_contract_runs_both_synthetic_native_protocols_end_to
         let log = fixture.path.join("native.jsonl");
         // Only this test child gets fixture variables. Never change the test
         // runner's process environment or resolve an actual account secret.
-        fs::write(&wrapper,format!("process.env.AGENTDOCK_CHAT_TEST_INHERITED='kept';\nprocess.env.AGENTDOCK_CHAT_TEST_LOG={};\nprocess.env.AGENTDOCK_SECRET_TEST_CREDENTIAL='synthetic-fixture-secret';\nawait import({});\n",json!(log),json!(fixture_url.as_str()))).unwrap();
+        fs::write(&wrapper,format!("process.env.TENDLY_CHAT_TEST_INHERITED='kept';\nprocess.env.TENDLY_CHAT_TEST_LOG={};\nprocess.env.TENDLY_SECRET_TEST_CREDENTIAL='synthetic-fixture-secret';\nawait import({});\n",json!(log),json!(fixture_url.as_str()))).unwrap();
         fixture.state.chat_bridge = wrapper;
         let workspace = fixture
             .state
@@ -785,7 +785,7 @@ async fn agent_chat(fixture: &Fixture) -> (Uuid, String) {
     // so the new one identifies it.
     let token = launch::build(&fixture.state, &session, fixture.path.join("repo"))
         .unwrap()
-        .env["AGENTDOCK_AGENT_TOKEN"]
+        .env["TENDLY_AGENT_TOKEN"]
         .clone();
     (id, token)
 }
@@ -814,7 +814,7 @@ async fn a_session_starts_another_follows_its_reply_and_only_its_own() {
     let spawn = {
         let token = token.clone();
         tokio::spawn(async move {
-            agent_request(app, "POST", "/api/agent/call", Some(&token), Some("agent"), json!({"name":"agentdock_spawn","arguments":{"provider":"codex","prompt":"Try the other approach","title":"Other approach"}})).await.1
+            agent_request(app, "POST", "/api/agent/call", Some(&token), Some("agent"), json!({"name":"tendly_spawn","arguments":{"provider":"codex","prompt":"Try the other approach","title":"Other approach"}})).await.1
         })
     };
     let request = next_event(&mut events, "request").await;
@@ -853,7 +853,7 @@ async fn a_session_starts_another_follows_its_reply_and_only_its_own() {
         &tool(
             &fixture,
             &token,
-            "agentdock_session",
+            "tendly_session",
             json!({"action":"wait","id":child,"seconds":5}),
         )
         .await,
@@ -865,27 +865,20 @@ async fn a_session_starts_another_follows_its_reply_and_only_its_own() {
     let sent = tool(
         &fixture,
         &token,
-        "agentdock_session",
+        "tendly_session",
         json!({"action":"message","id":child,"text":"And now?"}),
     )
     .await;
     assert_eq!(sent["isError"], false, "{sent}");
-    let listed = tool_text(
-        &tool(
-            &fixture,
-            &token,
-            "agentdock_session",
-            json!({"action":"list"}),
-        )
-        .await,
-    );
+    let listed =
+        tool_text(&tool(&fixture, &token, "tendly_session", json!({"action":"list"})).await);
     assert_eq!(listed[0]["id"], child.to_string());
 
     // After the first, no more questions.
     let again = tool(
         &fixture,
         &token,
-        "agentdock_spawn",
+        "tendly_spawn",
         json!({"provider":"codex","prompt":"A third look"}),
     )
     .await;
@@ -895,12 +888,12 @@ async fn a_session_starts_another_follows_its_reply_and_only_its_own() {
     let child_session = fixture.state.store.get_session(child).unwrap().unwrap();
     let child_token = launch::build(&fixture.state, &child_session, fixture.path.join("repo"))
         .unwrap()
-        .env["AGENTDOCK_AGENT_TOKEN"]
+        .env["TENDLY_AGENT_TOKEN"]
         .clone();
     let refused = tool(
         &fixture,
         &child_token,
-        "agentdock_spawn",
+        "tendly_spawn",
         json!({"provider":"codex","prompt":"Grandchild"}),
     )
     .await;
@@ -908,7 +901,7 @@ async fn a_session_starts_another_follows_its_reply_and_only_its_own() {
     let prying = tool(
         &fixture,
         &child_token,
-        "agentdock_session",
+        "tendly_session",
         json!({"action":"result","id":parent}),
     )
     .await;
@@ -924,7 +917,7 @@ async fn a_session_starts_another_follows_its_reply_and_only_its_own() {
     let shown = tool(
         &fixture,
         &token,
-        "agentdock_show",
+        "tendly_show",
         json!({"file":"README.md","line":3}),
     )
     .await;
@@ -932,13 +925,13 @@ async fn a_session_starts_another_follows_its_reply_and_only_its_own() {
     let show = next_event(&mut events, "show").await;
     assert_eq!(show["target"]["kind"], "file");
     assert_eq!(show["target"]["line"], 3);
-    let usage = tool_text(&tool(&fixture, &token, "agentdock_usage", json!({})).await);
+    let usage = tool_text(&tool(&fixture, &token, "tendly_usage", json!({})).await);
     assert_eq!(usage["known"], false);
 
     let renamed = tool(
         &fixture,
         &token,
-        "agentdock_session",
+        "tendly_session",
         json!({"action":"rename","title":"Lead"}),
     )
     .await;

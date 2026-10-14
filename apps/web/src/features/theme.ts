@@ -13,8 +13,8 @@ import { loadPreferences, preferences, savePreferences } from "./preferences";
 export type ThemePreference = "system" | "light" | "dark";
 /** "interface" follows the interface theme. */
 export type TerminalThemePreference = "interface" | "light" | "dark";
-const KEY = "agentdock.theme";
-const TERMINAL_KEY = "agentdock.terminal-theme";
+const KEY = "tendly.theme";
+const TERMINAL_KEY = "tendly.terminal-theme";
 
 function pinned(value: unknown): "light" | "dark" | undefined {
   return value === "light" || value === "dark" ? value : undefined;

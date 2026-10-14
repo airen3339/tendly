@@ -8,7 +8,7 @@
 // where the search still returns results. So this runs with a config directory
 // that holds no credentials and no history, and cannot read or alter the user's
 // own Codex state — unlike the history bridge, which must use the real one.
-import { withoutAgentDockSecrets } from "./native-spawn.mjs";
+import { withoutTendlySecrets } from "./native-spawn.mjs";
 import { AppServerClient, NOT_STARTED } from "./app-server.mjs";
 
 const MAX_LIMIT = 50;
@@ -45,7 +45,7 @@ const limit = Math.min(Number.isInteger(job.limit) && job.limit > 0 ? job.limit 
  * place it depends on Codex. Answers through `answer`, exactly once.
  */
 async function codexFuzzyFileSearch(job, query, limit, answer) {
-  const environment = withoutAgentDockSecrets(process.env);
+  const environment = withoutTendlySecrets(process.env);
   if (job.config_dir) environment.CODEX_HOME = job.config_dir;
 
   let settled = false;
@@ -57,7 +57,7 @@ async function codexFuzzyFileSearch(job, query, limit, answer) {
   };
   // A launch failure and an early exit each get their own answer: the first means
   // Codex is missing, which the UI treats differently from a search that failed.
-  const server = new AppServerClient(process.env.AGENTDOCK_CODEX_BIN || "codex", ["app-server"], {
+  const server = new AppServerClient(process.env.TENDLY_CODEX_BIN || "codex", ["app-server"], {
     cwd: job.cwd, env: environment,
     onClose: reason => finish({ error: reason === NOT_STARTED ? "Codex is not installed or could not start" : "Codex app-server exited before answering" }),
   });
@@ -66,7 +66,7 @@ async function codexFuzzyFileSearch(job, query, limit, answer) {
   for (const signal of ["SIGTERM", "SIGINT"]) process.once(signal, () => { server.child.kill("SIGTERM"); process.exit(0); });
 
   try {
-    await server.initialize({ name: "agentdock", version: "0.1.0" });
+    await server.initialize({ name: "tendly", version: "0.1.0" });
     // Confirmed against codex 0.154.0: `roots` is required and must be an array;
     // `root` and `cwd` are both rejected with "missing field `roots`".
     const result = await server.request("fuzzyFileSearch", { query, roots: [job.cwd], limit });

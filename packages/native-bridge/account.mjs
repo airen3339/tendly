@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline';
 
 export function isolatedEnvironment(parent, provider, directory, configEnv = directory) {
-  const entries = Object.entries(parent).filter(([key]) => !/^AGENTDOCK_/i.test(key) && !Object.values(CLIENTS).some(client => client.envStrip.test(key)));
+  const entries = Object.entries(parent).filter(([key]) => !/^TENDLY_/i.test(key) && !Object.values(CLIENTS).some(client => client.envStrip.test(key)));
   const environment = Object.fromEntries(entries);
   const key = clientFor(provider)?.configEnv;
   return configEnv && key ? { ...environment, [key]: configEnv } : environment;

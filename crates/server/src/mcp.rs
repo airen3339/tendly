@@ -5,8 +5,8 @@
 //! tool call to the running Tendly server, which decides everything
 //! (agent.rs). It never opens the database or binds a port.
 //!
-//! Inside a session Tendly launched, `AGENTDOCK_URL` and
-//! `AGENTDOCK_AGENT_TOKEN` say where the server is and which session is
+//! Inside a session Tendly launched, `TENDLY_URL` and
+//! `TENDLY_AGENT_TOKEN` say where the server is and which session is
 //! calling. Anywhere else it finds the local server the way `tendly status`
 //! does, with the deployment's own token when there is one.
 use serde_json::{Value, json};
@@ -31,7 +31,7 @@ impl Upstream {
         let mut request = self
             .client
             .request(method, format!("{}{path}", self.url))
-            .header("x-agentdock-client", "agent");
+            .header("x-tendly-client", "agent");
         if let Some(token) = &self.token {
             request = request.bearer_auth(token);
         }
@@ -40,7 +40,7 @@ impl Upstream {
     async fn json(&self, request: reqwest::RequestBuilder) -> Result<Value, String> {
         let response = request.send().await.map_err(|_| {
             format!(
-                "Tendly is not answering at {}. Start it with `agentdock`.",
+                "Tendly is not answering at {}. Start it with `tendly`.",
                 self.url
             )
         })?;
@@ -83,11 +83,11 @@ impl Upstream {
 /// Where the local server answers: the address a session Tendly launched is
 /// given, or else this machine's port, as `tendly status` finds it.
 pub(crate) fn local_url() -> String {
-    let url = env::var("AGENTDOCK_URL")
+    let url = env::var("TENDLY_URL")
         .ok()
         .filter(|url| !url.is_empty())
         .unwrap_or_else(|| {
-            let port = env::var("AGENTDOCK_ADDR")
+            let port = env::var("TENDLY_ADDR")
                 .ok()
                 .and_then(|address| address.rsplit(':').next().map(str::to_owned))
                 .unwrap_or_else(|| {
@@ -103,9 +103,9 @@ pub(crate) fn local_url() -> String {
 }
 
 fn locate() -> Upstream {
-    let injected = env::var("AGENTDOCK_URL").ok().filter(|url| !url.is_empty());
+    let injected = env::var("TENDLY_URL").ok().filter(|url| !url.is_empty());
     let url = local_url();
-    let token = env::var("AGENTDOCK_AGENT_TOKEN")
+    let token = env::var("TENDLY_AGENT_TOKEN")
         .ok()
         .filter(|token| injected.is_some() && !token.is_empty())
         .or_else(crate::security::existing_token);
@@ -147,7 +147,7 @@ async fn answer(upstream: &Upstream, message: Value) -> Option<Value> {
                 json!({
                     "protocolVersion": version,
                     "capabilities": { "tools": { "listChanged": false } },
-                    "serverInfo": { "name": "agentdock", "version": env!("CARGO_PKG_VERSION") },
+                    "serverInfo": { "name": "tendly", "version": env!("CARGO_PKG_VERSION") },
                     "instructions": instructions,
                 }),
             )
@@ -215,12 +215,12 @@ mod tests {
         let upstream = offline();
         let answer = answer(&upstream, json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26"}})).await.unwrap();
         assert_eq!(answer["result"]["protocolVersion"], "2025-03-26");
-        assert_eq!(answer["result"]["serverInfo"]["name"], "agentdock");
+        assert_eq!(answer["result"]["serverInfo"]["name"], "tendly");
         assert!(
             answer["result"]["instructions"]
                 .as_str()
                 .unwrap()
-                .contains("agentdock_status")
+                .contains("tendly_status")
         );
         let unknown = super::answer(&upstream, json!({"jsonrpc":"2.0","id":2,"method":"initialize","params":{"protocolVersion":"1999-01-01"}})).await.unwrap();
         assert_eq!(unknown["result"]["protocolVersion"], PROTOCOL_VERSIONS[0]);
@@ -255,7 +255,12 @@ mod tests {
     #[tokio::test]
     async fn an_unreachable_server_is_a_tool_error_the_model_can_read() {
         let upstream = offline();
-        let call = answer(&upstream, json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"agentdock_status"}})).await.unwrap();
+        let call = answer(
+            &upstream,
+            json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"tendly_status"}}),
+        )
+        .await
+        .unwrap();
         assert_eq!(call["result"]["isError"], true);
         assert!(
             call["result"]["content"][0]["text"]

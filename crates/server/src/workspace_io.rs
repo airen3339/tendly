@@ -190,7 +190,7 @@ pub(crate) fn is_protected_path(relative: &Path) -> bool {
     // provider configuration.  These names are intentionally conservative.
     const PROTECTED: &[&str] = &[
         ".git",
-        ".agentdock",
+        ".tendly",
         ".ssh",
         ".aws",
         ".azure",
@@ -479,7 +479,7 @@ pub async fn write_file(
             .parent()
             .ok_or_else(|| IoError::new(400, "invalid file path"))?;
         fs::create_dir_all(parent).map_err(IoError::from)?;
-        let temp = parent.join(format!(".agentdock-{}.tmp", Uuid::new_v4()));
+        let temp = parent.join(format!(".tendly-{}.tmp", Uuid::new_v4()));
         let mut options = fs::OpenOptions::new();
         options.write(true).create_new(true);
         let mut file = options.open(&temp).map_err(IoError::from)?;
@@ -1334,9 +1334,9 @@ pub async fn git_commit(root: &Path, message: &str, amend: bool) -> Result<Strin
 }
 
 /// Directory attachments land in, relative to the workspace root. Deliberately
-/// not `.agentdock`: that name is reserved for Tendly's own server state, and
+/// not `.tendly`: that name is reserved for Tendly's own server state, and
 /// a workspace may be the Tendly checkout itself.
-pub const ATTACHMENT_DIR: &str = ".agentdock-files";
+pub const ATTACHMENT_DIR: &str = ".tendly-files";
 pub const MAX_ATTACHMENT_BYTES: u64 = 50 * 1024 * 1024;
 /// Files pasted or dropped into a terminal, under the attachment directory.
 /// They are handed over as a path and serve that one prompt, so they are
@@ -1722,7 +1722,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_terminal_paste_lands_with_a_full_path_and_old_pastes_are_cleared() {
-        let root = std::env::temp_dir().join(format!("agentdock-paste-{}", Uuid::new_v4()));
+        let root = std::env::temp_dir().join(format!("tendly-paste-{}", Uuid::new_v4()));
         fs::create_dir_all(&root).unwrap();
         let old = root.join(ATTACHMENT_DIR).join(PASTE_DIR).join("2000-01-01");
         fs::create_dir_all(&old).unwrap();
@@ -1733,7 +1733,7 @@ mod tests {
             .await
             .unwrap();
         assert!(
-            saved.path.starts_with(".agentdock-files/pastes/"),
+            saved.path.starts_with(".tendly-files/pastes/"),
             "{}",
             saved.path
         );
@@ -1901,7 +1901,7 @@ mod tests {
             // Renaming a link renames the link. Its target is not this
             // workspace's to move, and following it would move it anyway.
             let outside =
-                std::env::temp_dir().join(format!("agentdock-rename-target-{}", Uuid::new_v4()));
+                std::env::temp_dir().join(format!("tendly-rename-target-{}", Uuid::new_v4()));
             fs::write(&outside, "precious").unwrap();
             std::os::unix::fs::symlink(&outside, root.join("outward")).unwrap();
             let link = rename_entry(root, "outward", "pointer").await.unwrap();
@@ -1944,7 +1944,7 @@ mod tests {
         #[cfg(unix)]
         {
             let outside =
-                std::env::temp_dir().join(format!("agentdock-link-target-{}", Uuid::new_v4()));
+                std::env::temp_dir().join(format!("tendly-link-target-{}", Uuid::new_v4()));
             fs::write(&outside, "precious").unwrap();
             let inside = root.join("inside.txt");
             fs::write(&inside, "also precious").unwrap();
@@ -1965,11 +1965,11 @@ mod tests {
     }
     impl TempRepo {
         fn new() -> Self {
-            let path = std::env::temp_dir().join(format!("agentdock-test-{}", Uuid::new_v4()));
+            let path = std::env::temp_dir().join(format!("tendly-test-{}", Uuid::new_v4()));
             fs::create_dir_all(&path).unwrap();
             for args in [
                 vec!["init"],
-                vec!["config", "user.email", "agentdock@example.com"],
+                vec!["config", "user.email", "tendly@example.com"],
                 vec!["config", "user.name", "Tendly"],
                 // Git for Windows commonly defaults this on, which rewrites the
                 // fixtures' line endings on checkout.
@@ -2218,7 +2218,7 @@ mod tests {
     #[tokio::test]
     async fn symlink_escape_is_rejected() {
         let repo = TempRepo::new();
-        let outside = std::env::temp_dir().join(format!("agentdock-outside-{}", Uuid::new_v4()));
+        let outside = std::env::temp_dir().join(format!("tendly-outside-{}", Uuid::new_v4()));
         fs::write(&outside, "secret").unwrap();
         std::os::unix::fs::symlink(&outside, repo.path.join("link.txt")).unwrap();
         assert!(safe_path(&repo.path, "link.txt").is_err());
@@ -2239,7 +2239,7 @@ mod tests {
     }
     #[tokio::test]
     async fn host_files_are_read_only_inside_the_browsing_roots() {
-        let base = std::env::temp_dir().join(format!("agentdock-host-{}", uuid::Uuid::new_v4()));
+        let base = std::env::temp_dir().join(format!("tendly-host-{}", uuid::Uuid::new_v4()));
         let root = base.join("root");
         fs::create_dir_all(root.join(".ssh")).unwrap();
         fs::write(root.join("notes.md"), "# notes\n").unwrap();

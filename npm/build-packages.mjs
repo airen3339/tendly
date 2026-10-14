@@ -2,11 +2,6 @@
 // holding a binary, plus the package users actually name, which holds only the
 // shim and depends on all of them optionally.
 //
-// Tendly was called AgentDock, and installs made under that name update by
-// reinstalling `@wnzzer/agentdock`. That package is still built, from the same
-// shim and on the same platform packages, so those installs keep updating; it
-// is deprecated on the registry, which tells whoever installs it to move.
-//
 //   node npm/build-packages.mjs <version> <dir-of-tarballs> [out]
 //
 // Run locally against artifacts downloaded from a workflow run to inspect
@@ -19,7 +14,6 @@ import { fileURLToPath } from 'node:url';
 
 const SCOPE = '@wnzzer';
 const NAME = 'tendly';
-const LEGACY = 'agentdock';
 const BINARY = 'tendly-server';
 const REPOSITORY = 'https://github.com/wnzzer/tendly';
 // One source in docs/, published under the name a registry reader expects.
@@ -108,9 +102,6 @@ try {
   rmSync(extractRoot, { recursive: true, force: true });
 }
 
-// `bin` names every command the package installs. The legacy package carries
-// `tendly` too, so what the program prints is runnable whichever was installed;
-// that is also why the two cannot be installed side by side.
 function mainPackage(name, bin) {
   const dir = path.join(out, name);
   mkdirSync(path.join(dir, 'bin'), { recursive: true });
@@ -139,11 +130,10 @@ function mainPackage(name, bin) {
   );
 }
 mainPackage(NAME, [NAME]);
-mainPackage(LEGACY, [LEGACY, NAME]);
 
 // Platform packages first: the main package names them as dependencies, and a
 // registry that has not seen them yet resolves an install to nothing.
-const order = [...TARGETS.map((target) => `${NAME}-${target.key}`), NAME, LEGACY];
+const order = [...TARGETS.map((target) => `${NAME}-${target.key}`), NAME];
 writeFileSync(path.join(out, 'publish-order.txt'), `${order.join('\n')}\n`);
 console.log(`built ${order.length} packages for ${version} in ${out}`);
 for (const name of order) console.log(`  ${SCOPE}/${name}`);

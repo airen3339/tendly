@@ -47,8 +47,8 @@ async fn terminal_launch_pins_snapshot_revision_credentials_and_flags_for_every_
         (
             ProviderKind::Pi,
             "PI_CODING_AGENT_DIR",
-            "AGENTDOCK_PI_API_KEY",
-            "agentdock/chosen-model",
+            "TENDLY_PI_API_KEY",
+            "tendly/chosen-model",
             "--thinking",
         ),
     ] {
@@ -61,7 +61,7 @@ async fn terminal_launch_pins_snapshot_revision_credentials_and_flags_for_every_
         let (status, _) = call(
             f.app(),
             "PUT",
-            "/api/secrets/AGENTDOCK_SECRET_LAUNCH",
+            "/api/secrets/TENDLY_SECRET_LAUNCH",
             json!({"value":"synthetic-launch-key"}),
         )
         .await;
@@ -73,7 +73,7 @@ async fn terminal_launch_pins_snapshot_revision_credentials_and_flags_for_every_
         };
         let (status, body) = call(f.app(), "POST", "/api/endpoint-profiles", json!({
             "name":"launch fixture", "provider":provider, "endpoint_url":"https://original.example.test/v1",
-            "secret_ref":"env:AGENTDOCK_SECRET_LAUNCH", "model":"template-model", "effort":"low", "permission_mode":mode,
+            "secret_ref":"env:TENDLY_SECRET_LAUNCH", "model":"template-model", "effort":"low", "permission_mode":mode,
             "environment":{"LAUNCH_MARKER":{"kind":"literal","value":"original"}}
         })).await;
         assert_eq!(status, StatusCode::CREATED, "{body}");
@@ -118,7 +118,7 @@ async fn terminal_launch_pins_snapshot_revision_credentials_and_flags_for_every_
         assert_eq!(spec.env[config_key], original.env[config_key]);
         assert_eq!(spec.env[key_variable], "synthetic-launch-key");
         assert_eq!(spec.env["LAUNCH_MARKER"], "original");
-        let args = without_agentdock(&spec.args);
+        let args = without_tendly(&spec.args);
         assert!(
             args.windows(2).any(|pair| pair == ["--model", model]),
             "{args:?}"
@@ -304,7 +304,7 @@ async fn terminal_launch_of_imported_history_keeps_the_original_home_and_one_res
         let spec = launch::prepare(&f.state, &terminal).await.unwrap();
         let client = crate::adapters::agent(provider).unwrap();
         assert_eq!(spec.env[client.config_key()], directory.to_string_lossy());
-        assert_eq!(without_agentdock(&spec.args), client.resume_args(NATIVE_ID));
+        assert_eq!(without_tendly(&spec.args), client.resume_args(NATIVE_ID));
         let again = f
             .state
             .store
@@ -378,7 +378,7 @@ async fn launch_plan(
         .method("POST")
         .uri(format!("/api/sessions/{id}/launch-plan{query}"))
         .header("host", "127.0.0.1:8787")
-        .header("x-agentdock-client", "cli")
+        .header("x-tendly-client", "cli")
         .body(Body::empty())
         .unwrap();
     if let Some(peer) = peer {

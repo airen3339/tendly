@@ -4,7 +4,7 @@
 
 ## 2026-09-17 更新：npm 分发（已验证，尚未发布）
 
-- 发布形态为「主包 + 四个平台包」：`@wnzzer/agentdock` 只含一个 CommonJS shim，`@wnzzer/agentdock-{darwin-arm64,darwin-x64,linux-x64,linux-arm64}` 各含一个二进制，由 npm 依据 `os`/`cpu` 只下载匹配本机的那一个。无 postinstall，`--ignore-scripts` 环境可安装。
+- 发布形态为「主包 + 四个平台包」：`@wnzzer/tendly` 只含一个 CommonJS shim，`@wnzzer/tendly-{darwin-arm64,darwin-x64,linux-x64,linux-arm64}` 各含一个二进制，由 npm 依据 `os`/`cpu` 只下载匹配本机的那一个。无 postinstall，`--ignore-scripts` 环境可安装。
 - 二进制已内嵌 web 产物与 Node 桥接，单文件 5.4–6.3 MB。以真实 release 产物验证：四个包的架构与包名一一对应、可执行位经 `npm pack` 保留、安装后 shim 能解析并启动二进制、启动时释放 9 个桥接文件（含打包的 Claude Agent SDK）、内嵌前端资源返回 200。
 - shim 的失败路径同样验证：缺平台包时说明是 optional dependency 被跳过及补救命令；不支持的平台列出已支持平台；退出码透传；SIGTERM 发给 shim 时服务器随之退出，不留孤儿进程。
 - `release.yml` 新增 `npm` job，并且在 `workflow_dispatch` 下也运行、只做 `--dry-run`。理由是 npm 版本号不可撤回，不应让首次执行就是不可重来的那一次。
@@ -66,7 +66,7 @@
 - **273 项 Node 测试、100 项 Rust 测试**、真实 Vue SFC 类型检查、生产构建、fmt 与 Clippy `-D warnings` 通过。Rust → 实际 Node bridge → 两种合成原生协议完成消息/审批/去重/打断/配置切换回归；账号测试覆盖凭据不泄漏、目录权限、维护竞争、官方重置已知结果、授权持久化及进程组退出。
 - Browser 使用真实 `ChatSessionPane` 的开发只读预览 `http://127.0.0.1:5173/ui-preview.html`：桌面/390px 容器切换，实际窄容器宽 388px 无横向溢出，输入 16px，发送/审批按钮高度 44px。验证本地中文输入、工具卡展开、发送/审批/端点动作全部禁用；样例显式标记，不连接 Agent 或模型。这是浏览器窄容器测试，非手机真机验收。
 - 独立 8788 预览升级 SQLite v7 后，实测本机 **Codex 与 Claude Code 原生初始化都返回 ready/running**；没有发送提示词、创建模型轮次或执行真实 OAuth/额度消费。只结束自己创建的两条 `Structured handshake QA · … · no prompt` 会话，记录保留为 stopped。
-- 预览创建一个 `OAuth metadata QA · not signed in` 账号：目录 0700，元数据/config 文件 0600，状态 unknown，不冒充登录。生成的 Profile 不允许从普通端点页孤立删除。以上测试数据只保留在 `.agentdock/preview-v2`，未复制到主库、未读取真实凭据内容。
+- 预览创建一个 `OAuth metadata QA · not signed in` 账号：目录 0700，元数据/config 文件 0600，状态 unknown，不冒充登录。生成的 Profile 不允许从普通端点页孤立删除。以上测试数据只保留在 `.tendly/preview-v2`，未复制到主库、未读取真实凭据内容。
 - **已知边界**：载入旧 native history 可继续原上下文，但旧完整正文暂不回填到聊天 UI，并在视图说明；未知原生交互 fail closed。尚未执行真实授权后的付费模型回合、实际 OAuth 登录/额度消费、Linux 实机或手机真机验收。
 - **本段为重启前历史记录**：当时 8787 的 4 个用户活跃会话未被中断；2026-09-10 在用户明确授权后已完成主后端有序重启，详见本页顶部更新。新能力现已通过 5173 主页面提供；会话记录和窗口绑定保留，旧 PTY 进程按重启语义结束。
 
@@ -81,7 +81,7 @@
 - 新会话草稿按工作区/provider/profile、历史草稿按工作区/source 分开，保留未完成行，切账号不串值。原生 Profile 允许名称与进程级环境模板，不改源配置文件。已有会话可从侧栏齿轮直接编辑，不需要先打开/启动；运行中只读，保存不启动/停止，修改下次显式启动生效。
 - SQLite v6 保存显式环境 map，默认 `{}`，不改旧快照。PATCH 必须 stopped/failed 且 runtime 非活跃，通过 operations 锁防启动竞争；历史重复载入省略环境保留既有值，不同显式值返回 409。旧后端无 `session_environment` 能力时禁用编辑、说明升级原因，不请求缺失路由或静默丢弃草稿。
 - 自动验证：**186 项 Node 测试、79 项 Rust 测试**全部通过；真实 SFC typecheck、生产 build、Rust fmt、Clippy `-D warnings` 通过。Node 冻结依赖安装通过。没有执行认证后的付费模型回合，也没有宣称 Linux 实机验证或云端 CI 已执行。
-- 空闲的 8788 预览后端已升级 v6（`.agentdock/preview-v2`），实测 capability、Profile 环境快照、会话完整替换、保留变量/明文敏感值拒绝及引用原样返回。保留一个 `Environment QA · blocked fixture` 配置和一个 `Environment QA · never started` 的 stopped 记录作验收样本；从未启动原生客户端、未读取真实密钥、未复制任何预览数据到主库。
+- 空闲的 8788 预览后端已升级 v6（`.tendly/preview-v2`），实测 capability、Profile 环境快照、会话完整替换、保留变量/明文敏感值拒绝及引用原样返回。保留一个 `Environment QA · blocked fixture` 配置和一个 `Environment QA · never started` 的 stopped 记录作验收样本；从未启动原生客户端、未读取真实密钥、未复制任何预览数据到主库。
 - Browser 在 5173 确认旧后端环境弹窗默认展开、添加/保存禁用并显示升级说明；打开停止会话的齿轮不会启动它，关闭弹窗后原活跃窗格仍已连接，刷新无 alert。8788 的浏览器访问先前被安全设置拦截，本轮未绕过，不宣称新版预览的完整浏览器交互验收。
 - **部署边界：原 PID 82687 / v5 主库已在 2026-09-10 授权重启时替换。** 当前 8787 为 schema 7 / PID 27770，13 条会话记录保留但运行中 PTY 已结束；5173 Node 前端现在连接新能力。
 
@@ -130,7 +130,7 @@
 - Bun Vite 开发服务在独立端口启动并返回页面，已结束该临时服务；原 5173/8787 服务未重启。
 - 通过 Browser 技能在验收工作区实际验证：三级文件树懒加载 → 打开文件 → 折叠父目录 → 预览定位重新展开并选中；中英切换后新增标签同步翻译。切到已停止的 Codex 窗格不会自动启动。
 - 原生历史通过官方 SDK / app-server 读取当前项目元数据；本机两来源均返回空列表，无模型请求、无自动 resume。fixture 覆盖跨工作区拒绝、显式同意、去重、Unicode流、分页边界、原始配置绑定和隐私字段。
-- 在临时 `AGENTDOCK_HOME` 连续 init 两次成功：schema 3、SQLite WAL、目录 0700。未迁移用户原始数据，也未声称已提供一键下载/系统服务安装器。
+- 在临时 `TENDLY_HOME` 连续 init 两次成功：schema 3、SQLite WAL、目录 0700。未迁移用户原始数据，也未声称已提供一键下载/系统服务安装器。
 - 已增加端口预留与 state/database 独占锁：重复启动先失败，不再提前重置 running 记录；init 同样持锁且不执行 reconcile。
 - 原 8787 服务核验仍保留 4 个用户运行中会话。
 - Rust 本轮 43 项（server 35、persistence 4、runtime 4），含启动端口冲突、数据库/状态锁、init不改运行状态、文件描述符继承后锁释放回归；连续 5 轮全量测试通过，fmt/clippy 通过。
@@ -154,7 +154,7 @@
 - 窗格与标签显示所属工作区；文件 ID 包含工作区与路径，Git/文件操作固定引用自己的工作区。右侧文件树可跟随焦点或固定；比例划分、拖拽和自适应 Tab 保持不变。
 - SQLite v5 新增共享布局与 revision/CAS，不覆盖旧的每工作区布局。旧后端不请求新接口：明确显示“保存在此浏览器”；不支持的原生配置/历史/目录/模型发现禁用并提示升级，避免不透明的 API route not found。
 - Browser 在原 5173 实测：选择 B 后 A 编辑器仍在，保存只修改 A；两个项目同名 README 同时存在、草稿互不覆盖；文件树固定 B 时聚焦 A 不切走；B 编辑器与 A Git 窗格成功并排。
-- 在专用 `/tmp/agentdock-shared-canvas-qa.IvfxOP/{a,b}` 测试仓库通过 UI 验证：A 暂存后 A 为 index M，B 仍仅 worktree M；提交仅进入 A，B 的 Git log 仍为初始提交。未提交用户项目。
+- 在专用 `/tmp/tendly-shared-canvas-qa.IvfxOP/{a,b}` 测试仓库通过 UI 验证：A 暂存后 A 为 index M，B 仍仅 worktree M；提交仅进入 A，B 的 Git log 仍为初始提交。未提交用户项目。
 - 浏览器测试结束已移除测试窗格，原有 4 个窗格逐一比对保留；整页刷新后布局仍在。新增的两个 QA 工作区引用及其临时目录保留为验收样本，未删除用户数据。
 - 独立 8788 的 v5 共享接口实测：首次保存 revision 1；过期写入返回 409，深层内容比较确认布局未被改动。已检查 JSON 键排序不会被误判为内容变化，并增加回归。
 - 新版预览只登记测试目录/保存文件与 Git 窗格，不启动模型或原生会话；原 8787 的 8 个活跃会话保持运行。

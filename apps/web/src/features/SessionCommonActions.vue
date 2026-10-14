@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Session } from "@agentdock/protocol";
+import type { Session } from "@tendly/protocol";
 import { useI18n } from "../i18n";
 import { isEphemeralSession, resumeCommand } from "./session-list";
 import { clientLabel } from "./clients";

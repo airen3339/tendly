@@ -2,7 +2,7 @@
 
 Default origin: `http://127.0.0.1:8787`. Node-run Vite proxies the same `/api` surface, including WebSocket upgrades. The development toolchain is Node 24+ and pnpm 10.30.3; see the README for install/run commands.
 
-All mutations require `X-AgentDock-Client: web`. Unknown Host and untrusted Origin are rejected. When `AGENTDOCK_TOKEN` is configured, private routes additionally require a bearer token or the HttpOnly login cookie.
+All mutations require `X-Tendly-Client: web`. Unknown Host and untrusted Origin are rejected. When `TENDLY_TOKEN` is configured, private routes additionally require a bearer token or the HttpOnly login cookie.
 
 ```text
 GET  /api/health
@@ -32,7 +32,7 @@ WS   /api/sessions/:id/pty/ws?cols=120&rows=40
 
 Providers: `claude_code`, `codex`, `terminal`. Create records a stopped session and an immutable `endpoint_snapshot`; profile environment defaults plus explicit request overrides form the session's effective `environment` map. A new isolated/custom-profile session may override its model; native-reference profiles keep the native model setting. Start is idempotent for a running process. Stop is idempotent for an existing stopped session. Clients cannot PATCH runtime states. The UI calls start when the user opens/reopens a session, coalescing concurrent requests; ordinary view remounts never revive stopped sessions. End is a secondary, confirmed menu action. These lifecycle APIs remain available even though primary Start/Stop buttons were removed. Opening environment settings from the sidebar gear or pane menu only inspects configuration and never starts a session.
 
-`POST /api/sessions/:id/launch-plan` is what `tendly resume <id>` runs: `{program,args,cwd,env,env_remove,title,provider,provider_session_id}` for continuing the session's conversation in a terminal of one's own, built by the same launch layer as an escape-hatch terminal (pinned configuration revision, checkout, endpoint, model, effort, permission and resume selector) without recording a session. Because `env` carries the endpoint's resolved key, it answers only connections from a loopback address, and takes `X-AgentDock-Client: cli` (or `web`) plus the usual authentication. A session Tendly is running is refused with 409 unless `force=true`; a client session without a native conversation yet is refused with 409; a terminal session opens its shell in the session's directory.
+`POST /api/sessions/:id/launch-plan` is what `tendly resume <id>` runs: `{program,args,cwd,env,env_remove,title,provider,provider_session_id}` for continuing the session's conversation in a terminal of one's own, built by the same launch layer as an escape-hatch terminal (pinned configuration revision, checkout, endpoint, model, effort, permission and resume selector) without recording a session. Because `env` carries the endpoint's resolved key, it answers only connections from a loopback address, and takes `X-Tendly-Client: cli` (or `web`) plus the usual authentication. A session Tendly is running is refused with 409 unless `force=true`; a client session without a native conversation yet is refused with 409; a terminal session opens its shell in the session's directory.
 
 `PATCH /api/sessions/:id {title}` changes the Tendly display title and returns the same session record. The session ID, workspace, native resume identity, conversation history and live process are unchanged. The title is propagated to every open canvas tab bound to that session. For a newly started or explicitly reopened isolated Claude Code session, Tendly also forwards the title as Claude Code's native `--name`; imported/native-reference sessions keep their original client-owned naming and history identity. Blank or oversized titles are rejected.
 
@@ -143,7 +143,7 @@ Codex uses native app-server `thread/list`; Claude uses the official Agent SDK's
 
 The imported stopped session has `native_source_id`, `provider_session_id` and its explicit `environment`; its pinned configuration path is internal and excluded from session JSON. PTY opening uses `codex resume ID` or `claude --resume ID` with the original native configuration, without adding permission/model/endpoint overrides. Structured mode adapts the original client to stdio transport; Codex calls `thread/resume` only for the first explicit message. Explicit environment overrides affect the child process, not native configuration files. Changing the source directory fails closed rather than applying another account to the old association. This links a saved native context, not an external live PTY, and older full message bodies are not yet imported into the structured Web transcript. SQLite schema 3 added the association; schema 6 adds environment maps with empty defaults.
 
-The helper runs under **Node.js** by default. `AGENTDOCK_JS_RUNTIME` may override the executable; the legacy `AGENTDOCK_NODE_BIN` is used only when the new override is unset/empty. The helper has time/output/page limits and returns explicit unsupported-client errors. See the [Codex app-server API](https://developers.openai.com/codex/app-server/) and [Claude Agent SDK metadata helpers](https://code.claude.com/docs/en/agent-sdk/typescript).
+The helper runs under **Node.js** by default. `TENDLY_JS_RUNTIME` may override the executable; the legacy `TENDLY_NODE_BIN` is used only when the new override is unset/empty. The helper has time/output/page limits and returns explicit unsupported-client errors. See the [Codex app-server API](https://developers.openai.com/codex/app-server/) and [Claude Agent SDK metadata helpers](https://code.claude.com/docs/en/agent-sdk/typescript).
 
 ## Explicit environment overrides
 
@@ -164,13 +164,13 @@ New sessions merge profile defaults first and request overrides second, validate
 The native/custom/history launch builders receive this overlay after constructing the base launch configuration:
 
 - `literal` assigns the exact string without shell expansion. `$PATH`, `${NAME}`, `~` and command-looking text remain literal environment contents. Plain values are stored in local metadata and returned to the editor: they are **not a secret store**.
-- `secret_ref` accepts only `env:AGENTDOCK_SECRET_` followed by one or more uppercase ASCII letters, digits or underscores. The backend resolves that reference only at launch. Missing or invalid resolved values fail launch without returning the value. References, not their resolved secrets, are persisted and exposed through the API.
+- `secret_ref` accepts only `env:TENDLY_SECRET_` followed by one or more uppercase ASCII letters, digits or underscores. The backend resolves that reference only at launch. Missing or invalid resolved values fail launch without returning the value. References, not their resolved secrets, are persisted and exposed through the API.
 - `unset` removes the variable from the child launch environment. It differs from deleting an override: deleting a new-session override reveals the profile default, while deleting an entry from an existing session's replacement map leaves the base launch environment to apply. Native config files may still supply their own settings according to the CLI's precedence.
 
 Validation is shared by profile, session, import and launch paths:
 
 - At most 64 entries and 64 KiB of serialized JSON. Keys match `[A-Za-z_][A-Za-z0-9_]{0,127}`. Literal and resolved secret values are at most 8192 UTF-8 bytes, with no NUL.
-- Reserved keys, case-insensitively: `HOME`, `USERPROFILE`, `PWD`, `OLDPWD`, `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `CLAUDECODE`, and every `AGENTDOCK_*` key. A secret may be referenced from that namespace, but an override cannot assign to it.
+- Reserved keys, case-insensitively: `HOME`, `USERPROFILE`, `PWD`, `OLDPWD`, `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `CLAUDECODE`, and every `TENDLY_*` key. A secret may be referenced from that namespace, but an override cannot assign to it.
 - Key names containing `TOKEN`, `SECRET`, `PASSWORD`, `PRIVATE_KEY`, `API_KEY` or `AUTHORIZATION` reject literal values; use `secret_ref` or `unset`. `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` and names ending in `_BASE_URL` also reject literal URL user information. Detection is case-insensitive. Do not put other credentials into benign-looking literal keys; validation is not a general secret detector.
 - Invalid keys/value variants are rejected rather than interpreted as shell code. Profile defaults plus session overrides must satisfy limits after merging as well as individually.
 
@@ -182,7 +182,7 @@ SQLite schema 6 adds `environment` JSON columns with `{}` defaults without rewri
 
 ## Files
 
-`GET /api/host/directories?root=0&path=relative/folder` browses configured host locations for the workspace picker. It returns roots, current absolute/relative path, parent and directory entries only. Protected directories, traversal and symlinks are rejected. `AGENTDOCK_BROWSE_ROOTS` limits the picker; manual registration remains a trusted-admin workflow, not an OS sandbox.
+`GET /api/host/directories?root=0&path=relative/folder` browses configured host locations for the workspace picker. It returns roots, current absolute/relative path, parent and directory entries only. Protected directories, traversal and symlinks are rejected. `TENDLY_BROWSE_ROOTS` limits the picker; manual registration remains a trusted-admin workflow, not an OS sandbox.
 
 ```text
 GET /api/workspaces/:id/files?path=src
@@ -271,7 +271,7 @@ Profiles additionally accept `proxy_url?: string|null` and `model_aliases?: {ali
 
 `effort` is one of `low`, `medium`, `high`, `xhigh` or `max`. A profile stores a default; a new session may override it, and the effective value is captured in that session's endpoint snapshot. Native-reference profiles cannot receive model or effort overrides. The Claude adapter forwards `--effort`; the Codex adapter writes `model_reasoning_effort` to its generated per-session configuration. Empty/omitted means the provider default.
 
-Secret references must use `env:AGENTDOCK_SECRET_NAME`. Resolved secret values are not stored in profile metadata or returned to the Web UI; explicit environment literals, by contrast, are plaintext metadata and must not contain secrets. Generated native configuration uses per-session directories; it does not silently replace global client config.
+Secret references must use `env:TENDLY_SECRET_NAME`. Resolved secret values are not stored in profile metadata or returned to the Web UI; explicit environment literals, by contrast, are plaintext metadata and must not contain secrets. Generated native configuration uses per-session directories; it does not silently replace global client config.
 
 Permission intents are not equivalent security guarantees: native uses CLI defaults; interactive uses native conservative prompts; trusted uses Claude acceptEdits and Codex on-request + workspace-write; Claude-only `plan` forwards Claude Code's native plan mode. Codex keeps its native approval model and rejects the `plan` intent rather than pretending it has an equivalent. Blocked refuses launch. Tendly never adds a bypass flag.
 
@@ -333,9 +333,9 @@ POST /api/workspaces/:id/attachments?name=<file name>
 
 Raw request body (`application/octet-stream`), so a phone upload costs no base64 inflation. Max 10 MiB per file; the route carries its own body limit rather than the shared 3 MiB JSON cap. Returns `{path, name, bytes}`.
 
-The file is written inside the workspace under `.agentdock-files/<date>/`, and the workspace-relative `path` is what a session is given. Both native clients can already read workspace files with their own tools, so this works for every provider and every file type without depending on one client's inline-content protocol.
+The file is written inside the workspace under `.tendly-files/<date>/`, and the workspace-relative `path` is what a session is given. Both native clients can already read workspace files with their own tools, so this works for every provider and every file type without depending on one client's inline-content protocol.
 
-Only the base name of `name` is used, so a path from a file picker cannot steer the write; the stored file name is slugified (no spaces) because an agent receives it as text, while the returned `name` keeps the user's own spelling. Each upload gets a unique file name, so two photos with the same camera name both survive. A scoped `.agentdock-files/.gitignore` containing `*` is created on first use, so uploads do not appear as pending Git changes; no `.gitignore` belonging to the user is edited.
+Only the base name of `name` is used, so a path from a file picker cannot steer the write; the stored file name is slugified (no spaces) because an agent receives it as text, while the returned `name` keeps the user's own spelling. Each upload gets a unique file name, so two photos with the same camera name both survive. A scoped `.tendly-files/.gitignore` containing `*` is created on first use, so uploads do not appear as pending Git changes; no `.gitignore` belonging to the user is edited.
 
 ## Agent clients
 
@@ -346,7 +346,7 @@ POST /api/clients/:provider/install {confirmed:true}
 
 Requires `agent_clients`. `GET` is read-only discovery: for Claude Code and Codex it reports the `program` a session would launch, where it came from (`source`: `override` | `path` | `managed` | `missing`), the `version` the client reports, its `npm_package`, whether npm exists on the server (`install_available`), and whether a Tendly copy exists but is outranked (`shadowed`). Looking installs nothing.
 
-Resolution order is `AGENTDOCK_*_BIN` override, then the server's `PATH`, then Tendly's own copy. A client already on the host always wins, so installing here can never silently repoint existing sessions at a different binary.
+Resolution order is `TENDLY_*_BIN` override, then the server's `PATH`, then Tendly's own copy. A client already on the host always wins, so installing here can never silently repoint existing sessions at a different binary.
 
 `install` runs `npm install --prefix <state_dir>/clients <package>`. It is not a global install and needs no elevated permissions. It downloads and runs package code, so `confirmed:true` is required and one install runs at a time. When the result is `shadowed`, the install succeeded but sessions keep using the host copy — the response says so rather than implying a change.
 
@@ -366,7 +366,7 @@ Resolution order is `AGENTDOCK_*_BIN` override, then the server's `PATH`, then T
 
 The preferred source is the official Claude OAuth usage response (`five_hour`, `seven_day`, and optional model windows), using `utilization` and `resets_at`. The same response shape is used by [CPA Usage Keeper](https://github.com/Willxup/cpa-usage-keeper) through [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI); Tendly only adopts its read-only request and normalization, not its proxy, account pool, or routing logic. OAuth provenance is carried by `usage.source: "claude_oauth_usage"`; the two named windows map to `primary`/`secondary`. The status-line fallback uses `mapping_basis: "status_line_window"`. Nothing polls, and an absent or malformed response is never rendered as zero usage.
 
-Recording that payload requires adding a status line command to the Claude sessions Tendly starts, which overrides the account's own configuration for those sessions, so it is opt-in: set `AGENTDOCK_CLAUDE_USAGE_CAPTURE=1` on the server. The overlay is passed per launch with `--settings` — no settings file belonging to the user is written — and a status line the account already configured is run with the same payload and its output passed through unchanged. Sessions started outside Tendly are never modified and record nothing.
+Recording that payload requires adding a status line command to the Claude sessions Tendly starts, which overrides the account's own configuration for those sessions, so it is opt-in: set `TENDLY_CLAUDE_USAGE_CAPTURE=1` on the server. The overlay is passed per launch with `--settings` — no settings file belonging to the user is written — and a status line the account already configured is run with the same payload and its output passed through unchanged. Sessions started outside Tendly are never modified and record nothing.
 
 ## Updates
 

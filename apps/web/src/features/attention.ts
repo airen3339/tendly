@@ -1,5 +1,5 @@
 import { computed, reactive, ref } from "vue";
-import type { Session } from "@agentdock/protocol";
+import type { Session } from "@tendly/protocol";
 import { showToast } from "./toasts";
 
 /**
@@ -15,7 +15,7 @@ import { showToast } from "./toasts";
 export const sessionStatuses = reactive<Record<string, Session["status"]>>({});
 export const waitingIds = computed(() => Object.keys(sessionStatuses).filter(id => sessionStatuses[id] === "waiting"));
 
-const KEY = "agentdock.notifications";
+const KEY = "tendly.notifications";
 function stored(): boolean {
   try { return localStorage.getItem(KEY) === "on"; } catch { return false; }
 }
@@ -66,7 +66,7 @@ function announce(session: Session, context: AttentionContext) {
   const title = context.t("{session} is waiting for you", { session: session.title });
   if (away) {
     if (!desktopNotifications.value || notificationSupport() !== "granted") return;
-    const notification = new Notification(title, { body: context.t("An approval or a question needs your answer."), tag: `agentdock-${session.id}` });
+    const notification = new Notification(title, { body: context.t("An approval or a question needs your answer."), tag: `tendly-${session.id}` });
     notification.onclick = () => { window.focus(); context.open(session); notification.close(); };
     return;
   }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from "vue";
-import type { Session } from "@agentdock/protocol";
+import type { Session } from "@tendly/protocol";
 import { useI18n } from "../i18n";
 import { providerLabel } from "./api";
 import { isEphemeralSession, isSessionArchived } from "./session-list";
@@ -57,7 +57,7 @@ const lastActive = computed(() => {
   return t("{n} d ago", { n: Math.round(hours / 24) });
 });
 function dragSession(event: DragEvent) {
-  event.dataTransfer?.setData("application/agentdock-pane", JSON.stringify(workspaceSessionPane(props.session)));
+  event.dataTransfer?.setData("application/tendly-pane", JSON.stringify(workspaceSessionPane(props.session)));
   if (event.dataTransfer) event.dataTransfer.effectAllowed = "copyMove";
 }
 function toggleMenu() { menuOpen.value = !menuOpen.value; confirmDelete.value = false; }

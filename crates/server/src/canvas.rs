@@ -3,8 +3,6 @@
 //! files, client configuration, or credentials to validate a saved layout.
 
 use crate::{ApiError, AppState, Result};
-use agentdock_domain::{ProviderKind, WorkspaceId};
-use agentdock_persistence::Store;
 use axum::{Json, extract::State};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
@@ -12,6 +10,8 @@ use std::{
     collections::HashSet,
     path::{Component, Path},
 };
+use tendly_domain::{ProviderKind, WorkspaceId};
+use tendly_persistence::Store;
 use uuid::Uuid;
 
 const MAX_LAYOUT_BYTES: usize = 256 * 1024;

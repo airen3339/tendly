@@ -1,4 +1,4 @@
-import type { ProviderKind, Session, Workspace } from "@agentdock/protocol";
+import type { ProviderKind, Session, Workspace } from "@tendly/protocol";
 import { providerLabel } from "./clients";
 import { fuzzyScore } from "./fuzzy-search";
 

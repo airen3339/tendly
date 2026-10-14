@@ -417,7 +417,7 @@ impl Codex {
         }
         self.rpc(
             "initialize",
-            json!({"clientInfo":{"name":"agentdock","title":"Tendly","version":"0.1.0"}}),
+            json!({"clientInfo":{"name":"tendly","title":"Tendly","version":"0.1.0"}}),
             Then::Initialize,
             false,
         );
@@ -1246,7 +1246,7 @@ impl Codex {
                         "This MCP server asked for a form Tendly cannot show.",
                     );
                 }
-                if p.get("serverName") == Some(&json!("agentdock")) {
+                if p.get("serverName") == Some(&json!("tendly")) {
                     if self
                         .core
                         .send(json!({"id":id,"result":{"action":"accept","content":{}}}))

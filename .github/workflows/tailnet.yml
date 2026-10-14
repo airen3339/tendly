@@ -34,7 +34,7 @@ jobs:
       run:
         shell: bash
     env:
-      AGENTDOCK_HOME: ${{ github.workspace }}/.agentdock-ci
+      TENDLY_HOME: ${{ github.workspace }}/.tendly-ci
       BIN: target/debug/tendly-server
     steps:
       - uses: actions/checkout@v4
@@ -49,7 +49,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       # The server embeds apps/web/dist, so the web build comes first.
       - run: pnpm build:web
-      - run: cargo build -p agentdock-server
+      - run: cargo build -p tendly-server
 
       - name: Join the tailnet
         uses: tailscale/github-action@v3
@@ -57,7 +57,7 @@ jobs:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
-          hostname: agentdock-ci-${{ runner.os }}-${{ github.run_id }}
+          hostname: tendly-ci-${{ runner.os }}-${{ github.run_id }}
           # Without one, tailscaled keeps its state in memory and has nowhere
           # to put a certificate, so HTTPS never comes up. (Windows runs the
           # installed service, which has its own.)
@@ -87,7 +87,7 @@ jobs:
           test "$(echo "$status" | jq -r .phase)" = live
           name=$(echo "$status" | jq -r .machine.name)
           ip=$(echo "$status" | jq -r .machine.ip)
-          token=$(cat "$AGENTDOCK_HOME/token")
+          token=$(cat "$TENDLY_HOME/token")
           # The runner's own DNS is not what is under test; the certificate is,
           # and --resolve still checks it against the name.
           resolve=(--resolve "$name:443:$ip")
@@ -115,7 +115,7 @@ jobs:
 
       - name: Gateway log
         if: always()
-        run: cat "$AGENTDOCK_HOME/agentdock.log" 2>/dev/null || true
+        run: cat "$TENDLY_HOME/tendly.log" 2>/dev/null || true
       - name: Tailscale log
         if: failure() && runner.os != 'Windows'
         run: tail -n 100 ~/tailscaled.log 2>/dev/null || true

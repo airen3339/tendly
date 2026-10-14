@@ -1,4 +1,4 @@
-import type { LayoutDocument, LayoutNode, PaneNode, Session, Workspace } from "@agentdock/protocol";
+import type { LayoutDocument, LayoutNode, PaneNode, Session, Workspace } from "@tendly/protocol";
 import { closePane, flattenPanes, restoreCollapsed, updatePane, validateLayout } from "../layout/layout-engine";
 import { isEphemeralSession } from "./session-list";
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
-import type { Session, Workspace } from '@agentdock/protocol';
+import type { Session, Workspace } from '@tendly/protocol';
 import { ApiError, errorMessage, json, providerLabel, request } from './api';
 import PageShell from './PageShell.vue';
 import ProviderIcon from './ProviderIcon.vue';

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import type { Workspace } from "@agentdock/protocol";
+import type { Workspace } from "@tendly/protocol";
 import { useI18n } from "../i18n";
 import { errorMessage, json, request } from "./api";
 import { backendCapabilities } from "./backend-capabilities";
@@ -188,7 +188,7 @@ onUnmounted(() => { alive = false; browseController?.abort(); });
         <summary>{{ t('Advanced: enter a host path') }}</summary>
         <label>{{ t('Absolute host directory') }}<input :value="path" :placeholder="t('/path/to/your/project')" autocomplete="off" spellcheck="false" :disabled="busy" @input="selectDirectory(($event.target as HTMLInputElement).value)" /></label>
         <p class="form-help">{{ t('This path is on the server, not your browser’s computer. No folder, container or repository will be created.') }}</p>
-        <p class="form-help">{{ t('Deployment tip: set AGENTDOCK_BROWSE_ROOTS to choose the folders available in the browser.') }}</p>
+        <p class="form-help">{{ t('Deployment tip: set TENDLY_BROWSE_ROOTS to choose the folders available in the browser.') }}</p>
       </details>
 
       <p v-if="existingWorkspace" class="form-help">{{ t('This directory is already registered. We will open the existing workspace.') }}</p>

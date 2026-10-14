@@ -116,7 +116,7 @@ tendly             # 后台启动 → http://127.0.0.1:28789/
 
 然后**选择工作区**（宿主机上任意目录），在 *设置 → 官方账号 → 引入现有配置* 中复用已有登录，再**新建会话**或**加载已有会话**。
 
-提供 macOS（arm64、x64）、Linux（x64、arm64，静态 musl）和 Windows（x64）预编译包，没有 postinstall 步骤。其他平台可[从源码构建](docs/development.md)。Windows 上终端默认打开 PowerShell（可用 `AGENTDOCK_SHELL` 指定其他 shell）。
+提供 macOS（arm64、x64）、Linux（x64、arm64，静态 musl）和 Windows（x64）预编译包，没有 postinstall 步骤。其他平台可[从源码构建](docs/development.md)。Windows 上终端默认打开 PowerShell（可用 `TENDLY_SHELL` 指定其他 shell）。
 
 | 命令 | 说明 |
 | --- | --- |
@@ -126,24 +126,14 @@ tendly             # 后台启动 → http://127.0.0.1:28789/
 | `tendly update` · `--check` | 安装 npm 上的最新版（或只检查）；页面「设置 → 更新」效果相同 |
 | `tendly serve` | 前台运行，用于 systemd 等进程管理器 |
 
-### 从 AgentDock 迁移
-
-Tendly 在 0.1.75 之前叫 AgentDock。数据完全不受影响：会话、设置、访问令牌和保存的密钥都还在 `~/.agentdock`，Tendly 会继续使用它，`AGENTDOCK_*` 环境变量也照常生效。换到新包：
-
-```bash
-npm uninstall -g @wnzzer/agentdock && npm install -g @wnzzer/tendly
-```
-
-在此之前，旧包仍会正常更新，并且已经可以用 `tendly` 和 `agentdock` 两个命令。
-
 ## 配置与远程访问
 
-状态保存在 `~/.tendly/`（改名前创建的则继续用 `~/.agentdock/`；SQLite、设置、日志），没有任何遥测。设置读取自其中的 `config.toml`，同名 `AGENTDOCK_*` 环境变量优先：
+状态保存在 `~/.tendly/`（SQLite、设置、日志），没有任何遥测。设置读取自其中的 `config.toml`，同名 `TENDLY_*` 环境变量优先：
 
 ```toml
 lan = true                  # 等同于 --lan
 port = 28789                # 或 addr = "192.168.0.9:28789"
-token = "..."               # AGENTDOCK_TOKEN
+token = "..."               # TENDLY_TOKEN
 allowed-origins = ["https://dock.example.com"]
 ```
 

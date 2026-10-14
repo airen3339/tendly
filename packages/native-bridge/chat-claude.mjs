@@ -9,10 +9,10 @@ import { ChatBase, NativeProcess, approvalScope, clip, nativeId, MAX_TEXT } from
  * here keeps the translation next to the client it translates for.
  */
 const CLAUDE_PERMISSION={ask:'default',plan:'plan',accept_edits:'acceptEdits',danger:'bypassPermissions'};
-const AGENTDOCK_PERMISSION=Object.fromEntries(Object.entries(CLAUDE_PERMISSION).map(([ours,theirs])=>[theirs,ours]));
+const TENDLY_PERMISSION=Object.fromEntries(Object.entries(CLAUDE_PERMISSION).map(([ours,theirs])=>[theirs,ours]));
 // The client calls the ask-every-time mode `default` on current builds and
 // `manual` on older ones. Both mean the same thing to a person.
-AGENTDOCK_PERMISSION.manual='ask';
+TENDLY_PERMISSION.manual='ask';
 
 export function claudeLaunch(job) {
   const args=[];let resume=job.resume_id,settingSources=false,sessionId,model,effort;
@@ -194,7 +194,7 @@ export class ClaudeChat extends ChatBase {
     // The answer comes back in the client's own vocabulary, so it is translated
     // before it is reported. An answer this bridge cannot name is left to the
     // status message to settle rather than guessed at here.
-    const applied=AGENTDOCK_PERMISSION[typeof result?.mode==='string'?result.mode:mode];
+    const applied=TENDLY_PERMISSION[typeof result?.mode==='string'?result.mode:mode];
     if(applied)this.permissionMode=applied;
     this.settings(this.models,this.model,this.effort);
   }
@@ -234,7 +234,7 @@ export class ClaudeChat extends ChatBase {
     // it made itself. Following its word rather than the last request is what
     // keeps the interface from claiming a mode the client is not in.
     if(message.type==='system'&&typeof message.permissionMode==='string'){
-      const mode=AGENTDOCK_PERMISSION[message.permissionMode];
+      const mode=TENDLY_PERMISSION[message.permissionMode];
       if(mode&&mode!==this.permissionMode){this.permissionMode=mode;this.settings(this.models,this.model,this.effort);}
     }
     if(message.type==='system'&&message.subtype==='init'){

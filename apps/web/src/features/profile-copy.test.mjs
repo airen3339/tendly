@@ -4,7 +4,7 @@ import { copiedEnvironment, copiedProfilePayload, copyName } from './profile-cop
 
 const source = {
   id: 'relay-cc', name: 'Relay CC', provider: 'claude_code', endpoint_url: 'https://relay.example', model: 'opus-fixture', effort: 'high',
-  permission_mode: 'plan', secret_ref: 'env:AGENTDOCK_SECRET_RELAY', proxy_url: 'http://127.0.0.1:7890', models: ['opus-fixture', 'sonnet-fixture'],
+  permission_mode: 'plan', secret_ref: 'env:TENDLY_SECRET_RELAY', proxy_url: 'http://127.0.0.1:7890', models: ['opus-fixture', 'sonnet-fixture'],
   model_aliases: { fast: 'sonnet-fixture' }, created_at: '2026-01-01T00:00:00Z',
   environment: {
     ANTHROPIC_DEFAULT_OPUS_MODEL: { kind: 'main_model' }, ANTHROPIC_DEFAULT_HAIKU_MODEL: { kind: 'literal', value: 'haiku-fixture' },
@@ -16,7 +16,7 @@ const draft = overrides => ({ name: 'Relay CC copy', provider: 'claude_code', en
 test('a copy on the same client and endpoint keeps everything but its name', () => {
   const payload = copiedProfilePayload(source, draft({}));
   assert.equal(payload.name, 'Relay CC copy');
-  assert.equal(payload.secret_ref, 'env:AGENTDOCK_SECRET_RELAY');
+  assert.equal(payload.secret_ref, 'env:TENDLY_SECRET_RELAY');
   assert.equal(payload.permission_mode, 'plan');
   assert.equal(payload.effort, 'high');
   assert.equal(payload.proxy_url, 'http://127.0.0.1:7890');
@@ -38,7 +38,7 @@ test('a copy for another client drops what only the old client reads and keeps w
   assert.equal(payload.model, null);
   assert.equal(payload.permission_mode, 'native');
   assert.deepEqual(payload.environment, { MY_FLAG: { kind: 'literal', value: '1' } });
-  assert.equal(payload.secret_ref, 'env:AGENTDOCK_SECRET_RELAY');
+  assert.equal(payload.secret_ref, 'env:TENDLY_SECRET_RELAY');
 });
 
 test('a copy onto Claude Code gets slots that follow its main model, as a new profile does', () => {

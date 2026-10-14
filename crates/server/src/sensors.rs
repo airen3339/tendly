@@ -492,7 +492,7 @@ mod tests {
 
     #[test]
     fn hwmon_fans_are_read_with_their_labels_and_limits() {
-        let root = std::env::temp_dir().join(format!("agentdock-hwmon-{}", uuid::Uuid::new_v4()));
+        let root = std::env::temp_dir().join(format!("tendly-hwmon-{}", uuid::Uuid::new_v4()));
         let write = |path: &str, value: &str| {
             let path = root.join(path);
             fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -550,7 +550,7 @@ mod tests {
     }
 
     fn tree(files: &[(&str, &str)]) -> std::path::PathBuf {
-        let root = std::env::temp_dir().join(format!("agentdock-sys-{}", uuid::Uuid::new_v4()));
+        let root = std::env::temp_dir().join(format!("tendly-sys-{}", uuid::Uuid::new_v4()));
         for (path, value) in files {
             let path = root.join(path);
             fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -583,10 +583,7 @@ mod tests {
             "on the charger the draw is unknown"
         );
         fs::remove_dir_all(&root).unwrap();
-        assert_eq!(
-            battery_draw(Path::new("/nonexistent/agentdock/power")),
-            None
-        );
+        assert_eq!(battery_draw(Path::new("/nonexistent/tendly/power")), None);
     }
 
     #[test]
@@ -607,10 +604,7 @@ mod tests {
         // 100 to the wrap and 400 after: 500 microjoules in about a second.
         assert!((watts - 0.0005).abs() < 0.0001, "{watts}");
         fs::remove_dir_all(&root).unwrap();
-        assert_eq!(
-            chip.rapl_watts(Path::new("/nonexistent/agentdock/rapl")),
-            None
-        );
+        assert_eq!(chip.rapl_watts(Path::new("/nonexistent/tendly/rapl")), None);
     }
 
     #[test]
@@ -674,18 +668,18 @@ mod tests {
                 celsius: Some(61.0),
             }]
         );
-        assert!(amd_gpus(Path::new("/nonexistent/agentdock/drm")).is_empty());
+        assert!(amd_gpus(Path::new("/nonexistent/tendly/drm")).is_empty());
     }
 
     #[test]
     fn a_missing_hwmon_tree_has_no_fans() {
-        assert!(hwmon_fans(Path::new("/nonexistent/agentdock/hwmon")).is_empty());
+        assert!(hwmon_fans(Path::new("/nonexistent/tendly/hwmon")).is_empty());
     }
 
     /// Hosted CI runners are virtual machines without sensors, so this only
     /// runs when asked for, on real hardware:
-    /// `cargo test -p agentdock-server -- --ignored sensors`. Set
-    /// `AGENTDOCK_NO_FANS=1` on a machine that has none, such as a MacBook Air.
+    /// `cargo test -p tendly-server -- --ignored sensors`. Set
+    /// `TENDLY_NO_FANS=1` on a machine that has none, such as a MacBook Air.
     #[test]
     #[ignore = "needs a machine with real sensors"]
     fn this_machine_reports_real_temperatures_and_fans() {
@@ -739,10 +733,10 @@ mod tests {
             }
         }
         let fans = fans();
-        if std::env::var_os("AGENTDOCK_NO_FANS").is_none() {
+        if std::env::var_os("TENDLY_NO_FANS").is_none() {
             assert!(
                 !fans.is_empty(),
-                "no fans read; set AGENTDOCK_NO_FANS=1 if there are none"
+                "no fans read; set TENDLY_NO_FANS=1 if there are none"
             );
         }
         for fan in &fans {

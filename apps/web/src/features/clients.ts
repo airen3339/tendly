@@ -1,4 +1,4 @@
-import type { AgentProviderKind, ProviderKind } from "@agentdock/protocol";
+import type { AgentProviderKind, ProviderKind } from "@tendly/protocol";
 // Type only: icon-palette.ts reads this registry, so a value import would be circular.
 import type { ICON_PALETTE } from "./icon-palette";
 
@@ -95,7 +95,7 @@ const CLIENTS: Record<AgentProviderKind, ClientInfo> = {
     tabTint: "#E8F0FA",
     colorToken: "pi",
     // The provider Tendly writes for a profile's endpoint (server adapters/pi.rs).
-    endpointModelPrefix: "agentdock/",
+    endpointModelPrefix: "tendly/",
     apis: [
       { value: "openai-completions", label: "OpenAI Chat Completions" },
       { value: "openai-responses", label: "OpenAI Responses" },

@@ -13,8 +13,8 @@ use crate::{
     agent::{Caller, endpoint_view, text},
     db,
 };
-use agentdock_domain::{EndpointProfile, ProviderKind};
 use serde_json::{Map, Value, json};
+use tendly_domain::{EndpointProfile, ProviderKind};
 use uuid::Uuid;
 
 fn object(properties: Value, required: &[&str]) -> Value {
@@ -24,7 +24,7 @@ fn object(properties: Value, required: &[&str]) -> Value {
 pub fn tools() -> Vec<Value> {
     vec![
         crate::agent::tool(
-            "agentdock_endpoint",
+            "tendly_endpoint",
             "Create, change, delete, test or import Tendly endpoint profiles (where a Claude Code or Codex session sends requests, with which key and model). Create, update, delete and import are confirmed by the person in the Tendly window, which is also where they type any API key: never ask for a key in the conversation. test lists the models an existing profile can reach.",
             object(
                 json!({
@@ -44,7 +44,7 @@ pub fn tools() -> Vec<Value> {
             ),
         ),
         crate::agent::tool(
-            "agentdock_preferences",
+            "tendly_preferences",
             "Read or change Tendly's settings: what new sessions start with, per client (default endpoint profile, reasoning effort, permission mode), and how the interface and its terminals look. Session defaults apply to sessions started afterwards; the appearance changes every open window at once. Changes are shown to the person with an undo; making tools run without asking is confirmed first.",
             object(
                 json!({
@@ -60,7 +60,7 @@ pub fn tools() -> Vec<Value> {
             ),
         ),
         crate::agent::tool(
-            "agentdock_workspace",
+            "tendly_workspace",
             "Add a directory on this machine as a Tendly workspace, so sessions can be opened in it. It must be inside the roots the server allows.",
             object(
                 json!({
@@ -157,7 +157,7 @@ async fn fresh_secret_name(state: &AppState, label: &str) -> Result<String, ApiE
     }
     let slug = slug.trim_end_matches('_');
     let base = format!(
-        "AGENTDOCK_SECRET_{}",
+        "TENDLY_SECRET_{}",
         if slug.is_empty() { "KEY" } else { slug }
     );
     if !taken.contains(&base) {

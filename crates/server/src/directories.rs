@@ -46,13 +46,13 @@ pub struct DirectoryListing {
 /// An explicitly empty or invalid configuration fails closed instead of
 /// unexpectedly making the server's home directory browsable.
 pub fn roots() -> Result<Vec<PathBuf>, IoError> {
-    let candidates = match env::var_os("AGENTDOCK_BROWSE_ROOTS") {
+    let candidates = match env::var_os("TENDLY_BROWSE_ROOTS") {
         Some(value) => {
             let paths: Vec<_> = env::split_paths(&value).collect();
             if paths.is_empty() || paths.iter().any(|path| path.as_os_str().is_empty()) {
                 return Err(IoError::new(
                     400,
-                    "AGENTDOCK_BROWSE_ROOTS must contain at least one existing directory",
+                    "TENDLY_BROWSE_ROOTS must contain at least one existing directory",
                 ));
             }
             paths
@@ -81,13 +81,13 @@ pub fn roots() -> Result<Vec<PathBuf>, IoError> {
 /// Defaults to the browsing roots, so a host that never configures either keeps
 /// one boundary rather than two that can disagree.
 pub fn workspace_roots(browse: &[PathBuf]) -> Result<Vec<PathBuf>, IoError> {
-    match env::var_os("AGENTDOCK_WORKSPACE_ROOTS") {
+    match env::var_os("TENDLY_WORKSPACE_ROOTS") {
         Some(value) => {
             let paths: Vec<_> = env::split_paths(&value).collect();
             if paths.is_empty() || paths.iter().any(|path| path.as_os_str().is_empty()) {
                 return Err(IoError::new(
                     400,
-                    "AGENTDOCK_WORKSPACE_ROOTS must contain at least one existing directory",
+                    "TENDLY_WORKSPACE_ROOTS must contain at least one existing directory",
                 ));
             }
             canonical_roots(paths)
@@ -293,7 +293,7 @@ fn protected(path: &Path) -> bool {
         ".azure",
         ".config",
         ".kube",
-        ".agentdock",
+        ".tendly",
         ".docker",
         "credentials",
         "credential",
@@ -319,7 +319,7 @@ mod tests {
     struct TempDirectory(PathBuf);
     impl TempDirectory {
         fn new() -> Self {
-            let path = env::temp_dir().join(format!("agentdock-browse-test-{}", Uuid::new_v4()));
+            let path = env::temp_dir().join(format!("tendly-browse-test-{}", Uuid::new_v4()));
             fs::create_dir(&path).unwrap();
             Self(dunce::canonicalize(path).unwrap())
         }
@@ -342,7 +342,7 @@ mod tests {
             "Alpha/nested",
             ".ssh",
             ".codex",
-            ".agentdock",
+            ".tendly",
             ".Claude",
         ] {
             fs::create_dir(temp.0.join(name)).unwrap();
@@ -469,7 +469,7 @@ mod tests {
 
     #[test]
     fn workspace_roots_bound_a_candidate_to_a_root_or_below_it() {
-        let base = std::env::temp_dir().join(format!("agentdock-roots-{}", uuid::Uuid::new_v4()));
+        let base = std::env::temp_dir().join(format!("tendly-roots-{}", uuid::Uuid::new_v4()));
         let allowed = base.join("allowed");
         fs::create_dir_all(allowed.join("nested/deep")).unwrap();
         fs::create_dir_all(base.join("allowed-sibling")).unwrap();

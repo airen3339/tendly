@@ -7,8 +7,8 @@
 //! the adapter and never names a client, so adding one is a file here and an
 //! entry in `adapter`.
 use crate::{ApiError, AppState};
-use agentdock_domain::{EndpointProfile, ProviderKind};
 use std::{collections::BTreeMap, path::Path};
+use tendly_domain::{EndpointProfile, ProviderKind};
 
 mod claude_code;
 mod codex;
@@ -171,7 +171,7 @@ pub trait ClientAdapter: Sync {
     fn equip_tools(
         &self,
         state: &AppState,
-        session: agentdock_domain::SessionId,
+        session: tendly_domain::SessionId,
         program: &str,
         identity: &[(String, String)],
         args: &mut Vec<String>,

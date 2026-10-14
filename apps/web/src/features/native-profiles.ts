@@ -1,4 +1,4 @@
-import type { EndpointProfile, NativeHistorySource, ProviderKind } from "@agentdock/protocol";
+import type { EndpointProfile, NativeHistorySource, ProviderKind } from "@tendly/protocol";
 import { parseEnvironmentRows, type EnvironmentRow } from "./environment-model";
 
 export function profileEnvironmentDraftChanged(rows: EnvironmentRow[], initial: EnvironmentRow[]): boolean {
@@ -27,7 +27,7 @@ export function nativeProfileUpdatePayload(name: string, rows: EnvironmentRow[],
  *
  * A profile having a `native_config` only says it runs against a client's own
  * configuration directory — not whose directory that is. An account created
- * here gets its own under `.agentdock/accounts/<id>` and is the only thing
+ * here gets its own under `.tendly/accounts/<id>` and is the only thing
  * signing in through it; an imported one points at a directory the host already
  * had, where a profile switcher or a native re-login changes this account too.
  *

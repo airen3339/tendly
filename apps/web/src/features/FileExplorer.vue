@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import type { ComponentPublicInstance } from "vue";
-import type { FileEntry } from "@agentdock/protocol";
+import type { FileEntry } from "@tendly/protocol";
 import { errorMessage, formatBytes, request, workspacePath } from "./api";
 import { flattenTree, isTreeChild, sortTreeEntries, treeAncestors, treeParent } from "./tree-model";
 import type { TreeDirectory, TreeRow } from "./tree-model";
@@ -83,7 +83,7 @@ async function deleteEntry() {
   const entry = rowMenu.value?.entry; if (!entry) return;
   deleting.value = true;
   try {
-    await request(workspacePath(props.workspaceId) + "/file" + "?path=" + encodeURIComponent(entry.path), { method: "DELETE", headers: { "X-AgentDock-Client": "web" } });
+    await request(workspacePath(props.workspaceId) + "/file" + "?path=" + encodeURIComponent(entry.path), { method: "DELETE", headers: { "X-Tendly-Client": "web" } });
     closeRowMenu();
     await loadDirectory(treeParent(entry.path) ?? "", true);
   } catch (cause) { error.value = errorMessage(cause); }
@@ -366,7 +366,7 @@ async function focusRoot() {
 
 function drag(event: DragEvent, file: FileEntry) {
   if (file.kind !== "file") return;
-  event.dataTransfer?.setData("application/agentdock-pane", JSON.stringify(filePane(props.workspaceId, file.path)));
+  event.dataTransfer?.setData("application/tendly-pane", JSON.stringify(filePane(props.workspaceId, file.path)));
   if (event.dataTransfer) event.dataTransfer.effectAllowed = "copy";
 }
 

@@ -1,8 +1,8 @@
 //! Supported metadata APIs only. Import links history; it never adopts an OS process.
 use crate::{ApiError, AppState};
-use agentdock_domain::{ProviderKind, Session, WorkspaceId};
 use serde::{Deserialize, Serialize};
 use std::{env, ffi::OsString, path::PathBuf, time::Duration};
+use tendly_domain::{ProviderKind, Session, WorkspaceId};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[derive(Clone)]
@@ -124,7 +124,7 @@ pub async fn list(
     let mut command = crate::bridge::node_command(&[], &state.native_bridge);
     let mut child = command.spawn().map_err(|_| {
         ApiError::bad(
-            "Native history needs Node.js and the installed native bridge; AGENTDOCK_JS_RUNTIME can override the runtime",
+            "Native history needs Node.js and the installed native bridge; TENDLY_JS_RUNTIME can override the runtime",
         )
     })?;
     let mut stdin = child
@@ -209,7 +209,7 @@ pub async fn import_with_environment(
     workspace: WorkspaceId,
     source_id: String,
     native_id: String,
-    environment: Option<agentdock_domain::EnvironmentOverrides>,
+    environment: Option<tendly_domain::EnvironmentOverrides>,
 ) -> Result<Session, ApiError> {
     if let Some(values) = &environment {
         crate::environment::validate(values)?;
@@ -246,7 +246,7 @@ pub fn resume_spec(
     state: &AppState,
     session: &Session,
     cwd: PathBuf,
-) -> Result<agentdock_runtime::SpawnSpec, ApiError> {
+) -> Result<tendly_runtime::SpawnSpec, ApiError> {
     let source = selected_source(
         state,
         session
@@ -286,7 +286,7 @@ pub fn resume_spec(
         })
         .transpose()?;
     let (environment, remove) = crate::native_config::launch_environment(key, config_env);
-    Ok(agentdock_runtime::SpawnSpec {
+    Ok(tendly_runtime::SpawnSpec {
         program,
         args,
         cwd,

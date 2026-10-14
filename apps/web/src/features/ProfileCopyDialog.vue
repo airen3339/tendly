@@ -5,7 +5,7 @@
  * source (profile-copy.ts), and is all in the full form once it is created.
  */
 import { computed, reactive, ref, watch } from "vue";
-import type { AgentProviderKind, EndpointProfile, ModelCatalog } from "@agentdock/protocol";
+import type { AgentProviderKind, EndpointProfile, ModelCatalog } from "@tendly/protocol";
 import { errorMessage, json, providerLabel, request } from "./api";
 import { AGENT_CLIENTS, clientLabel } from "./clients";
 import { copiedProfilePayload, copyName } from "./profile-copy";

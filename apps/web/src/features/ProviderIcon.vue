@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ProviderKind } from "@agentdock/protocol";
+import type { ProviderKind } from "@tendly/protocol";
 import { computed } from "vue";
 import { providerColor } from "./icon-palette";
 import { agentClient } from "./clients";

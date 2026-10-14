@@ -8,14 +8,14 @@ Remote access and what this server can and cannot reach. Back to the [README](..
 tendly --lan
 ```
 
-Binds every interface, generates an access token if `AGENTDOCK_TOKEN` does not
+Binds every interface, generates an access token if `TENDLY_TOKEN` does not
 provide one, and prints it; `tendly status` prints it again. The token is
 kept in the state directory, readable only by its owner — a background gateway
 cannot show it to you any other way, and deleting the file issues a new one.
 
 Reaching the machine at its own address needs nothing further: a `Host` that is
 an IP literal on the bound port is answered for, because DNS rebinding requires
-a *name* and cannot produce one. `AGENTDOCK_ALLOWED_ORIGINS` remains for the
+a *name* and cannot produce one. `TENDLY_ALLOWED_ORIGINS` remains for the
 hostnames a reverse proxy serves under. Cross-site requests stay blocked by the
 Origin and `sec-fetch-site` checks either way.
 
@@ -31,10 +31,10 @@ This is a **single trusted user's host workspace**, not a multi-tenant sandbox. 
 
 ### What this server can reach
 
-- **Network**: loopback only by default. A non-loopback bind refuses to start without an access token (`AGENTDOCK_TOKEN`, or one it generates), and Origin/Host must be allow-listed.
-- **Directory picker**: limited to `AGENTDOCK_BROWSE_ROOTS`, defaulting to the working directory and the server user's home.
-- **New workspaces**: limited to `AGENTDOCK_WORKSPACE_ROOTS`, defaulting to the browsing roots. Workspaces created before this rule keep working; it governs new ones.
-- **File read/write**: confined to a workspace root. Paths are canonicalised and anything resolving outside is refused, as are `.git`, `.agentdock` and client configuration files. Deleting never follows a symlink out of the tree.
+- **Network**: loopback only by default. A non-loopback bind refuses to start without an access token (`TENDLY_TOKEN`, or one it generates), and Origin/Host must be allow-listed.
+- **Directory picker**: limited to `TENDLY_BROWSE_ROOTS`, defaulting to the working directory and the server user's home.
+- **New workspaces**: limited to `TENDLY_WORKSPACE_ROOTS`, defaulting to the browsing roots. Workspaces created before this rule keep working; it governs new ones.
+- **File read/write**: confined to a workspace root. Paths are canonicalised and anything resolving outside is refused, as are `.git`, `.tendly` and client configuration files. Deleting never follows a symlink out of the tree.
 - **Agent processes are not confined by any of the above.** `claude` and `codex` run with your full user permissions. Tendly sets their working directory and forwards their permission prompts; it never answers one for you, and it never reads their credentials. What an Agent can reach is decided by that client's own permission settings, not by this server.
 
 Anyone who can reach the API has the authority of the user running the server. Treat the token as that user's credentials.

@@ -5,7 +5,7 @@ import { isAbsolute, join } from 'node:path';
 import { runChatBridge } from '../chat.mjs';
 import { MAX_INPUT_LINE } from '../chat-common.mjs';
 
-if(process.env.AGENTDOCK_CHAT_TEST_INHERITED!=='kept')throw Error('This fixture is only available to the isolated chat test harness.');
+if(process.env.TENDLY_CHAT_TEST_INHERITED!=='kept')throw Error('This fixture is only available to the isolated chat test harness.');
 let first=true,buffer=Buffer.alloc(0);
 const rewrite=new Transform({
   transform(chunk,_encoding,callback){

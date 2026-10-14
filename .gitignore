@@ -1,4 +1,10 @@
 /target
+/.tendly
+/tendly-data
+tendly.db
+tendly.db-shm
+tendly.db-wal
+# State left from before the rename to Tendly: it holds tokens and secrets.
 /.agentdock
 /agentdock-data
 agentdock.db

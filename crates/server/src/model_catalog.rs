@@ -1,9 +1,9 @@
 //! Read-only model discovery. Explicit UI action only; never runs inference.
 use crate::{ApiError, providers};
-use agentdock_domain::EndpointProfile;
 use serde::Serialize;
 use serde_json::Value;
 use std::{collections::BTreeSet, time::Duration};
+use tendly_domain::EndpointProfile;
 use url::Url;
 const MAX_BYTES: usize = 2 * 1024 * 1024;
 
@@ -274,7 +274,7 @@ async fn unconfigured_models(
     profile: &EndpointProfile,
 ) -> Result<ModelCatalog, ApiError> {
     let directory = providers::private_dir(
-        &std::env::temp_dir().join(format!("agentdock-models-{}", uuid::Uuid::new_v4())),
+        &std::env::temp_dir().join(format!("tendly-models-{}", uuid::Uuid::new_v4())),
     )?;
     let mut command =
         tokio::process::Command::new(crate::clients::program(state_dir, &profile.provider));
@@ -287,7 +287,7 @@ async fn unconfigured_models(
         .copied()
         .collect();
     for (key, _) in std::env::vars().filter(|(k, _)| {
-        prefixes.iter().any(|prefix| k.starts_with(prefix)) || crate::bridge::is_agentdock_secret(k)
+        prefixes.iter().any(|prefix| k.starts_with(prefix)) || crate::bridge::is_tendly_secret(k)
     }) {
         command.env_remove(key);
     }
@@ -442,10 +442,10 @@ async fn fetch(profile: &EndpointProfile, secret: Option<&str>) -> Result<ModelC
 async fn native_models(
     state: &crate::AppState,
     profile: &EndpointProfile,
-    reference: &agentdock_domain::NativeConfigReference,
+    reference: &tendly_domain::NativeConfigReference,
 ) -> Result<ModelCatalog, ApiError> {
     let directory = providers::private_dir(
-        &std::env::temp_dir().join(format!("agentdock-models-{}", uuid::Uuid::new_v4())),
+        &std::env::temp_dir().join(format!("tendly-models-{}", uuid::Uuid::new_v4())),
     )?;
     let spec = crate::native_config::build(state, &profile.provider, reference, directory.clone())?;
     let client = crate::adapters::agent(profile.provider)?;
@@ -633,7 +633,7 @@ mod tests {
     }
 
     use super::*;
-    use agentdock_domain::ProviderKind;
+    use tendly_domain::ProviderKind;
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
         net::TcpListener,

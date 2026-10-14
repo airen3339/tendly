@@ -1,4 +1,4 @@
-import type { EnvironmentOverrides, EnvironmentValue } from "@agentdock/protocol";
+import type { EnvironmentOverrides, EnvironmentValue } from "@tendly/protocol";
 import { AGENT_CLIENTS, clientInfo } from "./clients";
 
 export interface EnvironmentRow { id: string; name: string; kind: EnvironmentValue["kind"]; value: string }
@@ -17,13 +17,13 @@ export function parseEnvironmentRows(rows: EnvironmentRow[]): { environment: Env
     if (!/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(key)) { errors.add("Use a valid environment variable name."); continue; }
     if (seen.has(key)) errors.add("Environment variable names must be unique.");
     seen.add(key);
-    if (RESERVED.has(upper) || upper.startsWith("AGENTDOCK_")) errors.add("Account directories, workspace identity and Tendly internal variables cannot be overridden.");
+    if (RESERVED.has(upper) || upper.startsWith("TENDLY_")) errors.add("Account directories, workspace identity and Tendly internal variables cannot be overridden.");
     if (row.kind === "unset") entries.push([key, { kind: "unset" }]);
     else if (row.kind === "main_model") entries.push([key, { kind: "main_model" }]);
     else if (row.kind === "main_model_context") entries.push([key, { kind: "main_model_context" }]);
     else if (row.kind === "secret_ref") {
       const reference = row.value.trim();
-      if (!/^env:AGENTDOCK_SECRET_[A-Z0-9_]+$/.test(reference)) errors.add("Use env:AGENTDOCK_SECRET_NAME for a secret reference.");
+      if (!/^env:TENDLY_SECRET_[A-Z0-9_]+$/.test(reference)) errors.add("Use env:TENDLY_SECRET_NAME for a secret reference.");
       entries.push([key, { kind: "secret_ref", reference }]);
     } else if (row.kind === "literal") {
       if (bytes(row.value) > 8192 || row.value.includes("\0")) errors.add("Environment values must be at most 8192 bytes and cannot contain NUL.");

@@ -27,7 +27,7 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   try {
     response = await fetch(`/api${path}`, {
       ...init,
-      headers: { "X-AgentDock-Client": "web", ...(init.body ? { "Content-Type": "application/json" } : {}), ...init.headers },
+      headers: { "X-Tendly-Client": "web", ...(init.body ? { "Content-Type": "application/json" } : {}), ...init.headers },
     });
   } catch (cause) {
     if (aborted(cause, init.signal)) throw cause;

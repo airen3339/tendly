@@ -49,7 +49,7 @@ export function normalizeClaudeLimits(payload, mappingBasis = 'status_line_windo
   };
 }
 export function claudeStatusPath(directory, configEnv) {
-  return join(configEnv ?? directory, 'agentdock', 'statusline.json');
+  return join(configEnv ?? directory, 'tendly', 'statusline.json');
 }
 
 const CLAUDE_OAUTH_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';

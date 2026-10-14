@@ -128,7 +128,7 @@ async fn archive_api_does_not_stop_or_replace_a_running_native_process() {
         .runtime
         .start(
             id.to_string(),
-            agentdock_runtime::SpawnSpec {
+            tendly_runtime::SpawnSpec {
                 program: waiting_process(&["-i"]).0,
                 args: waiting_process(&["-i"]).1,
                 cwd: fixture.path.join("repo"),
@@ -282,7 +282,7 @@ async fn archive_api_uses_existing_authentication_and_csrf_guards() {
             .header("content-type", "application/json")
             .header("origin", origin);
         if client_header {
-            request = request.header("x-agentdock-client", "web");
+            request = request.header("x-tendly-client", "web");
         }
         let request = request
             .body(Body::from(json!({"archived":true}).to_string()))

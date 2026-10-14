@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
-import type { GitRemote, GitTag } from "@agentdock/protocol";
+import type { GitRemote, GitTag } from "@tendly/protocol";
 import { errorMessage } from "./api";
 import { gitGet, gitPost, shortHash, useGit } from "./git-context";
 import { relativeTime } from "./git-model";

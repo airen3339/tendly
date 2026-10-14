@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import type { ModelCatalog } from '@agentdock/protocol';
+import type { ModelCatalog } from '@tendly/protocol';
 import Icon from './Icon.vue';
 import { effortLabel } from './reasoning-effort';
 import { useI18n } from '../i18n';

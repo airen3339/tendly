@@ -1,6 +1,6 @@
 # Configuration
 
-Commands, state directory, credentials, host-configuration reuse, per-session environment and every `AGENTDOCK_*` variable. Back to the [README](../README.md).
+Commands, state directory, credentials, host-configuration reuse, per-session environment and every `TENDLY_*` variable. Back to the [README](../README.md).
 
 ## Commands
 
@@ -22,7 +22,7 @@ If a start fails, the command prints the reason from the log and exits with a no
 
 ### Updating
 
-`tendly update`, or **Settings → Updates** in the page, runs `npm install -g @wnzzer/tendly@<latest> (or `@wnzzer/agentdock`, for an install made under the old name)` with `--prefix` set to wherever this copy is installed, so it replaces this install rather than adding one where npm points today. The latest version is looked up through the server's own npm, which keeps any registry mirror or proxy npm is configured with. A single-file release or a source build is not updated; the page shows the release link instead.
+`tendly update`, or **Settings → Updates** in the page, runs `npm install -g @wnzzer/tendly@<latest>` with `--prefix` set to wherever this copy is installed, so it replaces this install rather than adding one where npm points today. The latest version is looked up through the server's own npm, which keeps any registry mirror or proxy npm is configured with. A single-file release or a source build is not updated; the page shows the release link instead.
 
 Installing does not restart anything: a restart stops every running session, so the new version waits on disk until you choose. In the page, **Restart now** says how many sessions it will stop and asks again. It restarts a background gateway (`tendly` / `tendly start`) through a detached `tendly restart`; a gateway systemd runs as `tendly serve` exits with status 75 so the unit restarts it (`Restart=always` or `Restart=on-failure`). Anything else — a `serve` in a terminal, another supervisor — is restarted by hand.
 
@@ -32,13 +32,13 @@ Tarballs with `SHA256SUMS` are also attached to every [release](https://github.c
 
 ## State and credentials
 
-New installations initialize state at **`~/.tendly/`** (an existing `~/.agentdock/`, from before the rename, stays in use), independently of project directories. Run **`pnpm run init`** (not `pnpm init`, which is pnpm's package-initialization command), or `tendly-server init` for a built binary; first server startup can also initialize it. This creates state only, not a system service or a downloaded installation.
+New installations initialize state at **`~/.tendly/`**, independently of project directories. Run **`pnpm run init`** (not `pnpm init`, which is pnpm's package-initialization command), or `tendly-server init` for a built binary; first server startup can also initialize it. This creates state only, not a system service or a downloaded installation.
 
-Path priority: `AGENTDOCK_STATE_DIR` → `AGENTDOCK_HOME` → an existing `./.agentdock/agentdock.db` for legacy compatibility → `~/.agentdock`. Existing local data is never silently moved. Set `AGENTDOCK_HOME` explicitly to use the home directory while running from an older checkout. Keep the selected state directory between restarts:
+Path priority: `TENDLY_STATE_DIR` → `TENDLY_HOME` → an existing `./.tendly/tendly.db` for legacy compatibility → `~/.tendly`. Existing local data is never silently moved. Set `TENDLY_HOME` explicitly to use the home directory while running from an older checkout. Keep the selected state directory between restarts:
 
 ```text
-~/.agentdock/
-├── agentdock.db
+~/.tendly/
+├── tendly.db
 ├── sessions/<session-id>/   # generated native CLI configuration/history
 │   └── configurations/<revision>/ # fresh isolated home after confirmed configuration switches
 └── accounts/<account-id>/   # private manifest and native-owned account configuration
@@ -46,10 +46,10 @@ Path priority: `AGENTDOCK_STATE_DIR` → `AGENTDOCK_HOME` → an existing `./.ag
 
 Configuration directories are 0700, generated Codex config files are 0600. The native client manages its login cache. These paths can contain credentials; don't commit/share them. Use SQLite Online Backup for the DB and protect backups of native state separately.
 
-API-key profiles hold a **reference**, e.g. `env:AGENTDOCK_SECRET_WORK`, never the key itself. The key behind it lives in one of two places:
+API-key profiles hold a **reference**, e.g. `env:TENDLY_SECRET_WORK`, never the key itself. The key behind it lives in one of two places:
 
 - **Saved in Tendly** (the default in the profile form): paste the key and it is written to `<state>/secrets.toml` (0600, owner only) under a name made from the profile's name. It is usable at once, with no restart, and the API only ever lists names, never values. Deleting a profile removes a saved key no other profile uses.
-- **A server environment variable**: set `AGENTDOCK_SECRET_WORK` for the server (or as `secret-work` in `config.toml`) and restart. When both exist, the environment wins.
+- **A server environment variable**: set `TENDLY_SECRET_WORK` for the server (or as `secret-work` in `config.toml`) and restart. When both exist, the environment wins.
 
 Tendly resolves the selected reference on the backend and injects its value into the selected child-process destination variable.
 
@@ -64,7 +64,7 @@ Importing also selects that profile for future new sessions of this client in th
 Importing **does not rebind existing sessions**. If a session still asks for login, check its configuration badge: an isolated session uses a separate login environment even when a host profile exists. Create a new session with the imported host profile to reuse its valid sign-in. The UI now distinguishes this case explicitly.
 
 - Discovery checks directory availability only. It does not inspect credential contents, claim that login is valid, launch a client, or perform inference.
-- Source resolution follows the same deployment settings as native history: `AGENTDOCK_CODEX_HISTORY_DIR` → `CODEX_HOME` → `~/.codex`, and `AGENTDOCK_CLAUDE_HISTORY_DIR` → `CLAUDE_CONFIG_DIR` → `~/.claude`. These are the **server user's** directories, not the browser machine's.
+- Source resolution follows the same deployment settings as native history: `TENDLY_CODEX_HISTORY_DIR` → `CODEX_HOME` → `~/.codex`, and `TENDLY_CLAUDE_HISTORY_DIR` → `CLAUDE_CONFIG_DIR` → `~/.claude`. These are the **server user's** directories, not the browser machine's.
 - A reference pins the provider, source ID, canonical directory and original directory-environment context. A changed/deleted source is rejected at create/start. The **directory's contents remain live**, not an immutable copy; native configuration changes can affect subsequent starts.
 - The original unset-versus-explicit `CODEX_HOME`/`CLAUDE_CONFIG_DIR` state is preserved. On macOS, explicitly setting even the default Claude directory can select a different Keychain login context. Explicit absolute paths keep their original spelling; relative directory variables are rejected because the workspace changes the child's working directory.
 - Tendly neither creates a new config home nor rewrites the source settings. The native client still manages its own credential refresh and conversation history. Existing login is reused when valid; reauthorization can still be required by the provider.
@@ -80,26 +80,26 @@ Everything a deployment decides — whether it is reachable from other machines,
 ```toml
 lan = true              # reachable from other machines (same as --lan)
 port = 28789            # or addr = "192.168.0.9:28789"
-token = "..."           # AGENTDOCK_TOKEN
+token = "..."           # TENDLY_TOKEN
 instance_label = "novel box"
 allowed-origins = ["http://box.local:28789"]
 ```
 
-Any other key names the `AGENTDOCK_` variable it spells (`shell`, `claude-bin`, `browse-roots`, …); dashes and underscores are the same, a full `AGENTDOCK_*` name is accepted as written, and a list becomes the comma-separated form those variables already take. Keys always land under that prefix, so this file cannot set a variable outside Tendly's namespace.
+Any other key names the `TENDLY_` variable it spells (`shell`, `claude-bin`, `browse-roots`, …); dashes and underscores are the same, a full `TENDLY_*` name is accepted as written, and a list becomes the comma-separated form those variables already take. Keys always land under that prefix, so this file cannot set a variable outside Tendly's namespace.
 
 ### Running agent clients in the server itself
 
 Structured Codex, Claude Code and Pi conversations run through the Node chat bridge by default. Each client can instead be driven directly by the server, with no Node process per conversation:
 
 ```toml
-codex_adapter = "rust"    # AGENTDOCK_CODEX_ADAPTER
-claude_adapter = "rust"   # AGENTDOCK_CLAUDE_ADAPTER
-pi_adapter = "rust"       # AGENTDOCK_PI_ADAPTER
+codex_adapter = "rust"    # TENDLY_CODEX_ADAPTER
+claude_adapter = "rust"   # TENDLY_CLAUDE_ADAPTER
+pi_adapter = "rust"       # TENDLY_PI_ADAPTER
 ```
 
 Any other value, or none, keeps the bridge, so going back is one line. The choice is read when a conversation starts: one already running keeps the layer it began on. A change in this file takes effect after a restart; the environment variable takes effect when it is set for the server. Account sign-in, native history and file search still use the bridge either way.
 
-Precedence is command line → environment → file → default. `--lan` outranks the file only about the host: a port written down is still the port that was meant. `AGENTDOCK_HOME` and `AGENTDOCK_STATE_DIR` cannot come from the file, which lives inside the directory they choose.
+Precedence is command line → environment → file → default. `--lan` outranks the file only about the host: a port written down is still the port that was meant. `TENDLY_HOME` and `TENDLY_STATE_DIR` cannot come from the file, which lives inside the directory they choose.
 
 ## Advanced environment configuration
 
@@ -108,9 +108,9 @@ Expand **Advanced environment** in an endpoint profile, new-session form or nati
 - Profile environment defaults are merged with new-session overrides and snapshotted into that session's effective explicit map. Later profile edits do not change existing sessions. Editing an existing session **replaces the entire effective map**, not a partial merge.
 - History loading with no overrides omits the environment field and preserves an already-imported session's map. Repeating an import with different explicit overrides returns a conflict (409); it never silently changes a running session.
 - The inherited backend environment is not copied into SQLite or exposed by the editor. Another terminal's exports, shell startup configuration and an old session's temporary environment cannot be reconstructed from history. Native configuration files retain the CLI's own precedence; an environment overlay does not rewrite those files or promise to override every native setting.
-- **Literal** assigns the exact value: `$PATH`, `${NAME}`, `~` and command-looking text are not shell-expanded. Literal values are plaintext local metadata, so never enter credentials there. **Secret reference** accepts only `env:AGENTDOCK_SECRET_NAME`; configure that variable for the backend and it is resolved only at launch, never returned as an editor value. **Unset** explicitly removes a child-process variable.
+- **Literal** assigns the exact value: `$PATH`, `${NAME}`, `~` and command-looking text are not shell-expanded. Literal values are plaintext local metadata, so never enter credentials there. **Secret reference** accepts only `env:TENDLY_SECRET_NAME`; configure that variable for the backend and it is resolved only at launch, never returned as an editor value. **Unset** explicitly removes a child-process variable.
 - Deleting an override is not the same as **Unset**. In a new-session draft it reveals any profile default; in an existing session's replacement map it drops that explicit value and leaves the base launch environment to apply. Native config-file settings still follow native-client behavior.
-- Names use `[A-Za-z_][A-Za-z0-9_]{0,127}`. `HOME`, `USERPROFILE`, `PWD`, `OLDPWD`, `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `CLAUDECODE` and all `AGENTDOCK_*` names are reserved, case-insensitively. Names containing `TOKEN`, `SECRET`, `PASSWORD`, `PRIVATE_KEY`, `API_KEY` or `AUTHORIZATION`, and proxy/base URLs containing user information, require a secret reference instead of a literal value (or may be unset).
+- Names use `[A-Za-z_][A-Za-z0-9_]{0,127}`. `HOME`, `USERPROFILE`, `PWD`, `OLDPWD`, `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `CLAUDECODE` and all `TENDLY_*` names are reserved, case-insensitively. Names containing `TOKEN`, `SECRET`, `PASSWORD`, `PRIVATE_KEY`, `API_KEY` or `AUTHORIZATION`, and proxy/base URLs containing user information, require a secret reference instead of a literal value (or may be unset).
 - Limits: 64 explicit entries and 64 KiB of serialized JSON; literal and resolved secret values are at most 8192 UTF-8 bytes and cannot contain NUL. Profile defaults and per-session overrides must also fit the limits after merging.
 
 An optional interactive **Terminal** still follows its shell's own startup-file behavior; that does not make those files or an old terminal's exports an imported native-session snapshot.
@@ -118,27 +118,27 @@ An optional interactive **Terminal** still follows its shell's own startup-file 
 SQLite schema 6 adds explicit environment maps with empty defaults, preserving older records and snapshots. The backend advertises `session_environment` in `/api/health`; editors are disabled with an upgrade explanation when it is absent. Updating frontend files alone does not enable this API on an already-running old backend. Upgrade that backend through an orderly restart after saving/ending its active native sessions; do not interrupt them merely to enable the editor.
 
 ```text
-AGENTDOCK_DB                  # optional database path
-AGENTDOCK_HOME                # installation/state home; default ~/.agentdock for new installs
-AGENTDOCK_STATE_DIR           # optional persistent state directory
-AGENTDOCK_ADDR                # default 127.0.0.1:28789
-AGENTDOCK_TOKEN               # access token; required by a binding that reaches other machines
-AGENTDOCK_ALLOWED_ORIGINS     # optional extra browser origins, comma-separated
-AGENTDOCK_WEB_DIR             # state-dir/web if installed, else source apps/web/dist
-AGENTDOCK_NATIVE_BRIDGE       # optional path to packages/native-bridge/history.mjs
-AGENTDOCK_JS_RUNTIME          # native helper/chat/account runtime; default node (absolute path supported)
-AGENTDOCK_CHAT_BRIDGE         # optional path to packages/native-bridge/chat.mjs
-AGENTDOCK_CODEX_ADAPTER       # `rust` runs Codex conversations in the server; anything else, the bridge
-AGENTDOCK_CLAUDE_ADAPTER      # the same for Claude Code
-AGENTDOCK_PI_ADAPTER          # the same for Pi
-AGENTDOCK_ACCOUNT_BRIDGE      # optional path to packages/native-bridge/account.mjs
-AGENTDOCK_NODE_BIN            # legacy runtime override, used only if JS_RUNTIME is unset/empty
-AGENTDOCK_CODEX_HISTORY_DIR   # optional history source; otherwise CODEX_HOME or ~/.codex
-AGENTDOCK_CLAUDE_HISTORY_DIR  # optional history source; otherwise CLAUDE_CONFIG_DIR or ~/.claude
-AGENTDOCK_CLAUDE_BIN          # optional absolute path to claude
-AGENTDOCK_CODEX_BIN           # optional absolute path to codex
-AGENTDOCK_SHELL               # optional shell; defaults to SHELL or /bin/sh
-AGENTDOCK_BROWSE_ROOTS        # optional directory-picker roots, OS path-list (macOS/Linux colon-separated)
-AGENTDOCK_WORKSPACE_ROOTS     # optional roots a new workspace may sit under; defaults to the browsing roots
-AGENTDOCK_INSTANCE_LABEL      # optional UI label for isolated preview deployments
+TENDLY_DB                  # optional database path
+TENDLY_HOME                # installation/state home; default ~/.tendly for new installs
+TENDLY_STATE_DIR           # optional persistent state directory
+TENDLY_ADDR                # default 127.0.0.1:28789
+TENDLY_TOKEN               # access token; required by a binding that reaches other machines
+TENDLY_ALLOWED_ORIGINS     # optional extra browser origins, comma-separated
+TENDLY_WEB_DIR             # state-dir/web if installed, else source apps/web/dist
+TENDLY_NATIVE_BRIDGE       # optional path to packages/native-bridge/history.mjs
+TENDLY_JS_RUNTIME          # native helper/chat/account runtime; default node (absolute path supported)
+TENDLY_CHAT_BRIDGE         # optional path to packages/native-bridge/chat.mjs
+TENDLY_CODEX_ADAPTER       # `rust` runs Codex conversations in the server; anything else, the bridge
+TENDLY_CLAUDE_ADAPTER      # the same for Claude Code
+TENDLY_PI_ADAPTER          # the same for Pi
+TENDLY_ACCOUNT_BRIDGE      # optional path to packages/native-bridge/account.mjs
+TENDLY_NODE_BIN            # legacy runtime override, used only if JS_RUNTIME is unset/empty
+TENDLY_CODEX_HISTORY_DIR   # optional history source; otherwise CODEX_HOME or ~/.codex
+TENDLY_CLAUDE_HISTORY_DIR  # optional history source; otherwise CLAUDE_CONFIG_DIR or ~/.claude
+TENDLY_CLAUDE_BIN          # optional absolute path to claude
+TENDLY_CODEX_BIN           # optional absolute path to codex
+TENDLY_SHELL               # optional shell; defaults to SHELL or /bin/sh
+TENDLY_BROWSE_ROOTS        # optional directory-picker roots, OS path-list (macOS/Linux colon-separated)
+TENDLY_WORKSPACE_ROOTS     # optional roots a new workspace may sit under; defaults to the browsing roots
+TENDLY_INSTANCE_LABEL      # optional UI label for isolated preview deployments
 ```

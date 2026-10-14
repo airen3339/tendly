@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import type { EndpointProfile, Session } from "@agentdock/protocol";
+import type { EndpointProfile, Session } from "@tendly/protocol";
 import { backendCapabilities } from "./backend-capabilities";
 import { errorMessage, json, request } from "./api";
 import { useI18n } from "../i18n";

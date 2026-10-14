@@ -7,17 +7,17 @@
 use super::{AccountOperations, CatalogStep, ClientAdapter, EndpointLaunch};
 use crate::usage::{Call, FileState, Source, Tokens, empty, number, timestamp};
 use crate::{ApiError, AppState};
-use agentdock_domain::{EndpointProfile, ProviderKind};
 use serde_json::{Value, json};
 use std::sync::Arc;
+use tendly_domain::{EndpointProfile, ProviderKind};
 
 pub struct Pi;
 
 /// The provider a profile's endpoint becomes in the generated `models.json`.
-const PROVIDER: &str = "agentdock";
+const PROVIDER: &str = "tendly";
 /// The variable the generated `models.json` reads the key from, so the key
 /// itself is never written to disk.
-const KEY_VARIABLE: &str = "AGENTDOCK_PI_API_KEY";
+const KEY_VARIABLE: &str = "TENDLY_PI_API_KEY";
 
 /// Whether a launch with this profile reaches its own endpoint through the
 /// generated provider, rather than through Pi's own configuration.
@@ -82,7 +82,7 @@ impl ClientAdapter for Pi {
         "pi"
     }
     fn bin_override(&self) -> &'static str {
-        "AGENTDOCK_PI_BIN"
+        "TENDLY_PI_BIN"
     }
     fn config_key(&self) -> &'static str {
         "PI_CODING_AGENT_DIR"
@@ -91,7 +91,7 @@ impl ClientAdapter for Pi {
         ".pi/agent"
     }
     fn history_source(&self) -> (&'static str, &'static str) {
-        ("pi-default", "AGENTDOCK_PI_HISTORY_DIR")
+        ("pi-default", "TENDLY_PI_HISTORY_DIR")
     }
     fn source_order(&self) -> u8 {
         2
@@ -190,7 +190,7 @@ impl ClientAdapter for Pi {
                 environment.insert(KEY_VARIABLE.into(), secret);
                 format!("${KEY_VARIABLE}")
             }
-            None => "agentdock".into(),
+            None => "tendly".into(),
         };
         let config = json!({ "providers": { PROVIDER: {
             "baseUrl": url, "api": api_of(profile), "apiKey": key, "models": entries,
@@ -227,11 +227,11 @@ impl ClientAdapter for Pi {
         &["--mode", "rpc", "--no-session"]
     }
     fn catalog_opening(&self) -> &'static str {
-        "{\"id\":\"agentdock-models\",\"type\":\"get_available_models\"}\n"
+        "{\"id\":\"tendly-models\",\"type\":\"get_available_models\"}\n"
     }
     // Each model as `provider/id`, which is how Pi is told to run it.
     fn catalog_step(&self, packet: &Value, _stage: &mut u8) -> CatalogStep {
-        if packet.get("id").and_then(Value::as_str) != Some("agentdock-models") {
+        if packet.get("id").and_then(Value::as_str) != Some("tendly-models") {
             return CatalogStep::Wait;
         }
         if packet.get("success") != Some(&Value::Bool(true)) {
@@ -280,7 +280,7 @@ impl ClientAdapter for Pi {
     fn equip_tools(
         &self,
         _state: &AppState,
-        _session: agentdock_domain::SessionId,
+        _session: tendly_domain::SessionId,
         _program: &str,
         _identity: &[(String, String)],
         _args: &mut Vec<String>,
@@ -385,7 +385,7 @@ mod tests {
         let lines = [
             r#"{"type":"session","version":3,"id":"conv-1","timestamp":"2026-10-09T01:00:00.000Z","cwd":"/work"}"#,
             r#"{"type":"message","id":"a1","parentId":null,"timestamp":"2026-10-09T01:00:01.000Z","message":{"role":"user","content":"Hello"}}"#,
-            r#"{"type":"message","id":"a2","parentId":"a1","timestamp":"2026-10-09T01:00:02.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Hi"}],"provider":"agentdock","model":"qwen-local","usage":{"input":100,"output":20,"cacheRead":50,"cacheWrite":5,"totalTokens":175}}}"#,
+            r#"{"type":"message","id":"a2","parentId":"a1","timestamp":"2026-10-09T01:00:02.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Hi"}],"provider":"tendly","model":"qwen-local","usage":{"input":100,"output":20,"cacheRead":50,"cacheWrite":5,"totalTokens":175}}}"#,
             r#"{"type":"message","id":"a3","parentId":"a2","timestamp":"2026-10-09T01:00:03.000Z","message":{"role":"toolResult","toolCallId":"c","toolName":"bash","content":[],"isError":false}}"#,
             // A Codex line that happens to sit in a `sessions/` directory too.
             r#"{"type":"response_item","timestamp":"2026-10-09T01:00:04.000Z","payload":{"type":"message"}}"#,
@@ -412,7 +412,7 @@ mod tests {
 
     #[test]
     fn pi_lists_its_models_as_provider_and_id() {
-        let packet = json!({"id":"agentdock-models","type":"response","command":"get_available_models","success":true,
+        let packet = json!({"id":"tendly-models","type":"response","command":"get_available_models","success":true,
             "data":{"models":[{"id":"zai-org/GLM-5.3","name":"GLM","provider":"kunlun","reasoning":true},{"id":"plain","provider":"local"}]}});
         let CatalogStep::Done(Ok(catalog)) = Pi.catalog_step(&packet, &mut 0) else {
             panic!("a list");

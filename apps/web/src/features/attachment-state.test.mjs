@@ -7,8 +7,8 @@ const file = (path, name = 'photo.jpg', bytes = 1024) => ({ path, name, bytes })
 test('attachment paths travel with the message so the agent knows what to open', () => {
   assert.equal(composeMessage('  look at this  ', []), 'look at this');
   assert.equal(
-    composeMessage('what is wrong here?', [file('.agentdock-files/2026-09-14/photo-abc.jpg')]),
-    'Attached file in this workspace:\n- .agentdock-files/2026-09-14/photo-abc.jpg\n\nwhat is wrong here?',
+    composeMessage('what is wrong here?', [file('.tendly-files/2026-09-14/photo-abc.jpg')]),
+    'Attached file in this workspace:\n- .tendly-files/2026-09-14/photo-abc.jpg\n\nwhat is wrong here?',
   );
   // Attachments alone are a valid message; the header stands on its own.
   assert.equal(

@@ -1,4 +1,4 @@
-import type { AgentProviderKind } from "@agentdock/protocol";
+import type { AgentProviderKind } from "@tendly/protocol";
 
 /** The usage report as the server sends it, and the figures the page derives from it. */
 export type UsageProvider = AgentProviderKind;

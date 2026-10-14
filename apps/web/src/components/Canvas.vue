@@ -6,15 +6,15 @@
  *   </Canvas>
  * expose openPane(PaneNode) to open/select sessions and files from the sidebar.
  * focusPane(id) locates an existing pane without opening or starting a session.
- * Drag MIME application/agentdock-pane is a JSON PaneNode, e.g.
+ * Drag MIME application/tendly-pane is a JSON PaneNode, e.g.
  * {type:'pane',id:'session-123',kind:'agent_chat',title:'Refactor',metadata:{session_id:'123'}}.
  * update:modelValue always emits CANONICAL data; debounce network persistence
  * in the parent. Responsive tabs and maximization never mutate saved geometry.
  * Pane content/lifetime belongs to the slot owner; closing is view-only.
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
-import type { LayoutDocument, LayoutNode as Node, LeafPaneKind, PaneNode, SplitDirection } from "@agentdock/protocol/layout";
-import type { ProviderKind } from "@agentdock/protocol";
+import type { LayoutDocument, LayoutNode as Node, LeafPaneKind, PaneNode, SplitDirection } from "@tendly/protocol/layout";
+import type { ProviderKind } from "@tendly/protocol";
 import LayoutNode from "./LayoutNode.vue";
 import Icon from "../features/Icon.vue";
 import { activatePane, applyPreset, closePane as removePane, containerId, createPane, dockPane, findNode, findNodes, flattenPanes, projectLayout, replacePane, resizeSplit, restoreCollapsed, selectionGroups, splitPane, updatePane, validateLayout, type DockPosition, type LayoutPreset } from "../layout/layout-engine";

@@ -4,35 +4,35 @@
 //! way: under the configured JavaScript runtime, in a process group of its own,
 //! with piped stdio, and without Tendly's own secrets in its environment.
 //! Keeping that in one place is what keeps the four from drifting apart, and
-//! [`is_agentdock_secret`] is the one definition every launch path filters by.
-use agentdock_runtime::process;
+//! [`is_tendly_secret`] is the one definition every launch path filters by.
 use std::{
     env,
     ffi::{OsStr, OsString},
     path::Path,
     process::Stdio,
 };
+use tendly_runtime::process;
 
 /// A variable that holds Tendly's own credentials: endpoint secrets
-/// referenced as `env:AGENTDOCK_SECRET_*`, and the gateway's access token.
+/// referenced as `env:TENDLY_SECRET_*`, and the gateway's access token.
 /// These never reach a bridge, a native client or a terminal.
-pub fn is_agentdock_secret(key: &str) -> bool {
-    key.starts_with("AGENTDOCK_SECRET_") || key == "AGENTDOCK_TOKEN"
+pub fn is_tendly_secret(key: &str) -> bool {
+    key.starts_with("TENDLY_SECRET_") || key == "TENDLY_TOKEN"
 }
 
 /// The names of Tendly's secrets present in this process's environment.
-pub fn agentdock_secrets() -> impl Iterator<Item = String> {
+pub fn tendly_secrets() -> impl Iterator<Item = String> {
     env::vars_os()
         .filter_map(|(key, _)| key.into_string().ok())
-        .filter(|key| is_agentdock_secret(key))
+        .filter(|key| is_tendly_secret(key))
 }
 
-/// The JavaScript runtime the bridges run under: `AGENTDOCK_JS_RUNTIME`, then
-/// the legacy `AGENTDOCK_NODE_BIN`, then `node`. An empty value is unset.
+/// The JavaScript runtime the bridges run under: `TENDLY_JS_RUNTIME`, then
+/// the legacy `TENDLY_NODE_BIN`, then `node`. An empty value is unset.
 pub fn js_runtime() -> OsString {
     choose_runtime(
-        env::var_os("AGENTDOCK_JS_RUNTIME"),
-        env::var_os("AGENTDOCK_NODE_BIN"),
+        env::var_os("TENDLY_JS_RUNTIME"),
+        env::var_os("TENDLY_NODE_BIN"),
     )
 }
 
@@ -57,7 +57,7 @@ pub fn node_command(node_options: &[&str], script: impl AsRef<OsStr>) -> tokio::
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .kill_on_drop(true);
-    for key in agentdock_secrets() {
+    for key in tendly_secrets() {
         command.env_remove(key);
     }
     process::own_group(command.as_std_mut());
@@ -98,22 +98,18 @@ mod tests {
     }
 
     #[test]
-    fn only_agentdock_credentials_count_as_its_secrets() {
-        for key in [
-            "AGENTDOCK_SECRET_WORK",
-            "AGENTDOCK_SECRET_",
-            "AGENTDOCK_TOKEN",
-        ] {
-            assert!(is_agentdock_secret(key), "{key}");
+    fn only_tendly_credentials_count_as_its_secrets() {
+        for key in ["TENDLY_SECRET_WORK", "TENDLY_SECRET_", "TENDLY_TOKEN"] {
+            assert!(is_tendly_secret(key), "{key}");
         }
         // Configuration is not a secret, and neither is a lookalike.
         for key in [
-            "AGENTDOCK_HOME",
-            "AGENTDOCK_TOKEN_FILE",
-            "MY_AGENTDOCK_TOKEN",
+            "TENDLY_HOME",
+            "TENDLY_TOKEN_FILE",
+            "MY_TENDLY_TOKEN",
             "OPENAI_API_KEY",
         ] {
-            assert!(!is_agentdock_secret(key), "{key}");
+            assert!(!is_tendly_secret(key), "{key}");
         }
     }
 }

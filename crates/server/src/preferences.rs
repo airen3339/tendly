@@ -7,10 +7,10 @@
 //! dialog still shows and can change the first two, and the permission chip in
 //! a running session changes the third.
 use crate::{ApiError, AppState, Result, db, providers};
-use agentdock_domain::{ProviderKind, Session};
 use axum::{Json, Router, extract::State, routing::get};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use tendly_domain::{ProviderKind, Session};
 use uuid::Uuid;
 
 #[derive(Debug, Default, Clone, Deserialize, Serialize, PartialEq)]

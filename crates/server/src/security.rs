@@ -14,7 +14,7 @@ use url::Url;
 /// one: the environment's, else the one kept in the state directory. Never
 /// creates one -- that is the server's business at startup.
 pub fn existing_token() -> Option<String> {
-    if let Some(explicit) = env::var("AGENTDOCK_TOKEN").ok().filter(|v| !v.is_empty()) {
+    if let Some(explicit) = env::var("TENDLY_TOKEN").ok().filter(|v| !v.is_empty()) {
         return Some(explicit);
     }
     let state_dir = crate::installation::state_directory().ok()?;
@@ -30,7 +30,7 @@ fn token_file(state_dir: &std::path::Path) -> std::path::PathBuf {
 
 /// The access token for a binding that reaches other machines.
 ///
-/// `AGENTDOCK_TOKEN` still wins, so an existing deployment and a secret manager
+/// `TENDLY_TOKEN` still wins, so an existing deployment and a secret manager
 /// keep working. Otherwise one is generated and kept, which is what makes a
 /// background gateway usable at all: a token printed once by a detached process
 /// is a token nobody can read afterwards, and `status` has to be able to say
@@ -45,7 +45,7 @@ pub fn resolve_token(
     state_dir: &std::path::Path,
     needed: bool,
 ) -> Result<Option<String>, Box<dyn std::error::Error>> {
-    if let Some(explicit) = env::var("AGENTDOCK_TOKEN").ok().filter(|v| !v.is_empty()) {
+    if let Some(explicit) = env::var("TENDLY_TOKEN").ok().filter(|v| !v.is_empty()) {
         return Ok(Some(explicit));
     }
     if !needed {
@@ -119,7 +119,7 @@ pub(crate) fn write_owner_only(path: &std::path::Path, content: &str) -> std::io
 /// generates one: `status` describing a token the server does not have would be
 /// worse than saying nothing.
 pub fn stored_token(state_dir: &std::path::Path) -> Option<String> {
-    env::var("AGENTDOCK_TOKEN")
+    env::var("TENDLY_TOKEN")
         .ok()
         .filter(|v| !v.is_empty())
         .or_else(|| {
@@ -202,7 +202,7 @@ impl Security {
             // all would leave a shell on this machine open to the network.
             if token.is_none() {
                 return Err(format!(
-                    "Listening on {address} reaches other machines, so it needs an access token. Set AGENTDOCK_TOKEN, or let Tendly generate one by not setting it."
+                    "Listening on {address} reaches other machines, so it needs an access token. Set TENDLY_TOKEN, or let Tendly generate one by not setting it."
                 )
                 .into());
             }
@@ -213,7 +213,7 @@ impl Security {
             .collect();
         origins.insert(format!("http://127.0.0.1:{}", address.port()));
         origins.insert(format!("http://localhost:{}", address.port()));
-        for value in env::var("AGENTDOCK_ALLOWED_ORIGINS")
+        for value in env::var("TENDLY_ALLOWED_ORIGINS")
             .unwrap_or_default()
             .split(',')
             .filter(|s| !s.is_empty())
@@ -255,7 +255,7 @@ impl Security {
     /// name the attacker controls can produce. Cross-site requests remain
     /// blocked by the Origin and `sec-fetch-site` checks, which are separate.
     ///
-    /// This is what makes `AGENTDOCK_ALLOWED_ORIGINS` unnecessary for reaching
+    /// This is what makes `TENDLY_ALLOWED_ORIGINS` unnecessary for reaching
     /// a LAN address: the server already knows its own port, and requiring the
     /// address to be repeated produced a 403 that named neither.
     fn addressed_by_ip(&self, host: &str) -> bool {
@@ -317,7 +317,7 @@ impl Security {
             .is_some_and(|v| {
                 v.split(';').any(|part| {
                     part.trim()
-                        .strip_prefix("agentdock_session=")
+                        .strip_prefix("tendly_session=")
                         .is_some_and(|s| equal(s, &self.cookie))
                 })
             })
@@ -331,7 +331,7 @@ fn error(status: StatusCode, message: &str) -> Response {
 }
 
 /// The one mutation `tendly resume` makes, which a command line names as
-/// `X-AgentDock-Client: cli`; it is still authenticated like any other.
+/// `X-Tendly-Client: cli`; it is still authenticated like any other.
 fn cli_path(path: &str) -> bool {
     path.strip_prefix("/api/sessions/")
         .and_then(|rest| rest.strip_suffix("/launch-plan"))
@@ -352,7 +352,7 @@ pub async fn guard(State(state): State<AppState>, request: Request, next: Next) 
     {
         return error(
             StatusCode::FORBIDDEN,
-            "This address is not one Tendly was told to answer for. Add it to AGENTDOCK_ALLOWED_ORIGINS.",
+            "This address is not one Tendly was told to answer for. Add it to TENDLY_ALLOWED_ORIGINS.",
         );
     }
     if let Some(origin) = headers.get(header::ORIGIN)
@@ -383,12 +383,12 @@ pub async fn guard(State(state): State<AppState>, request: Request, next: Next) 
         if !matches!(
             *request.method(),
             Method::GET | Method::HEAD | Method::OPTIONS
-        ) && headers.get("x-agentdock-client").is_none_or(|v| {
+        ) && headers.get("x-tendly-client").is_none_or(|v| {
             v != "web" && !(agent_path && v == "agent") && !(v == "cli" && cli_path(path))
         }) {
             return error(
                 StatusCode::FORBIDDEN,
-                "X-AgentDock-Client: web is required for mutations",
+                "X-Tendly-Client: web is required for mutations",
             );
         }
         // Browser WebSocket requests always carry Origin; command-line clients may use bearer.
@@ -459,7 +459,7 @@ pub async fn login(
         ""
     };
     let cookie = format!(
-        "agentdock_session={}; HttpOnly; SameSite=Strict; Path=/; Max-Age={SESSION_SECONDS}{secure}",
+        "tendly_session={}; HttpOnly; SameSite=Strict; Path=/; Max-Age={SESSION_SECONDS}{secure}",
         state.security.cookie
     );
     (
@@ -554,7 +554,7 @@ mod tests {
         let security = bound(28789);
         for host in [
             "evil.com:28789",
-            "agentdock.local:28789",
+            "tendly.local:28789",
             "192.168.0.252.evil.com:28789",
             "localhost:28789",
         ] {
@@ -591,7 +591,7 @@ mod tests {
     #[test]
     fn a_browser_session_survives_a_restart_but_not_a_new_token() {
         let address: SocketAddr = "0.0.0.0:28789".parse().unwrap();
-        let dir = std::env::temp_dir().join(format!("agentdock-session-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("tendly-session-{}", uuid::Uuid::new_v4()));
         let secret = resolve_session_secret(&dir).unwrap();
         assert_eq!(
             resolve_session_secret(&dir).unwrap(),

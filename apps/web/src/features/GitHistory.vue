@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import type { GitCommit, GitLog, GitOutcome } from "@agentdock/protocol";
+import type { GitCommit, GitLog, GitOutcome } from "@tendly/protocol";
 import { errorMessage } from "./api";
 import { gitGet, gitPost, shortHash, useGit } from "./git-context";
 import { commitGraph, commitRefs, relativeTime } from "./git-model";

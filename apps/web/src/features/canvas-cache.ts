@@ -1,4 +1,4 @@
-import type { LayoutDocument, Workspace } from "@agentdock/protocol";
+import type { LayoutDocument, Workspace } from "@tendly/protocol";
 import { validateLayout } from "../layout/layout-engine";
 type CanvasStorage = Pick<Storage, "getItem" | "setItem">;
 export interface CachedCanvas { layout: LayoutDocument; pending: boolean; updated_at: string }
@@ -14,7 +14,7 @@ export function sameCanvasLayout(first: LayoutDocument, second: LayoutDocument):
  * deployments on the same origin have different workspace UUIDs. */
 export function canvasStorageKey(origin: string, workspaces: Workspace[]): string | undefined {
   const anchor = [...workspaces].sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id))[0];
-  return anchor ? `agentdock:shared-canvas:${encodeURIComponent(origin)}:${anchor.id}` : undefined;
+  return anchor ? `tendly:shared-canvas:${encodeURIComponent(origin)}:${anchor.id}` : undefined;
 }
 export function readCanvasCache(storage: CanvasStorage | undefined, key: string | undefined): CachedCanvas | undefined {
   if (!storage || !key) return undefined;

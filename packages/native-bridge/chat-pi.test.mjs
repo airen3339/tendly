@@ -11,9 +11,9 @@ import { piLaunch } from './chat-pi.mjs';
 
 /** The chat bridge driving the synthetic Pi in fixtures/pi-cli.mjs. */
 async function pi(run,args=[]){
-  const root=await mkdtemp(join(tmpdir(),'agentdock-pi-test-')),program=join(root,'pi-cli.mjs'),log=join(root,'native.jsonl');
+  const root=await mkdtemp(join(tmpdir(),'tendly-pi-test-')),program=join(root,'pi-cli.mjs'),log=join(root,'native.jsonl');
   await copyFile(fileURLToPath(new URL('./fixtures/pi-cli.mjs',import.meta.url)),program);await chmod(program,0o755);
-  const child=spawn(process.execPath,[fileURLToPath(new URL('./chat.mjs',import.meta.url))],{env:{PATH:process.env.PATH,AGENTDOCK_CHAT_TEST_LOG:log},stdio:['pipe','pipe','pipe']});
+  const child=spawn(process.execPath,[fileURLToPath(new URL('./chat.mjs',import.meta.url))],{env:{PATH:process.env.PATH,TENDLY_CHAT_TEST_LOG:log},stdio:['pipe','pipe','pipe']});
   const events=[],waiters=new Set(),decoder=new StringDecoder('utf8');let buffer='',stderr='';
   const exited=once(child,'exit');child.stderr.on('data',chunk=>{stderr+=chunk;});
   child.stdout.on('data',chunk=>{buffer+=decoder.write(chunk);let i;while((i=buffer.indexOf('\n'))!==-1){events.push(JSON.parse(buffer.slice(0,i)));buffer=buffer.slice(i+1);for(const notify of [...waiters])notify();}});
@@ -33,8 +33,8 @@ async function pi(run,args=[]){
 }
 
 test('a Pi launch keeps its model, provider, depth and name, and resumes by session',()=>{
-  const launch=piLaunch({cwd:'/work',args:['--model','agentdock/zai-org/GLM-5.3','--thinking','high','--name','task','--session','pi-session-1']});
-  assert.deepEqual(launch.args,['--mode','rpc','--model','agentdock/zai-org/GLM-5.3','--thinking','high','--name','task','--session','pi-session-1']);
+  const launch=piLaunch({cwd:'/work',args:['--model','tendly/zai-org/GLM-5.3','--thinking','high','--name','task','--session','pi-session-1']});
+  assert.deepEqual(launch.args,['--mode','rpc','--model','tendly/zai-org/GLM-5.3','--thinking','high','--name','task','--session','pi-session-1']);
   assert.throws(()=>piLaunch({cwd:'/work',args:['--mcp-config','x']}),/Unsupported Pi launch option/);
   assert.throws(()=>piLaunch({cwd:'/work',args:['--session','../escape']}),/Invalid or conflicting/);
 });
@@ -43,9 +43,9 @@ test('pi: a message streams its reply, tools and usage, and the turn settles',()
   const ready=await wait(event=>event.type==='ready');
   assert.equal(ready.native_session_id,'pi-session-1');assert.deepEqual(ready.commands,['skill:review']);
   const settings=await wait(event=>event.type==='settings'&&event.models);
-  assert.deepEqual(settings.models.map(model=>model.id),['agentdock/qwen-local','kunlun/zai-org/GLM-5.3']);
+  assert.deepEqual(settings.models.map(model=>model.id),['tendly/qwen-local','kunlun/zai-org/GLM-5.3']);
   assert.deepEqual(settings.models[1].efforts,['low','medium','high']);
-  assert.equal(settings.model,'agentdock/qwen-local');assert.equal(settings.effort,undefined,"Pi's `off` is no depth, not one Tendly rejects");assert.equal(settings.permission_modes,undefined,'no approval modes');
+  assert.equal(settings.model,'tendly/qwen-local');assert.equal(settings.effort,undefined,"Pi's `off` is no depth, not one Tendly rejects");assert.equal(settings.permission_modes,undefined,'no approval modes');
   assert.ok(!(await sent()).some(command=>command.type==='prompt'),'opening a session sends no prompt');
   send({type:'message',id:'one',content:'hello'});
   await wait(event=>event.type==='turn'&&event.id==='one'&&event.status==='completed');

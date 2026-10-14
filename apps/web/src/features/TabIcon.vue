@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import type { ProviderKind } from "@agentdock/protocol";
-import type { LeafPaneKind } from "@agentdock/protocol/layout";
+import type { ProviderKind } from "@tendly/protocol";
+import type { LeafPaneKind } from "@tendly/protocol/layout";
 import { resolveTabIcon } from "./tab-icons";
 import Icon from "./Icon.vue";
 import ProviderIcon from "./ProviderIcon.vue";

@@ -9,7 +9,7 @@
 //!
 //! In debug builds `rust-embed` reads from the source tree instead, so editing
 //! the web app or a bridge during development does not need a rebuild.
-//! `AGENTDOCK_WEB_DIR` and `AGENTDOCK_NATIVE_BRIDGE` still override both, which
+//! `TENDLY_WEB_DIR` and `TENDLY_NATIVE_BRIDGE` still override both, which
 //! is what an installed layout or a packaging test uses.
 
 use axum::{
@@ -88,7 +88,7 @@ pub fn serve_web(uri: &Uri) -> Response {
 ///
 /// Only files whose contents differ are rewritten, so a running server's
 /// modules are not replaced on every start, and a host that pinned its own copy
-/// through `AGENTDOCK_NATIVE_BRIDGE` is never touched.
+/// through `TENDLY_NATIVE_BRIDGE` is never touched.
 pub fn extract_bridge(directory: &Path) -> std::io::Result<PathBuf> {
     std::fs::create_dir_all(directory)?;
     for name in Bridge::iter() {
@@ -203,8 +203,7 @@ mod tests {
 
     #[test]
     fn extracting_twice_leaves_the_files_alone_the_second_time() {
-        let directory =
-            std::env::temp_dir().join(format!("agentdock-embed-{}", uuid::Uuid::new_v4()));
+        let directory = std::env::temp_dir().join(format!("tendly-embed-{}", uuid::Uuid::new_v4()));
         let entry = extract_bridge(&directory).unwrap();
         assert!(entry.exists());
         let before = std::fs::metadata(&entry).unwrap().modified().unwrap();

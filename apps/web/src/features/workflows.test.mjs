@@ -16,7 +16,7 @@ test('workspace requests use same origin and the required anti-CSRF header', asy
   const result = await request('/workspaces', json('POST', { name: 'project', root_path: '/tmp/project' }));
   assert.equal(result.id, 'created');
   assert.equal(call.path, '/api/workspaces');
-  assert.equal(call.init.headers['X-AgentDock-Client'], 'web');
+  assert.equal(call.init.headers['X-Tendly-Client'], 'web');
   assert.equal(call.init.headers['Content-Type'], 'application/json');
   assert.deepEqual(JSON.parse(call.init.body), { name: 'project', root_path: '/tmp/project' });
 });

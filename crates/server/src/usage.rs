@@ -9,7 +9,6 @@
 //! Files are parsed once and then only from where they were last read, since a
 //! transcript only ever grows; a request after the first costs the new lines.
 use crate::{AppState, Result};
-use agentdock_domain::ProviderKind;
 use axum::{
     Json, Router,
     extract::{Query, State},
@@ -26,6 +25,7 @@ use std::{
     sync::{Arc, Mutex, OnceLock},
     time::SystemTime,
 };
+use tendly_domain::ProviderKind;
 
 /// One model call, with its tokens split the way prices are.
 #[derive(Debug, Clone)]
@@ -1101,7 +1101,7 @@ mod tests {
 
     #[test]
     fn transcripts_of_both_clients_are_counted_once_each() {
-        let home = std::env::temp_dir().join(format!("agentdock-usage-{}", uuid::Uuid::new_v4()));
+        let home = std::env::temp_dir().join(format!("tendly-usage-{}", uuid::Uuid::new_v4()));
         let claude = home.join("projects/-repo/c1.jsonl");
         let reply = serde_json::json!({"type":"assistant","timestamp":"2026-10-01T10:00:00Z","sessionId":"c1","cwd":"/repo","requestId":"r1",
             "message":{"id":"m1","model":"claude-opus-5-5","usage":{"input_tokens":10,"cache_read_input_tokens":1000,"output_tokens":100,
@@ -1181,7 +1181,7 @@ mod tests {
 
     #[test]
     fn messages_activity_and_filters() {
-        let home = std::env::temp_dir().join(format!("agentdock-usage-{}", uuid::Uuid::new_v4()));
+        let home = std::env::temp_dir().join(format!("tendly-usage-{}", uuid::Uuid::new_v4()));
         let claude = home.join("projects/-repo/c2.jsonl");
         let user = |uuid: &str, at: &str, content: Value| serde_json::json!({"type":"user","uuid":uuid,"timestamp":at,"sessionId":"c2","cwd":"/repo/app","message":{"role":"user","content":content}});
         let reply = |id: &str, at: &str| {
@@ -1416,7 +1416,7 @@ mod tests {
     #[test]
     fn a_codex_account_reads_its_limits_from_the_newest_session_log() {
         let home =
-            std::env::temp_dir().join(format!("agentdock-codex-limits-{}", uuid::Uuid::new_v4()));
+            std::env::temp_dir().join(format!("tendly-codex-limits-{}", uuid::Uuid::new_v4()));
         let day = home.join("sessions/2026/10/04");
         std::fs::create_dir_all(&day).unwrap();
         let line = |at: &str, used: f64| {

@@ -1,6 +1,6 @@
 use super::*;
-use agentdock_domain::InteractionMode;
 use serde_json::{Value, json};
+use tendly_domain::InteractionMode;
 
 fn without_archive_timestamps(session: &Session) -> Value {
     let mut value = serde_json::to_value(session).unwrap();

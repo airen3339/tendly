@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
-import type { TextFile } from "@agentdock/protocol";
+import type { TextFile } from "@tendly/protocol";
 import { ApiError, assetUrl, errorMessage, json, request, workspacePath } from "./api";
 import { fileDraft } from "./file-drafts";
 import { lineRange, pendingJump, takeJump } from "./file-jumps";
@@ -175,7 +175,7 @@ const crumbs = computed(() => [props.workspaceName, ...(props.path?.split("/").s
  */
 const isMarkdown = computed(() => language.value === "markdown");
 type MarkdownMode = "preview" | "split" | "source";
-const MODE_KEY = "agentdock.markdown-mode.v1";
+const MODE_KEY = "tendly.markdown-mode.v1";
 function readMode(): MarkdownMode {
   try { const value = localStorage.getItem(MODE_KEY); return value === "preview" || value === "source" || value === "split" ? value : "split"; }
   catch { return "split"; }

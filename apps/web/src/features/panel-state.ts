@@ -9,7 +9,7 @@ export interface PanelVisibility {
   sidebar: boolean;
   explorer: boolean;
 }
-export const PANEL_STORAGE_KEY = "agentdock.panels.v1";
+export const PANEL_STORAGE_KEY = "tendly.panels.v1";
 
 /**
  * Below this width the sidebar is a drawer rather than a layout column, so a

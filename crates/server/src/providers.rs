@@ -1,10 +1,10 @@
 //! Endpoint validation and private configuration-file helpers.
 use crate::ApiError;
-use agentdock_domain::{EndpointProfile, ProviderKind};
 use std::{
     fs,
     path::{Path, PathBuf},
 };
+use tendly_domain::{EndpointProfile, ProviderKind};
 use url::Url;
 
 /// Levels both native clients accept. Tendly forwards one of these or none.
@@ -140,13 +140,13 @@ pub fn validate_profile(p: &EndpointProfile) -> Result<(), ApiError> {
         let source = reference
             .strip_prefix("env:")
             .ok_or_else(|| ApiError::bad("Use env:VARIABLE_NAME; never enter a secret value"))?;
-        if !source.starts_with("AGENTDOCK_SECRET_")
+        if !source.starts_with("TENDLY_SECRET_")
             || !source
                 .bytes()
                 .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == b'_')
         {
             return Err(ApiError::bad(
-                "Secret references must use env:AGENTDOCK_SECRET_NAME",
+                "Secret references must use env:TENDLY_SECRET_NAME",
             ));
         }
     }
@@ -231,7 +231,7 @@ mod tests {
         p.endpoint_url = Some("https://example.test/v1".into());
         p.secret_ref = Some("env:HOME".into());
         assert!(validate_profile(&p).is_err());
-        p.secret_ref = Some("env:AGENTDOCK_SECRET_WORK".into());
+        p.secret_ref = Some("env:TENDLY_SECRET_WORK".into());
         assert!(validate_profile(&p).is_ok());
     }
 
@@ -250,10 +250,10 @@ mod tests {
             model_aliases: Default::default(),
             models: Vec::new(),
             api: None,
-            native_config: Some(agentdock_domain::NativeConfigReference {
+            native_config: Some(tendly_domain::NativeConfigReference {
                 source_id: "claude-default".into(),
                 config_dir: std::env::temp_dir()
-                    .join("agentdock-fixture")
+                    .join("tendly-fixture")
                     .to_string_lossy()
                     .into_owned(),
                 config_env: None,
@@ -283,7 +283,7 @@ mod tests {
         p.endpoint_url = Some("https://relay.test/v1".into());
         assert!(validate_profile(&p).is_err());
         p.endpoint_url = None;
-        p.secret_ref = Some("env:AGENTDOCK_SECRET_WORK".into());
+        p.secret_ref = Some("env:TENDLY_SECRET_WORK".into());
         assert!(validate_profile(&p).is_err());
     }
 

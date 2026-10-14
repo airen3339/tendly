@@ -2,7 +2,7 @@
 //!
 //! The foreground `serve` is still the only thing that listens; these commands
 //! put it behind a process you do not have to keep a terminal open for, which
-//! is what `nohup agentdock &` was standing in for. The daemon is the same
+//! is what `nohup tendly &` was standing in for. The daemon is the same
 //! executable re-executed with `serve`, so there is one code path that serves
 //! and no second implementation to keep in step.
 //!
@@ -20,10 +20,10 @@ use std::{
 };
 
 pub fn pid_file(state_dir: &Path) -> PathBuf {
-    state_dir.join("agentdock.pid")
+    state_dir.join("tendly.pid")
 }
 pub fn log_file(state_dir: &Path) -> PathBuf {
-    state_dir.join("agentdock.log")
+    state_dir.join("tendly.log")
 }
 
 /// The pid recorded for this state directory, if that process is still alive.
@@ -38,7 +38,7 @@ pub fn running(state_dir: &Path) -> Option<i32> {
     if pid <= 1 {
         return None;
     }
-    agentdock_runtime::process::alive(pid as u32).then_some(pid)
+    tendly_runtime::process::alive(pid as u32).then_some(pid)
 }
 
 /// Re-execute this binary as a detached `serve`.
@@ -85,7 +85,7 @@ fn spawn_detached(
     let mut command = Command::new(program);
     command
         .arg(command_name)
-        .env("AGENTDOCK_ADDR", address.to_string())
+        .env("TENDLY_ADDR", address.to_string())
         .stdin(Stdio::null())
         .stdout(Stdio::from(log))
         .stderr(Stdio::from(errors));
@@ -105,15 +105,15 @@ fn spawn_detached(
     }
     #[cfg(windows)]
     {
-        use agentdock_runtime::process::{CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW};
         use std::os::windows::process::CommandExt;
+        use tendly_runtime::process::{CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW};
         // No console of its own and none shared with this one, so closing the
         // terminal that ran `start` delivers nothing to the gateway. Leaving the
         // terminal's job keeps a host that kills its job on close from taking
         // the gateway too; a job that forbids breakaway refuses the whole
         // spawn, so that case retries without it.
         const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
-        agentdock_runtime::process::keep_standard_handles_private();
+        tendly_runtime::process::keep_standard_handles_private();
         command.creation_flags(
             CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB,
         );
@@ -142,7 +142,7 @@ pub fn stop(
     // console program can receive, so there this stops the gateway and the
     // agents beneath it outright; SQLite's journal and the restart
     // reconciliation cover what a graceful shutdown would have closed.
-    agentdock_runtime::process::terminate(pid as u32)?;
+    tendly_runtime::process::terminate(pid as u32)?;
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
         if running(state_dir).is_none() {
@@ -182,7 +182,7 @@ pub async fn healthy(address: SocketAddr) -> bool {
     };
     client
         .get(url)
-        .header("X-AgentDock-Client", "web")
+        .header("X-Tendly-Client", "web")
         .send()
         .await
         .is_ok_and(|response| response.status().is_success())
@@ -228,7 +228,7 @@ mod tests {
     use super::*;
 
     fn temporary() -> PathBuf {
-        let path = env::temp_dir().join(format!("agentdock-daemon-{}", uuid::Uuid::new_v4()));
+        let path = env::temp_dir().join(format!("tendly-daemon-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&path).unwrap();
         path
     }

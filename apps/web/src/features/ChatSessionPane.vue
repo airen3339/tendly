@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, h, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
-import type { EndpointProfile, ProviderKind, Session, Workspace } from '@agentdock/protocol';
+import type { EndpointProfile, ProviderKind, Session, Workspace } from '@tendly/protocol';
 import { ApiConnectionError, assetUrl, errorMessage, json, providerLabel, request, workspacePath } from './api';
 import { backendCapabilities } from './backend-capabilities';
 import { AGENT_CLIENTS, agentClient } from './clients';
@@ -385,7 +385,7 @@ function chooseMention(hit: SearchHit | undefined) {
 }
 
 const fileInput = ref<HTMLInputElement>();
-const OTHER_ANSWER = '__agentdock_other__';
+const OTHER_ANSWER = '__tendly_other__';
 const canSendIgnoringText = computed(() => !isPreview.value && supported.value && mode.value === 'structured' && !loading.value && !actionBusy.value && !turnBusy.value && streamState.value === 'connected' && !uploading.value);
 const canSend = computed(() => !isPreview.value && supported.value && mode.value === 'structured' && !loading.value && !actionBusy.value && !turnBusy.value && streamState.value === 'connected' && !uploading.value && canSendMessage(draft.value.text, attachments.value));
 const selectedEffort = ref('');
@@ -1079,7 +1079,7 @@ async function uploadFiles(files: File[]) {
       if (reason) { error.value = t(reason, { count: MAX_ATTACHMENTS_PER_MESSAGE }); break; }
       const saved = await request<Attachment>(
         '/workspaces/' + encodeURIComponent(props.session.workspace_id) + '/attachments?name=' + encodeURIComponent(file.name),
-        { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', 'X-AgentDock-Client': 'web' }, body: file },
+        { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', 'X-Tendly-Client': 'web' }, body: file },
       );
       target.attachments = [...(target.attachments ?? []), saved];
     }

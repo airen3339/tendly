@@ -14,9 +14,9 @@ import { validateChatInput } from './chat.mjs';
 import { ChatBase, jsonLines, redactEvents } from './chat-common.mjs';
 
 async function fixture(provider,run,args=[]){
-  const root=await mkdtemp(join(tmpdir(),'agentdock-chat-test-')),program=join(root,'chat-cli.mjs'),log=join(root,'native.jsonl');
+  const root=await mkdtemp(join(tmpdir(),'tendly-chat-test-')),program=join(root,'chat-cli.mjs'),log=join(root,'native.jsonl');
   await copyFile(fileURLToPath(new URL('./fixtures/chat-cli.mjs',import.meta.url)),program);await chmod(program,0o755);
-  const child=spawn(process.execPath,[fileURLToPath(new URL('./chat.mjs',import.meta.url))],{env:{PATH:process.env.PATH,AGENTDOCK_CHAT_TEST_LOG:log,AGENTDOCK_CHAT_TEST_INHERITED:'kept',AGENTDOCK_SECRET_TEST_CREDENTIAL:'fixture-secret-value'},stdio:['pipe','pipe','pipe']});
+  const child=spawn(process.execPath,[fileURLToPath(new URL('./chat.mjs',import.meta.url))],{env:{PATH:process.env.PATH,TENDLY_CHAT_TEST_LOG:log,TENDLY_CHAT_TEST_INHERITED:'kept',TENDLY_SECRET_TEST_CREDENTIAL:'fixture-secret-value'},stdio:['pipe','pipe','pipe']});
   const events=[],waiters=new Set(),decoder=new StringDecoder('utf8');let buffer='',stderr='',all='';
   const exited=once(child,'exit');child.stderr.on('data',chunk=>{stderr+=chunk;});
   child.stdout.on('data',chunk=>{all+=chunk;buffer+=decoder.write(chunk);let i;while((i=buffer.indexOf('\n'))!==-1){events.push(JSON.parse(buffer.slice(0,i)));buffer=buffer.slice(i+1);for(const notify of [...waiters])notify();}});
@@ -53,12 +53,12 @@ test('Claude launch accepts a concrete session name for the native client',()=>{
 });
 
 test('Tendly tools reach both clients as the server injects them (agent::equip)',()=>{
-  const claude=claudeLaunch({cwd:'/fixture',args:['--resume=saved-session','--mcp-config=/state/agent-mcp/s.json','--allowedTools=mcp__agentdock']});
+  const claude=claudeLaunch({cwd:'/fixture',args:['--resume=saved-session','--mcp-config=/state/agent-mcp/s.json','--allowedTools=mcp__tendly']});
   const at=claude.args.indexOf('--mcp-config');
   assert.equal(claude.args[at+1],'/state/agent-mcp/s.json');
-  assert.equal(claude.args[claude.args.indexOf('--allowedTools')+1],'mcp__agentdock');
-  const codex=codexLaunch({cwd:'/fixture',args:['-c','mcp_servers.agentdock.command="/bin/agentdock"','-c','mcp_servers.agentdock.args=["mcp"]','-c','mcp_servers.agentdock.env={AGENTDOCK_AGENT_TOKEN="adk_1"}','-c','mcp_servers.agentdock.tool_timeout_sec=600','resume','saved-thread']});
-  assert.deepEqual(codex.args,['app-server','-c','mcp_servers.agentdock.command="/bin/agentdock"','-c','mcp_servers.agentdock.args=["mcp"]','-c','mcp_servers.agentdock.env={AGENTDOCK_AGENT_TOKEN="adk_1"}','-c','mcp_servers.agentdock.tool_timeout_sec=600']);
+  assert.equal(claude.args[claude.args.indexOf('--allowedTools')+1],'mcp__tendly');
+  const codex=codexLaunch({cwd:'/fixture',args:['-c','mcp_servers.tendly.command="/bin/tendly"','-c','mcp_servers.tendly.args=["mcp"]','-c','mcp_servers.tendly.env={TENDLY_AGENT_TOKEN="adk_1"}','-c','mcp_servers.tendly.tool_timeout_sec=600','resume','saved-thread']});
+  assert.deepEqual(codex.args,['app-server','-c','mcp_servers.tendly.command="/bin/tendly"','-c','mcp_servers.tendly.args=["mcp"]','-c','mcp_servers.tendly.env={TENDLY_AGENT_TOKEN="adk_1"}','-c','mcp_servers.tendly.tool_timeout_sec=600']);
   assert.equal(codex.resume,'saved-thread');
 });
 
@@ -204,7 +204,7 @@ test('native lines are UTF-8 safe, bounded, and reject incomplete streams',async
   const partial=new PassThrough();await new Promise(resolve=>{jsonLines(partial,()=>{},message=>{assert.match(message,/timed out/);resolve();},{lineTimeout:10});partial.write('{');});partial.destroy();
 });
 test('credential-shaped environment values never appear in structured bridge events',()=>{
-  const events=[],emit=redactEvents({AGENTDOCK_SECRET_TEST:'private-fixture',PATH:'/bin'},event=>events.push(event));
+  const events=[],emit=redactEvents({TENDLY_SECRET_TEST:'private-fixture',PATH:'/bin'},event=>events.push(event));
   emit({type:'error',message:'Diagnostic private-fixture'});assert.equal(events[0].message,'Diagnostic [redacted]');
 });
 test('oversized native question option lists fail closed before emitting an incompatible approval event',()=>{
@@ -262,7 +262,7 @@ test('a request outside the workspace says so, and can be allowed for the whole 
 test('Codex MCP tool confirmations: Tendly\'s own pass, others ask the person, forms fail closed',()=>{
   const events=[],sent=[],chat=new CodexChat({},event=>events.push(event));chat.active={id:'active'};chat.nativeSessionId='fixture-thread';chat.port={send:message=>sent.push(message)};
   const ask=(id,params)=>chat.request({id,method:'mcpServer/elicitation/request',params:{threadId:'fixture-thread',mode:'form',requestedSchema:{type:'object',properties:{}},message:'Allow tool?',...params}});
-  ask('own',{serverName:'agentdock'});
+  ask('own',{serverName:'tendly'});
   assert.deepEqual(sent.pop(),{id:'own',result:{action:'accept',content:{}}});
   assert.equal(events.some(event=>event.type==='approval'),false);
   ask('other',{serverName:'github'});

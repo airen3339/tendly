@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue';
-import type { Session } from '@agentdock/protocol';
+import type { Session } from '@tendly/protocol';
 import ModalDialog from './ModalDialog.vue';
 import { useI18n } from '../i18n';
 

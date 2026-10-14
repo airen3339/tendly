@@ -1,4 +1,4 @@
-import type { Session } from "@agentdock/protocol";
+import type { Session } from "@tendly/protocol";
 
 /**
  * A view preference is local UI state, never persisted into the workspace
@@ -6,7 +6,7 @@ import type { Session } from "@agentdock/protocol";
  * switch a session you were following in its terminal back to chat.
  */
 export type SessionView = "chat" | "native";
-const KEY = "agentdock.session-views";
+const KEY = "tendly.session-views";
 /** Enough for every session anyone has open; the oldest choices fall away first. */
 const LIMIT = 200;
 const preferences = new Map<string, SessionView>(load());

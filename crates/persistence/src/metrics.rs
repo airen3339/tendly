@@ -488,8 +488,7 @@ mod tests {
 
     #[test]
     fn a_version_one_file_gains_the_sensor_columns_and_keeps_its_rows() {
-        let path =
-            std::env::temp_dir().join(format!("agentdock-metrics-{}.db", std::process::id()));
+        let path = std::env::temp_dir().join(format!("tendly-metrics-{}.db", std::process::id()));
         let _ = std::fs::remove_file(&path);
         {
             let connection = Connection::open(&path).unwrap();

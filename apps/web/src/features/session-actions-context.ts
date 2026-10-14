@@ -1,5 +1,5 @@
 import type { InjectionKey } from "vue";
-import type { Session } from "@agentdock/protocol";
+import type { Session } from "@tendly/protocol";
 
 /**
  * The session actions App owns (rename, environment, keep, run information),

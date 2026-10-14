@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, provide, ref, watch } from "vue";
-import type { GitBranches, GitOutcome, GitRemote, GitStash, GitStatus } from "@agentdock/protocol";
+import type { GitBranches, GitOutcome, GitRemote, GitStash, GitStatus } from "@tendly/protocol";
 import { errorMessage } from "./api";
 import { copyText } from "./clipboard";
 import { GIT_CONTEXT, gitGet, gitPost, isOutcome, type GitContext, type PromptAnswer, type PromptSpec } from "./git-context";

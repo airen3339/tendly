@@ -15,9 +15,9 @@ use crate::{
     agent_config::who,
     db,
 };
-use agentdock_domain::{ProviderKind, Session, SessionId};
 use serde_json::{Value, json};
 use std::time::Duration;
+use tendly_domain::{ProviderKind, Session, SessionId};
 
 /// Sessions one session may have running at once.
 const RUNNING_CHILDREN: usize = 4;
@@ -31,8 +31,8 @@ fn object(properties: Value, required: &[&str]) -> Value {
 pub fn tools() -> Vec<Value> {
     vec![
         crate::agent::tool(
-            "agentdock_spawn",
-            "Start another Claude Code or Codex session in your workspace, with a first message, optionally on its own Git branch (a separate worktree). It runs on its own; follow it with agentdock_session. Use it for independent work worth doing in parallel, not for quick questions. The first start is confirmed by the person; a started session cannot start more.",
+            "tendly_spawn",
+            "Start another Claude Code or Codex session in your workspace, with a first message, optionally on its own Git branch (a separate worktree). It runs on its own; follow it with tendly_session. Use it for independent work worth doing in parallel, not for quick questions. The first start is confirmed by the person; a started session cannot start more.",
             object(
                 json!({
                     "provider": { "type": "string", "enum": ProviderKind::AGENTS.map(|kind| kind.as_str()) },
@@ -47,7 +47,7 @@ pub fn tools() -> Vec<Value> {
             ),
         ),
         crate::agent::tool(
-            "agentdock_session",
+            "tendly_session",
             "Follow the sessions you started (list, result, wait until its turn ends, message it), or manage your own session (rename, keep). You cannot read sessions you did not start.",
             object(
                 json!({
@@ -61,7 +61,7 @@ pub fn tools() -> Vec<Value> {
             ),
         ),
         crate::agent::tool(
-            "agentdock_show",
+            "tendly_show",
             "Show the person something in the Tendly window: a file (at a line), your workspace's Git changes, or a session you started.",
             object(
                 json!({
@@ -74,7 +74,7 @@ pub fn tools() -> Vec<Value> {
             ),
         ),
         crate::agent::tool(
-            "agentdock_usage",
+            "tendly_usage",
             "The quota your session's official account last reported (Claude or ChatGPT sign-in managed in Tendly). Nothing is known for API-key endpoints.",
             object(json!({}), &[]),
         ),
@@ -180,7 +180,7 @@ fn provider_of(arguments: &Value) -> Result<ProviderKind, ApiError> {
 }
 
 pub async fn spawn(state: &AppState, caller: Caller, arguments: &Value) -> Result<Value, ApiError> {
-    let parent = own_session(state, caller, "agentdock_spawn").await?;
+    let parent = own_session(state, caller, "tendly_spawn").await?;
     let parent_id = parent.id;
     if db(state, move |s| s.agent_parent(parent_id))
         .await?
@@ -281,7 +281,7 @@ pub async fn spawn(state: &AppState, caller: Caller, arguments: &Value) -> Resul
     );
     Ok(json!({
         "started": { "id": id, "title": created.title, "provider": created.provider, "branch": branch, "temporary": !keep },
-        "next": "Call agentdock_session with action wait or result and this id to follow it.",
+        "next": "Call tendly_session with action wait or result and this id to follow it.",
     }))
 }
 
@@ -290,7 +290,7 @@ pub async fn session(
     caller: Caller,
     arguments: &Value,
 ) -> Result<Value, ApiError> {
-    let me = own_session(state, caller, "agentdock_session").await?;
+    let me = own_session(state, caller, "tendly_session").await?;
     match text(arguments, "action") {
         Some("list") => {
             let parent = me.id;
@@ -360,7 +360,7 @@ pub async fn session(
 }
 
 pub async fn show(state: &AppState, caller: Caller, arguments: &Value) -> Result<Value, ApiError> {
-    let me = own_session(state, caller, "agentdock_show").await?;
+    let me = own_session(state, caller, "tendly_show").await?;
     let target = if let Some(file) = text(arguments, "file") {
         let line = arguments.get("line").and_then(Value::as_u64);
         json!({ "kind": "file", "workspace_id": me.workspace_id, "path": file, "line": line, "checkout": me.checkout_path })
@@ -380,7 +380,7 @@ pub async fn show(state: &AppState, caller: Caller, arguments: &Value) -> Result
 }
 
 pub async fn usage(state: &AppState, caller: Caller) -> Result<Value, ApiError> {
-    let me = own_session(state, caller, "agentdock_usage").await?;
+    let me = own_session(state, caller, "tendly_usage").await?;
     let Some(profile) = me
         .endpoint_profile_id
         .or(me.endpoint_snapshot.as_ref().map(|p| p.id))

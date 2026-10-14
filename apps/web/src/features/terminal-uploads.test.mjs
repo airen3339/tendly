@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { imageCaveat, isImage, pasteText, shellPath, uploadName, uploadProblem } from './terminal-uploads.ts';
 
 test('a pasted path is escaped the way a terminal escapes a dropped file', () => {
-  assert.equal(shellPath('/srv/ws/.agentdock-files/pastes/2026-10-07/shot-a1b2.png'), '/srv/ws/.agentdock-files/pastes/2026-10-07/shot-a1b2.png');
+  assert.equal(shellPath('/srv/ws/.tendly-files/pastes/2026-10-07/shot-a1b2.png'), '/srv/ws/.tendly-files/pastes/2026-10-07/shot-a1b2.png');
   assert.equal(shellPath('/home/me/My Projects/a (1).png'), '/home/me/My\\ Projects/a\\ \\(1\\).png');
   assert.equal(shellPath("/x/it's $HOME;&.txt"), String.raw`/x/it\'s\ \$HOME\;\&.txt`);
   assert.equal(pasteText(['/a b.png', '/c.pdf']), '/a\\ b.png /c.pdf ', 'space-separated, ending in a space to keep typing');

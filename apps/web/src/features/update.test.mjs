@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { updateStage, waitForVersion } from './update.ts';
 
-const base = { current: '0.1.27', latest: '0.1.30', available: true, installed: null, method: 'npm', writable: true, command: 'npm install -g @wnzzer/agentdock@latest', restart: 'daemon', running_sessions: 0, check_error: null };
+const base = { current: '0.1.27', latest: '0.1.30', available: true, installed: null, method: 'npm', writable: true, command: 'npm install -g @wnzzer/tendly@latest', restart: 'daemon', running_sessions: 0, check_error: null };
 
 test('a waiting restart is offered before anything else', () => {
   assert.equal(updateStage({ ...base, installed: '0.1.30', available: false }), 'restart');

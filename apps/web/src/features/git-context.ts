@@ -1,5 +1,5 @@
 import { inject, type InjectionKey, type Ref } from "vue";
-import type { GitOutcome, GitRemote, GitStatus } from "@agentdock/protocol";
+import type { GitOutcome, GitRemote, GitStatus } from "@tendly/protocol";
 import { json, request, workspacePath } from "./api";
 
 export interface PromptField { key: string; label: string; value?: string; placeholder?: string; multiline?: boolean; required?: boolean; hint?: string; }

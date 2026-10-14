@@ -397,17 +397,17 @@ fn spawn_runtime(id: String, spec: SpawnSpec) -> RuntimeResult<Arc<RuntimeSessio
 
     let reader_session = Arc::clone(&session);
     thread::Builder::new()
-        .name("agentdock-pty-reader".into())
+        .name("tendly-pty-reader".into())
         .spawn(move || runtime_read_output(reader, reader_session))?;
 
     let writer_master = Arc::clone(&master);
     thread::Builder::new()
-        .name("agentdock-pty-writer".into())
+        .name("tendly-pty-writer".into())
         .spawn(move || runtime_write_loop(writer, writer_master, command_rx))?;
 
     let wait_session = Arc::clone(&session);
     thread::Builder::new()
-        .name("agentdock-pty-waiter".into())
+        .name("tendly-pty-waiter".into())
         .spawn(move || runtime_wait_loop(child, wait_session))?;
 
     Ok(session)
@@ -608,7 +608,7 @@ impl PtySession {
         let writer = pair.master.take_writer()?;
         let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
         thread::Builder::new()
-            .name("agentdock-pty-reader-legacy".into())
+            .name("tendly-pty-reader-legacy".into())
             .spawn(move || {
                 let mut reader = reader;
                 let mut buffer = [0_u8; 8192];
@@ -707,9 +707,9 @@ mod tests {
     /// Input that prints the sentinel and exits. The typed text never contains
     /// the sentinel itself, so the terminal echoing the input cannot pass.
     const SENTINEL_INPUT: &[u8] = if cfg!(windows) {
-        b"echo agentdock_runtime_^sentinel\r\nexit\r\n"
+        b"echo tendly_runtime_^sentinel\r\nexit\r\n"
     } else {
-        b"printf '\\nagentdock_runtime_sentinel\\n'\nexit\n"
+        b"printf '\\ntendly_runtime_sentinel\\n'\nexit\n"
     };
 
     #[tokio::test]
@@ -732,8 +732,8 @@ mod tests {
             {
                 output.extend(data);
                 if output
-                    .windows(b"agentdock_runtime_sentinel".len())
-                    .any(|window| window == b"agentdock_runtime_sentinel")
+                    .windows(b"tendly_runtime_sentinel".len())
+                    .any(|window| window == b"tendly_runtime_sentinel")
                 {
                     break;
                 }
@@ -743,8 +743,8 @@ mod tests {
         assert!(result.is_ok(), "shell output timeout");
         assert!(
             output
-                .windows(b"agentdock_runtime_sentinel".len())
-                .any(|window| window == b"agentdock_runtime_sentinel")
+                .windows(b"tendly_runtime_sentinel".len())
+                .any(|window| window == b"tendly_runtime_sentinel")
         );
         assert!(
             tokio::time::timeout(Duration::from_secs(2), session.wait())

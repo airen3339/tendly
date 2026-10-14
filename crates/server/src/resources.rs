@@ -12,7 +12,6 @@ use crate::{
     ApiError, AppState, Result, preferences,
     sensors::{self, ChipSensors, CpuFrequency, Fan, Gpu, PowerPart, Temperature},
 };
-use agentdock_persistence::metrics::{self, HostPoint, MetricsStore, SessionPoint};
 use axum::{
     Json, Router,
     extract::{Query, State},
@@ -26,6 +25,7 @@ use std::{
     time::{Duration, Instant},
 };
 use sysinfo::{Components, DiskKind, Disks, Networks, Pid, ProcessesToUpdate, System};
+use tendly_persistence::metrics::{self, HostPoint, MetricsStore, SessionPoint};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SessionUsage {
@@ -173,8 +173,8 @@ pub struct HostInfo {
     pub kernel: Option<String>,
     pub arch: String,
     pub uptime_seconds: u64,
-    pub agentdock_version: &'static str,
-    pub agentdock_uptime_seconds: u64,
+    pub tendly_version: &'static str,
+    pub tendly_uptime_seconds: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -257,7 +257,7 @@ pub struct SystemDetail {
 
 /// How long this server process has run, from the operating system's record
 /// of when it started rather than from the first request.
-fn agentdock_uptime(system: &System) -> u64 {
+fn tendly_uptime(system: &System) -> u64 {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|elapsed| elapsed.as_secs())
@@ -384,8 +384,8 @@ pub fn detail(roots: Vec<(String, u32)>) -> SystemDetail {
             kernel: System::kernel_version(),
             arch: System::cpu_arch(),
             uptime_seconds: System::uptime(),
-            agentdock_version: env!("CARGO_PKG_VERSION"),
-            agentdock_uptime_seconds: agentdock_uptime(system),
+            tendly_version: env!("CARGO_PKG_VERSION"),
+            tendly_uptime_seconds: tendly_uptime(system),
         },
         load: (!cfg!(windows)).then_some(LoadAverage {
             one: load.one,
@@ -562,7 +562,7 @@ pub fn spawn_recorder(state: AppState, store: Arc<MetricsStore>) {
                 if compact {
                     store.compact(now())?;
                 }
-                Ok::<_, agentdock_persistence::DbError>(())
+                Ok::<_, tendly_persistence::DbError>(())
             })
             .await;
             match written {
@@ -648,7 +648,7 @@ async fn history(
     }
     let resolution = metrics::resolution_for(now, from, to, MAX_POINTS);
     let (host, sessions) = tokio::task::spawn_blocking(move || {
-        Ok::<_, agentdock_persistence::DbError>((
+        Ok::<_, tendly_persistence::DbError>((
             store.host_history(resolution, from, to)?,
             store.session_history(resolution, from, to, query.session_id.as_deref())?,
         ))

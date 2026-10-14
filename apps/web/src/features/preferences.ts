@@ -1,5 +1,5 @@
 import { ref } from "vue";
-import type { AgentProviderKind, ProviderKind } from "@agentdock/protocol";
+import type { AgentProviderKind, ProviderKind } from "@tendly/protocol";
 import { json, request } from "./api";
 import { AGENT_CLIENTS, isAgentClient } from "./clients";
 

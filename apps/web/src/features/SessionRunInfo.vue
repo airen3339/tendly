@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Session } from "@agentdock/protocol";
+import type { Session } from "@tendly/protocol";
 import { computed } from "vue";
 import ModalDialog from "./ModalDialog.vue";
 import CopyButton from "./CopyButton.vue";

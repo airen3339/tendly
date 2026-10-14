@@ -1,4 +1,4 @@
-import type { Session } from "@agentdock/protocol";
+import type { Session } from "@tendly/protocol";
 import { json, request } from "./api";
 
 /**

@@ -3,12 +3,12 @@
 use super::{AccountOperations, CatalogStep, ClientAdapter, EndpointLaunch, encode};
 use crate::ApiError;
 use crate::usage::{Call, FileState, LoggedLimits, Source, Tokens, jsonl_files, number, timestamp};
-use agentdock_domain::ProviderKind;
 use serde_json::Value;
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
+use tendly_domain::ProviderKind;
 
 pub struct Codex;
 
@@ -23,7 +23,7 @@ impl ClientAdapter for Codex {
         "codex"
     }
     fn bin_override(&self) -> &'static str {
-        "AGENTDOCK_CODEX_BIN"
+        "TENDLY_CODEX_BIN"
     }
     fn config_key(&self) -> &'static str {
         "CODEX_HOME"
@@ -32,7 +32,7 @@ impl ClientAdapter for Codex {
         ".codex"
     }
     fn history_source(&self) -> (&'static str, &'static str) {
-        ("codex-default", "AGENTDOCK_CODEX_HISTORY_DIR")
+        ("codex-default", "TENDLY_CODEX_HISTORY_DIR")
     }
     // Listed first, as it always has been.
     fn source_order(&self) -> u8 {
@@ -96,7 +96,7 @@ impl ClientAdapter for Codex {
             args.extend(["-c".into(), format!("model_context_window={window}")]);
         }
         if profile.is_some_and(|p| p.endpoint_url.is_some() || p.secret_ref.is_some()) {
-            config.push_str("model_provider = \"agentdock\"\n\n[model_providers.agentdock]\nname = \"Tendly\"\nwire_api = \"responses\"\nrequires_openai_auth = false\n");
+            config.push_str("model_provider = \"tendly\"\n\n[model_providers.tendly]\nname = \"Tendly\"\nwire_api = \"responses\"\nrequires_openai_auth = false\n");
             let base = profile
                 .and_then(|p| p.endpoint_url.as_deref())
                 .unwrap_or("https://api.openai.com/v1");
@@ -119,7 +119,7 @@ impl ClientAdapter for Codex {
     fn equip_tools(
         &self,
         _state: &crate::AppState,
-        _session: agentdock_domain::SessionId,
+        _session: tendly_domain::SessionId,
         program: &str,
         identity: &[(String, String)],
         args: &mut Vec<String>,
@@ -130,11 +130,11 @@ impl ClientAdapter for Codex {
             .collect::<Vec<_>>()
             .join(",");
         let overrides = [
-            format!("mcp_servers.agentdock.command={}", encode(program)),
-            r#"mcp_servers.agentdock.args=["mcp"]"#.to_owned(),
-            format!("mcp_servers.agentdock.env={{{table}}}"),
+            format!("mcp_servers.tendly.command={}", encode(program)),
+            r#"mcp_servers.tendly.args=["mcp"]"#.to_owned(),
+            format!("mcp_servers.tendly.env={{{table}}}"),
             // A call waiting on the person's confirmation outlasts the default.
-            "mcp_servers.agentdock.tool_timeout_sec=600".to_owned(),
+            "mcp_servers.tendly.tool_timeout_sec=600".to_owned(),
         ];
         let mut equipped: Vec<String> = overrides
             .into_iter()
@@ -168,7 +168,7 @@ impl ClientAdapter for Codex {
     }
     fn authorize(
         &self,
-        _profile: &agentdock_domain::EndpointProfile,
+        _profile: &tendly_domain::EndpointProfile,
         request: reqwest::RequestBuilder,
         secret: Option<&str>,
     ) -> reqwest::RequestBuilder {
@@ -187,7 +187,7 @@ impl ClientAdapter for Codex {
         &["-c", "cli_auth_credentials_store=\"file\""]
     }
     fn catalog_opening(&self) -> &'static str {
-        "{\"id\":1,\"method\":\"initialize\",\"params\":{\"clientInfo\":{\"name\":\"agentdock_models\",\"version\":\"0.1.0\"}}}\n"
+        "{\"id\":1,\"method\":\"initialize\",\"params\":{\"clientInfo\":{\"name\":\"tendly_models\",\"version\":\"0.1.0\"}}}\n"
     }
     fn catalog_step(&self, packet: &Value, stage: &mut u8) -> CatalogStep {
         if packet.get("id") == Some(&Value::from(1)) && *stage == 0 {

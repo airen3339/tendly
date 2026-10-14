@@ -161,7 +161,7 @@ mod tests {
     use super::*;
 
     fn directory() -> PathBuf {
-        let path = std::env::temp_dir().join(format!("agentdock-limits-{}", uuid::Uuid::new_v4()));
+        let path = std::env::temp_dir().join(format!("tendly-limits-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&path).unwrap();
         path
     }

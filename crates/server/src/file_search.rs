@@ -8,9 +8,9 @@
 //! When Codex is absent the endpoint reports that plainly and the client keeps
 //! filtering the entries it has already loaded, which is what it did before.
 use crate::{ApiError, AppState, Result, root};
-use agentdock_domain::WorkspaceId;
 use serde::{Deserialize, Serialize};
 use std::{path::PathBuf, time::Duration};
+use tendly_domain::WorkspaceId;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 /// Above the app-server's own deadline, so its degraded answer is preferred to
@@ -84,11 +84,7 @@ pub async fn search(
         )))
     })?;
 
-    let script = crate::bridge::script(
-        &state.state_dir,
-        "AGENTDOCK_SEARCH_BRIDGE",
-        "file-search.mjs",
-    );
+    let script = crate::bridge::script(&state.state_dir, "TENDLY_SEARCH_BRIDGE", "file-search.mjs");
     let job = serde_json::json!({
         "cwd": cwd,
         "query": query,

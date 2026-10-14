@@ -22,7 +22,7 @@ test('environment drafts have stable distinct IDs and explicit rows round trip w
   assert.deepEqual(environmentRows(), []);
   const source = Object.freeze({
     MODE: Object.freeze({ kind: 'literal', value: 'fixture' }),
-    OPENAI_API_KEY: Object.freeze({ kind: 'secret_ref', reference: 'env:AGENTDOCK_SECRET_FIXTURE' }),
+    OPENAI_API_KEY: Object.freeze({ kind: 'secret_ref', reference: 'env:TENDLY_SECRET_FIXTURE' }),
     HTTPS_PROXY: Object.freeze({ kind: 'unset' }),
   });
   const rows = environmentRows(source);
@@ -46,26 +46,26 @@ test('unset emits a removal marker without persisting a stale editor value', () 
 });
 
 test('secret references remain symbolic and accept only the dedicated server namespace', () => {
-  assert.deepEqual(valid(row('OPENAI_API_KEY', '  env:AGENTDOCK_SECRET_FIXTURE_9  ', 'secret_ref')), {
-    OPENAI_API_KEY: { kind: 'secret_ref', reference: 'env:AGENTDOCK_SECRET_FIXTURE_9' },
+  assert.deepEqual(valid(row('OPENAI_API_KEY', '  env:TENDLY_SECRET_FIXTURE_9  ', 'secret_ref')), {
+    OPENAI_API_KEY: { kind: 'secret_ref', reference: 'env:TENDLY_SECRET_FIXTURE_9' },
   });
-  for (const value of ['', 'env:AGENTDOCK_SECRET_', 'env:OTHER', 'env:AGENTDOCK_SECRET_lower', 'ENV:AGENTDOCK_SECRET_X', 'env:AGENTDOCK_SECRET_A-B', '${AGENTDOCK_SECRET_X}', 'env:AGENTDOCK_SECRET_A\0B', 'env:AGENTDOCK_SECRET_A\nB']) {
-    invalid([row('OPENAI_API_KEY', value, 'secret_ref')], 'Use env:AGENTDOCK_SECRET_NAME for a secret reference.');
+  for (const value of ['', 'env:TENDLY_SECRET_', 'env:OTHER', 'env:TENDLY_SECRET_lower', 'ENV:TENDLY_SECRET_X', 'env:TENDLY_SECRET_A-B', '${TENDLY_SECRET_X}', 'env:TENDLY_SECRET_A\0B', 'env:TENDLY_SECRET_A\nB']) {
+    invalid([row('OPENAI_API_KEY', value, 'secret_ref')], 'Use env:TENDLY_SECRET_NAME for a secret reference.');
   }
 });
 
 test('sensitive variable names reject plaintext case-insensitively but permit references or unset', () => {
   for (const name of ['ANTHROPIC_AUTH_TOKEN', 'my_secret', 'PASSWORD', 'ssh_private_key', 'openai_api_key', 'HTTP_AUTHORIZATION']) {
     invalid([row(name, 'synthetic-private-value')], 'Sensitive variables require a secret reference, not a plain value.');
-    valid(row(name, 'env:AGENTDOCK_SECRET_FIXTURE', 'secret_ref'));
+    valid(row(name, 'env:TENDLY_SECRET_FIXTURE', 'secret_ref'));
     valid(row(name, '', 'unset'));
   }
 });
 
 test('account, workspace and Tendly-reserved names are blocked for every value type and case', () => {
-  for (const name of ['HOME', 'userprofile', 'Pwd', 'oldpwd', 'CodeX_HoMe', 'claude_config_dir', 'ClaudeCode', 'AGENTDOCK_', 'agentdock_future_setting', 'AGENTDOCK_SECRET_FIXTURE']) {
+  for (const name of ['HOME', 'userprofile', 'Pwd', 'oldpwd', 'CodeX_HoMe', 'claude_config_dir', 'ClaudeCode', 'TENDLY_', 'tendly_future_setting', 'TENDLY_SECRET_FIXTURE']) {
     for (const kind of ['literal', 'secret_ref', 'unset']) {
-      invalid([row(name, kind === 'secret_ref' ? 'env:AGENTDOCK_SECRET_FIXTURE' : 'fixture', kind)], 'Account directories, workspace identity and Tendly internal variables cannot be overridden.');
+      invalid([row(name, kind === 'secret_ref' ? 'env:TENDLY_SECRET_FIXTURE' : 'fixture', kind)], 'Account directories, workspace identity and Tendly internal variables cannot be overridden.');
     }
   }
 });
@@ -129,18 +129,18 @@ test('proxy and provider base URL credentials cannot be persisted as literal val
     valid(row(name, 'https://example.invalid/v1'));
     valid(row(name, '127.0.0.1:9000'));
     valid(row(name, 'https://example.invalid/path@leaf'));
-    valid(row(name, 'env:AGENTDOCK_SECRET_PROXY', 'secret_ref'));
+    valid(row(name, 'env:TENDLY_SECRET_PROXY', 'secret_ref'));
   }
 });
 
 test('session overrides win over profile defaults while preserving unrelated defaults and removals', () => {
   const base = Object.freeze(valid(row('KEEP', 'profile'), row('MODE', 'profile'), row('REMOVE', 'profile')));
-  const overrides = Object.freeze(valid(row('MODE', 'session'), row('REMOVE', 'ignored', 'unset'), row('OPENAI_API_KEY', 'env:AGENTDOCK_SECRET_FIXTURE', 'secret_ref')));
+  const overrides = Object.freeze(valid(row('MODE', 'session'), row('REMOVE', 'ignored', 'unset'), row('OPENAI_API_KEY', 'env:TENDLY_SECRET_FIXTURE', 'secret_ref')));
   assert.deepEqual(mergeEnvironment(base, overrides), {
     KEEP: { kind: 'literal', value: 'profile' },
     MODE: { kind: 'literal', value: 'session' },
     REMOVE: { kind: 'unset' },
-    OPENAI_API_KEY: { kind: 'secret_ref', reference: 'env:AGENTDOCK_SECRET_FIXTURE' },
+    OPENAI_API_KEY: { kind: 'secret_ref', reference: 'env:TENDLY_SECRET_FIXTURE' },
   });
   assert.equal(base.MODE.value, 'profile');
   assert.equal(overrides.MODE.value, 'session');

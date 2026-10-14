@@ -15,7 +15,7 @@ before(async () => {
 });
 after(async () => { await server?.close(); });
 
-const workspace = { id: 'w1', name: 'agentdock', root_path: '/srv/agentdock' };
+const workspace = { id: 'w1', name: 'tendly', root_path: '/srv/tendly' };
 const render = pane => renderToString(createSSRApp(WorkspacePane, { pane, workspaces: [workspace], sessions: [], profiles: [], gitRefresh: {} }));
 
 test('a draft pane holds the new-session form in the tab, not a dialog over the canvas', async () => {

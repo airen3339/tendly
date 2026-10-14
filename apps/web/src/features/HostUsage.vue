@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import type { Session } from '@agentdock/protocol';
+import type { Session } from '@tendly/protocol';
 import { ApiError, request } from './api';
 import { preferences } from './preferences';
 import { useI18n } from '../i18n';

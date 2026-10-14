@@ -1,4 +1,4 @@
-import type { AgentProviderKind, ModelCatalog } from '@agentdock/protocol';
+import type { AgentProviderKind, ModelCatalog } from '@tendly/protocol';
 import { agentClient } from './clients';
 
 /** The values accepted by both native clients' configuration surfaces. */

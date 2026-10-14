@@ -75,7 +75,7 @@ test('selection validation rejects unresolved choices, missing IDs and cross-pro
 
 test('unresolved choices, paths, labels and tokens never enter persistence or overwrite a prior choice', () => {
   const store = storage();rememberProfileSelection('claude_code', CLAUDE, store);
-  for (const value of [PROFILE_CHOICE_REQUIRED, '/host/private-config', 'sk-test-not-a-profile', 'env:AGENTDOCK_SECRET_TEST', 'Account label']) rememberProfileSelection('claude_code', value, store);
+  for (const value of [PROFILE_CHOICE_REQUIRED, '/host/private-config', 'sk-test-not-a-profile', 'env:TENDLY_SECRET_TEST', 'Account label']) rememberProfileSelection('claude_code', value, store);
   assert.equal(store.writes.length, 1);
   assert.equal(store.writes[0][1], CLAUDE);
   assert.equal(preferredProfileSelection('claude_code', [profile(CLAUDE)], store), CLAUDE);

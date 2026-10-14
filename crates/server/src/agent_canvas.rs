@@ -16,13 +16,13 @@ use crate::{
     agent_config::who,
     db,
 };
-use agentdock_domain::SessionId;
 use serde_json::{Value, json};
 use std::collections::HashSet;
+use tendly_domain::SessionId;
 
 pub fn tools() -> Vec<Value> {
     vec![crate::agent::tool(
-        "agentdock_canvas",
+        "tendly_canvas",
         "The tabs open on the Tendly canvas: list them, or close some or all. Closing a tab only closes the view; the session keeps running, except a temporary session, which is discarded (a working one only after the person agrees).",
         json!({
             "type": "object",

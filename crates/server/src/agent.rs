@@ -13,7 +13,6 @@
 //! what protects anything sensitive. That is the confirmation a person gives
 //! in the browser, which no token can skip.
 use crate::{ApiError, AppState, db};
-use agentdock_domain::{Session, SessionId};
 use axum::{
     Json, Router,
     extract::State,
@@ -26,6 +25,7 @@ use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
 };
+use tendly_domain::{Session, SessionId};
 
 /// Who is calling a tool.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -108,9 +108,9 @@ fn caller(state: &AppState, headers: &HeaderMap) -> Caller {
 /// and its own token. Set in its environment at every launch.
 pub fn launch_environment(state: &AppState, session: SessionId) -> [(String, String); 3] {
     [
-        ("AGENTDOCK_URL".into(), state.security.local_url()),
-        ("AGENTDOCK_AGENT_TOKEN".into(), state.agents.issue(session)),
-        ("AGENTDOCK_SESSION_ID".into(), session.to_string()),
+        ("TENDLY_URL".into(), state.security.local_url()),
+        ("TENDLY_AGENT_TOKEN".into(), state.agents.issue(session)),
+        ("TENDLY_SESSION_ID".into(), session.to_string()),
     ]
 }
 
@@ -125,7 +125,7 @@ pub fn launch_environment(state: &AppState, session: SessionId) -> [(String, Str
 pub fn equip(
     state: &AppState,
     session: &Session,
-    spec: &mut agentdock_runtime::SpawnSpec,
+    spec: &mut tendly_runtime::SpawnSpec,
 ) -> Result<(), ApiError> {
     if !tools_enabled(state, session.id) {
         return Ok(());
@@ -135,7 +135,7 @@ pub fn equip(
         spec.env_remove.retain(|removed| removed != key);
         spec.env.insert(key.clone(), value.clone());
     }
-    if session.provider == agentdock_domain::ProviderKind::Terminal {
+    if session.provider == tendly_domain::ProviderKind::Terminal {
         return Ok(());
     }
     let program = std::env::current_exe()
@@ -211,15 +211,15 @@ async fn set_session_tools(
 pub const INSTRUCTIONS: &str = "\
 Tendly is the workspace this agent may be running in: a local web app that runs Claude Code, Codex and terminals side by side, with workspaces, Git worktrees and endpoint profiles. These tools let you inspect it and, where the person allows, configure it.
 
-- Start with agentdock_status to learn which session, workspace and endpoint you are.
-- agentdock_list shows workspaces, sessions (titles and status only, never conversations), endpoint profiles and installed clients.
-- agentdock_endpoint creates, changes, tests or imports endpoint profiles. To set up an API endpoint, call create with the provider, URL and model: the person confirms in the Tendly window and types the key there. Then call test to check it works.
+- Start with tendly_status to learn which session, workspace and endpoint you are.
+- tendly_list shows workspaces, sessions (titles and status only, never conversations), endpoint profiles and installed clients.
+- tendly_endpoint creates, changes, tests or imports endpoint profiles. To set up an API endpoint, call create with the provider, URL and model: the person confirms in the Tendly window and types the key there. Then call test to check it works.
 - Never ask the person to paste an API key into the conversation, and never put one in a tool argument. Tendly collects keys in its own window.
-- agentdock_preferences sets what new sessions start with, and the light or dark theme of the interface and its terminals; agentdock_workspace adds a directory as a workspace.
-- agentdock_spawn starts another Claude Code or Codex session with a self-contained task, optionally on its own branch, for independent work worth doing in parallel. Follow it with agentdock_session (wait, result, message). You can only follow sessions you started, and a session you start cannot start more.
-- agentdock_show opens a file at a line, your Git changes, or a session in the person's Tendly window: use it to point at what you changed instead of describing where it is.
-- agentdock_usage reports the quota your official account last reported.
-- agentdock_canvas lists the tabs open on the canvas and closes some or all of them. Closing a tab never ends a session, except a temporary one.
+- tendly_preferences sets what new sessions start with, and the light or dark theme of the interface and its terminals; tendly_workspace adds a directory as a workspace.
+- tendly_spawn starts another Claude Code or Codex session with a self-contained task, optionally on its own branch, for independent work worth doing in parallel. Follow it with tendly_session (wait, result, message). You can only follow sessions you started, and a session you start cannot start more.
+- tendly_show opens a file at a line, your Git changes, or a session in the person's Tendly window: use it to point at what you changed instead of describing where it is.
+- tendly_usage reports the quota your official account last reported.
+- tendly_canvas lists the tabs open on the canvas and closes some or all of them. Closing a tab never ends a session, except a temporary one.
 - Changes that matter are confirmed by the person in the Tendly window, and a call waits up to 5 minutes for that answer. If they decline, do not retry the same change unasked.";
 
 pub(crate) fn tool(name: &str, description: &str, schema: Value) -> Value {
@@ -229,12 +229,12 @@ pub(crate) fn tool(name: &str, description: &str, schema: Value) -> Value {
 pub fn tools() -> Vec<Value> {
     let mut tools = vec![
         tool(
-            "agentdock_status",
+            "tendly_status",
             "Who you are in Tendly: the calling session, its workspace and directory, its endpoint profile and model, and the Tendly version.",
             json!({ "type": "object", "properties": {}, "additionalProperties": false }),
         ),
         tool(
-            "agentdock_list",
+            "tendly_list",
             "List Tendly workspaces, sessions (metadata only), endpoint profiles, or installed agent clients.",
             json!({
                 "type": "object",
@@ -293,18 +293,16 @@ async fn call_tool(
         input.arguments
     };
     result(match input.name.as_str() {
-        "agentdock_status" => status(&state, caller).await,
-        "agentdock_list" => list(&state, caller, &arguments).await,
-        "agentdock_endpoint" => crate::agent_config::endpoint(&state, caller, &arguments).await,
-        "agentdock_preferences" => {
-            crate::agent_config::preferences(&state, caller, &arguments).await
-        }
-        "agentdock_workspace" => crate::agent_config::workspace(&state, caller, &arguments).await,
-        "agentdock_spawn" => crate::agent_sessions::spawn(&state, caller, &arguments).await,
-        "agentdock_session" => crate::agent_sessions::session(&state, caller, &arguments).await,
-        "agentdock_show" => crate::agent_sessions::show(&state, caller, &arguments).await,
-        "agentdock_usage" => crate::agent_sessions::usage(&state, caller).await,
-        "agentdock_canvas" => crate::agent_canvas::canvas(&state, caller, &arguments).await,
+        "tendly_status" => status(&state, caller).await,
+        "tendly_list" => list(&state, caller, &arguments).await,
+        "tendly_endpoint" => crate::agent_config::endpoint(&state, caller, &arguments).await,
+        "tendly_preferences" => crate::agent_config::preferences(&state, caller, &arguments).await,
+        "tendly_workspace" => crate::agent_config::workspace(&state, caller, &arguments).await,
+        "tendly_spawn" => crate::agent_sessions::spawn(&state, caller, &arguments).await,
+        "tendly_session" => crate::agent_sessions::session(&state, caller, &arguments).await,
+        "tendly_show" => crate::agent_sessions::show(&state, caller, &arguments).await,
+        "tendly_usage" => crate::agent_sessions::usage(&state, caller).await,
+        "tendly_canvas" => crate::agent_canvas::canvas(&state, caller, &arguments).await,
         other => Err(ApiError::bad(format!("Unknown Tendly tool {other:?}"))),
     })
 }
@@ -336,7 +334,7 @@ fn key_state(state_dir: &std::path::Path, reference: Option<&str>) -> &'static s
 
 pub(crate) fn endpoint_view(
     state_dir: &std::path::Path,
-    profile: &agentdock_domain::EndpointProfile,
+    profile: &tendly_domain::EndpointProfile,
 ) -> Value {
     json!({
         "id": profile.id,
@@ -383,7 +381,7 @@ async fn status(state: &AppState, caller: Caller) -> Result<Value, ApiError> {
             })
         }
     };
-    Ok(json!({ "agentdock": { "version": env!("CARGO_PKG_VERSION") }, "you": you }))
+    Ok(json!({ "tendly": { "version": env!("CARGO_PKG_VERSION") }, "you": you }))
 }
 
 async fn list(state: &AppState, _caller: Caller, arguments: &Value) -> Result<Value, ApiError> {
@@ -401,7 +399,7 @@ async fn list(state: &AppState, _caller: Caller, arguments: &Value) -> Result<Va
             let workspace = text(arguments, "workspace_id")
                 .map(|value| {
                     value
-                        .parse::<agentdock_domain::WorkspaceId>()
+                        .parse::<tendly_domain::WorkspaceId>()
                         .map_err(|_| ApiError::bad("workspace_id is not a workspace id"))
                 })
                 .transpose()?;

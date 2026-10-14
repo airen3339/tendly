@@ -67,7 +67,7 @@ export function uploadToSession(sessionId: string, file: File, name: string, pro
   const promise = new Promise<Attachment>((resolve, reject) => {
     xhr.open("POST", `/api/sessions/${encodeURIComponent(sessionId)}/uploads?name=${encodeURIComponent(name)}`);
     xhr.setRequestHeader("Content-Type", "application/octet-stream");
-    xhr.setRequestHeader("X-AgentDock-Client", "web");
+    xhr.setRequestHeader("X-Tendly-Client", "web");
     xhr.responseType = "json";
     xhr.upload.onprogress = event => { if (event.lengthComputable) progress(event.loaded / event.total); };
     xhr.onload = () => {

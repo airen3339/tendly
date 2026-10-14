@@ -1,4 +1,4 @@
-import type { PaneNode, Session, Workspace } from "@agentdock/protocol";
+import type { PaneNode, Session, Workspace } from "@tendly/protocol";
 import { providerLabel } from "./clients";
 import { fuzzyScore } from "./fuzzy-search";
 import { isSessionArchived } from "./session-list";
@@ -129,7 +129,7 @@ export function parseWorkspaceGroupPreferences(value: unknown): WorkspaceGroupPr
 }
 
 export function workspaceGroupStorageKey(deployment: string): string {
-  return `agentdock.workspace-groups.v1:${encodeURIComponent(deployment)}`;
+  return `tendly.workspace-groups.v1:${encodeURIComponent(deployment)}`;
 }
 
 /** Persist only opaque IDs, not paths/titles. Denied/quota-limited storage stays usable in memory. */

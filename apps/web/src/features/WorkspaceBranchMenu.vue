@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue';
-import type { GitBranches, GitOutcome, GitRef } from '@agentdock/protocol';
+import type { GitBranches, GitOutcome, GitRef } from '@tendly/protocol';
 import { ApiError, errorMessage, json, request, workspacePath } from './api';
 import { useI18n } from '../i18n';
 

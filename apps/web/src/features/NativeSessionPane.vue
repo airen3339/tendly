@@ -2,7 +2,7 @@
 import TerminalEndpointSetup from "./TerminalEndpointSetup.vue";
 import AgentToolsSwitch from "./AgentToolsSwitch.vue";
 import { computed, defineAsyncComponent, ref, watch } from "vue";
-import type { EndpointProfile, ProviderKind, Session } from "@agentdock/protocol";
+import type { EndpointProfile, ProviderKind, Session } from "@tendly/protocol";
 import { errorMessage, json, providerLabel, request } from "./api";
 import { sessionConnections } from "./session-connection";
 import { backendCapabilities } from "./backend-capabilities";

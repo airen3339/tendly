@@ -1,4 +1,4 @@
-import type { EndpointProfile, Session } from '@agentdock/protocol';
+import type { EndpointProfile, Session } from '@tendly/protocol';
 import type { Attachment } from './attachment-state';
 import { opensHtmlBlock } from './html-subset';
 

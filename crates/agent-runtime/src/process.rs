@@ -224,7 +224,7 @@ pub fn launcher(program: &str, args: &[String]) -> io::Result<(String, Vec<Strin
 }
 
 /// [`launcher`], running a script shim under `node` when it is a `.js` file or
-/// an npm shim for one, instead of `AGENTDOCK_NODE_BIN`: for a caller that
+/// an npm shim for one, instead of `TENDLY_NODE_BIN`: for a caller that
 /// already chose the JavaScript runtime its own scripts use.
 pub fn launcher_with_node(
     program: &str,
@@ -304,7 +304,7 @@ fn node_program(shim_directory: Option<&Path>) -> String {
     {
         return local.to_string_lossy().into_owned();
     }
-    std::env::var("AGENTDOCK_NODE_BIN")
+    std::env::var("TENDLY_NODE_BIN")
         .ok()
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| "node".into())
@@ -411,7 +411,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn npm_and_pnpm_shims_name_their_script() {
-        let directory = std::env::temp_dir().join(format!("agentdock-shim-{}", std::process::id()));
+        let directory = std::env::temp_dir().join(format!("tendly-shim-{}", std::process::id()));
         let package = directory.join("node_modules/@scope/tool");
         std::fs::create_dir_all(&package).unwrap();
         std::fs::write(package.join("cli.js"), "").unwrap();
@@ -439,8 +439,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn a_shim_runs_its_script_with_node_and_keeps_every_argument_verbatim() {
-        let directory =
-            std::env::temp_dir().join(format!("agentdock-launch-{}", std::process::id()));
+        let directory = std::env::temp_dir().join(format!("tendly-launch-{}", std::process::id()));
         std::fs::create_dir_all(directory.join("lib")).unwrap();
         std::fs::write(directory.join("lib/cli.js"), "").unwrap();
         let shim = directory.join("tool.cmd");

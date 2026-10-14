@@ -2,11 +2,11 @@
 // Synthetic `pi --mode rpc` only. Never launches a shell, model or network request.
 import { createInterface } from 'node:readline';
 import { appendFileSync } from 'node:fs';
-const log=value=>appendFileSync(process.env.AGENTDOCK_CHAT_TEST_LOG,JSON.stringify(value)+'\n');
+const log=value=>appendFileSync(process.env.TENDLY_CHAT_TEST_LOG,JSON.stringify(value)+'\n');
 const send=message=>process.stdout.write(JSON.stringify(message)+'\n');
 const respond=(command,data,extra={})=>send({id:command.id,type:'response',command:command.type,success:true,...(data===undefined?{}:{data}),...extra});
 log({event:'args',args:process.argv.slice(2)});
-let model={provider:'agentdock',id:'qwen-local',contextWindow:40000},holding=false,asked;
+let model={provider:'tendly',id:'qwen-local',contextWindow:40000},holding=false,asked;
 // Like Pi: `isStreaming` is true from a prompt's answer until its run settles,
 // and a thinking level the model cannot use is clamped to `off`, silently.
 let running=false;

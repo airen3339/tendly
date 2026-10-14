@@ -1,9 +1,9 @@
-import type { EndpointProfile, ProviderKind } from "@agentdock/protocol";
+import type { EndpointProfile, ProviderKind } from "@tendly/protocol";
 import { DEFAULT_CLIENT, PROVIDER_KINDS, providerLabel } from "./clients";
 import { PROFILE_CHOICE_REQUIRED, preferredProfileSelection } from "./profile-preferences";
 
 export type QuickProvider = ProviderKind;
-const KEY = "agentdock.quick-provider.v1";
+const KEY = "tendly.quick-provider.v1";
 type PreferenceStorage = Pick<Storage, "getItem" | "setItem">;
 
 function browserStorage(): PreferenceStorage | undefined {

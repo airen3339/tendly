@@ -26,7 +26,7 @@ for await (const line of createInterface({ input: process.stdin })) {
 `;
 
 async function fixture(t, options = {}) {
-  const directory = await mkdtemp(join(tmpdir(), 'agentdock-app-server-'));
+  const directory = await mkdtemp(join(tmpdir(), 'tendly-app-server-'));
   const script = join(directory, 'server.mjs');
   await writeFile(script, FIXTURE);
   const closes = [], notes = [];
@@ -74,7 +74,7 @@ test('the server exiting fails what is waiting and reports why, once', async t =
 
 test('a program that cannot start is told apart from one that exited', async () => {
   const reason = await new Promise(resolve => {
-    new AppServerClient(join(tmpdir(), 'agentdock-no-such-codex'), ['app-server'], { onClose: resolve });
+    new AppServerClient(join(tmpdir(), 'tendly-no-such-codex'), ['app-server'], { onClose: resolve });
   });
   assert.equal(reason, NOT_STARTED);
 });

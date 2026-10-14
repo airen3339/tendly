@@ -10,12 +10,12 @@ resolver = "2"
 [workspace.package]
 edition = "2024"
 license = "MIT"
-version = "0.1.74"
+version = "0.1.75"
 
 [workspace.dependencies]
-agentdock-domain = { path = "crates/domain" }
-agentdock-persistence = { path = "crates/persistence" }
-agentdock-runtime = { path = "crates/agent-runtime" }
+tendly-domain = { path = "crates/domain" }
+tendly-persistence = { path = "crates/persistence" }
+tendly-runtime = { path = "crates/agent-runtime" }
 axum = { version = "0.8", features = ["ws"] }
 chrono = { version = "0.4", features = ["serde", "clock"] }
 futures-util = "0.3"

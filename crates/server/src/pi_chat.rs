@@ -805,7 +805,7 @@ mod tests {
         assert_eq!(
             pi_launch(&init(&[
                 "--model",
-                "agentdock/zai-org/GLM-5.3",
+                "tendly/zai-org/GLM-5.3",
                 "--thinking",
                 "high",
                 "--name",
@@ -818,7 +818,7 @@ mod tests {
                 "--mode",
                 "rpc",
                 "--model",
-                "agentdock/zai-org/GLM-5.3",
+                "tendly/zai-org/GLM-5.3",
                 "--thinking",
                 "high",
                 "--name",
@@ -840,12 +840,12 @@ mod tests {
     #[test]
     fn models_are_named_by_provider_and_reasoning_ones_get_depths() {
         let models = pi_models(
-            &json!({"models":[{"provider":"agentdock","id":"qwen"},{"provider":"k","id":"glm","name":"GLM","reasoning":true},{"id":"orphan"}]}),
+            &json!({"models":[{"provider":"tendly","id":"qwen"},{"provider":"k","id":"glm","name":"GLM","reasoning":true},{"id":"orphan"}]}),
         );
         assert_eq!(
             models,
             vec![
-                json!({"id":"agentdock/qwen","name":"qwen"}),
+                json!({"id":"tendly/qwen","name":"qwen"}),
                 json!({"id":"k/glm","name":"GLM","efforts":["low","medium","high"]})
             ]
         );
@@ -867,8 +867,8 @@ mod tests {
         );
         assert_eq!(pi_reply(&json!({"type":"agent_start"})), None);
         assert_eq!(
-            pi_frame("agentdock-1", "prompt", json!({"message":"hi"})),
-            json!({"id":"agentdock-1","type":"prompt","message":"hi"})
+            pi_frame("tendly-1", "prompt", json!({"message":"hi"})),
+            json!({"id":"tendly-1","type":"prompt","message":"hi"})
         );
     }
 }

@@ -36,7 +36,7 @@ beforeEach(() => {
   const values = new Map();
   const storage = { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key) };
   const fixtures = {
-    window: { innerWidth: 1440, location: { origin: 'http://agentdock.fixture.invalid' }, localStorage: storage, addEventListener() { throw Error('SSR must not mount the application'); }, removeEventListener() {} },
+    window: { innerWidth: 1440, location: { origin: 'http://tendly.fixture.invalid' }, localStorage: storage, addEventListener() { throw Error('SSR must not mount the application'); }, removeEventListener() {} },
     document: { documentElement: { lang: 'en' }, hidden: false },
     localStorage: storage,
   };

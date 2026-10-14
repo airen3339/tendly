@@ -50,7 +50,7 @@ const VERIFY_WINDOW: Duration = Duration::from_secs(150);
 /// Whether this deployment asked to be published (`--tailscale`, or
 /// `tailscale = true` in the settings file).
 pub fn enabled() -> bool {
-    std::env::var("AGENTDOCK_TAILSCALE")
+    std::env::var("TENDLY_TAILSCALE")
         .is_ok_and(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
 }
 
@@ -59,7 +59,7 @@ pub fn enabled() -> bool {
 /// the App Store build does not put on PATH, and under Program Files on
 /// Windows, which a gateway started before the install does not see on PATH.
 fn program() -> String {
-    if let Ok(explicit) = std::env::var("AGENTDOCK_TAILSCALE_BIN")
+    if let Ok(explicit) = std::env::var("TENDLY_TAILSCALE_BIN")
         && !explicit.is_empty()
     {
         return explicit;
@@ -134,7 +134,7 @@ fn not_installed(program: &str) -> Problem {
     let problem = Problem::new(
         "not_installed",
         format!(
-            "{program:?} was not found. Set AGENTDOCK_TAILSCALE_BIN if it is installed somewhere else."
+            "{program:?} was not found. Set TENDLY_TAILSCALE_BIN if it is installed somewhere else."
         ),
     );
     if cfg!(target_os = "macos") {
@@ -227,7 +227,7 @@ async fn tailscale(args: &[&str], limit: Duration) -> std::result::Result<String
     // The gateway runs without a console on Windows; without this every call
     // would flash one up.
     #[cfg(windows)]
-    command.creation_flags(agentdock_runtime::process::CREATE_NO_WINDOW);
+    command.creation_flags(tendly_runtime::process::CREATE_NO_WINDOW);
     let mut child = command
         .args(args)
         .kill_on_drop(true)
@@ -776,7 +776,7 @@ impl Tailnet {
 
     #[cfg(test)]
     pub fn disabled() -> Self {
-        Self::new(&std::env::temp_dir().join("agentdock-no-tailnet"), 0)
+        Self::new(&std::env::temp_dir().join("tendly-no-tailnet"), 0)
     }
 }
 
@@ -1065,7 +1065,7 @@ mod tests {
 
     #[test]
     fn the_tailnet_listener_answers_for_its_name_and_itself_only() {
-        let tailnet = Tailnet::new(&std::env::temp_dir().join("agentdock-tailnet-hosts"), 51000);
+        let tailnet = Tailnet::new(&std::env::temp_dir().join("tendly-tailnet-hosts"), 51000);
         assert!(!tailnet.serves_host("mac.tail1234.ts.net"), "no name yet");
         tailnet.current().machine = Some(Machine {
             name: "mac.tail1234.ts.net".into(),

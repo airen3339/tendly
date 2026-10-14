@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { piHistory } from './history-pi.mjs';
 
 test("a workspace's Pi sessions are listed by their first prompt, and other directories' are not", async () => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), 'agentdock-pi-history-')));
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'tendly-pi-history-')));
   try {
     const work = join(root, 'work'), other = join(root, 'other'), home = join(root, 'home');
     await mkdir(work); await mkdir(other);

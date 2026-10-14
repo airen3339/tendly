@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue';
-import type { EndpointProfile } from '@agentdock/protocol';
+import type { EndpointProfile } from '@tendly/protocol';
 import PageShell from './PageShell.vue';
 import Icon from './Icon.vue';
 import AgentClientsPanel from './AgentClientsPanel.vue';

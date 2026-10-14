@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import type { EndpointProfile, ProviderKind, Session } from "@agentdock/protocol";
+import type { EndpointProfile, ProviderKind, Session } from "@tendly/protocol";
 import ChatSessionPane from "./ChatSessionPane.vue";
 import NativeSessionPane from "./NativeSessionPane.vue";
 import SessionCommonActions from "./SessionCommonActions.vue";

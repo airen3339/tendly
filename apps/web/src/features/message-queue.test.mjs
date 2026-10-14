@@ -13,8 +13,8 @@ test('queued messages go out in order and each session keeps its own', () => {
 });
 
 test('a message waiting mid-turn keeps its attachments, and may be only attachments', () => {
-  const file = { path: '.agentdock-files/shot.png', name: 'shot.png', bytes: 10 };
+  const file = { path: '.tendly-files/shot.png', name: 'shot.png', bytes: 10 };
   assert.equal(queuedContent({ id: 'a', text: ' look at this ' }), 'look at this');
-  assert.equal(queuedContent({ id: 'b', text: 'look', attachments: [file] }), 'Attached file in this workspace:\n- .agentdock-files/shot.png\n\nlook');
-  assert.equal(queuedContent({ id: 'c', text: '', attachments: [file] }), 'Attached file in this workspace:\n- .agentdock-files/shot.png');
+  assert.equal(queuedContent({ id: 'b', text: 'look', attachments: [file] }), 'Attached file in this workspace:\n- .tendly-files/shot.png\n\nlook');
+  assert.equal(queuedContent({ id: 'c', text: '', attachments: [file] }), 'Attached file in this workspace:\n- .tendly-files/shot.png');
 });

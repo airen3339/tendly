@@ -2,7 +2,6 @@
 //! view of it and dropped with the last one, pushes which paths changed so the
 //! tree and open files follow edits an agent (or anything else) makes on disk.
 use crate::{AppState, Result, root};
-use agentdock_domain::WorkspaceId;
 use axum::{
     Router,
     extract::{
@@ -21,6 +20,7 @@ use std::{
     sync::{Arc, Mutex, Weak},
     time::Duration,
 };
+use tendly_domain::WorkspaceId;
 use tokio::sync::{broadcast, mpsc};
 
 /// Events closer together than this reach the browser as one message.
