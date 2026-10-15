@@ -918,6 +918,8 @@ export const zhCN: Readonly<Record<string, string>> = {
   "Loaded from the native Codex catalog. Account access may differ.": "已读取 Codex 原生模型目录，当前账号的可用范围可能不同。",
   "Native Codex uses its client catalog. Custom endpoints use the models API and may require an API key. No inference is requested.": "原生 Codex 读取客户端模型目录；自定义端点调用 models API，可能需要 API Key。均不会发起推理请求。",
   "Actual effort support depends on the endpoint and model.": "实际支持的思考深度取决于端点和模型。",
+  "{count} commits to push · open Changes": "{count} 个提交待推送 · 打开变更",
+  "{count} commits to pull · open Changes": "{count} 个提交待拉取 · 打开变更",
   "Thinking depth": "思考深度",
   "Automatic · provider default": "自动 · 使用客户端默认值",
   "Plan · review before edits": "计划 · 修改前先审阅",

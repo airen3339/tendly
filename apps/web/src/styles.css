@@ -589,6 +589,9 @@ svg { flex-shrink: 0; vertical-align: middle; }
 .statusbar { display: flex; align-items: center; gap: 17px; height: 28px; flex-shrink: 0; border-top: 1px solid var(--glass-edge); padding: 0 17px; background: var(--glass); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); color: var(--muted); font-size: var(--text-xs); }
 .statusbar>span, .statusbar>button { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
 .statusbar>button { padding: 0; background: none; border: 0; color: var(--warn-ink); font-size: var(--text-xs); }
+.statusbar>button { cursor: pointer; }
+.statusbar>button:hover { text-decoration: underline; }
+.statusbar>button.git-count:not(.due) { color: var(--muted); }
 .status-agent-count { color: var(--muted); }
 .mobile-menu, .drawer-overlay, .explorer-close { display: none; }
 .welcome-screen { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; padding: 30px; text-align: center; }
