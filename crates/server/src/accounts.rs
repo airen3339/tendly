@@ -317,6 +317,7 @@ pub struct AccountView {
     pub status: String,
     pub email: Option<String>,
     pub plan: Option<String>,
+    pub quota_tier: Option<String>,
     pub checked_at: Option<String>,
     pub error: Option<String>,
     pub login: Option<LoginView>,
@@ -336,6 +337,7 @@ struct BridgeView {
     status: String,
     email: Option<String>,
     plan: Option<String>,
+    quota_tier: Option<String>,
     checked_at: Option<String>,
     error: Option<String>,
     limits: Option<Limits>,
@@ -701,6 +703,7 @@ fn initial_view(state: &AppState, record: &AccountRecord) -> Result<AccountView>
         status: "unknown".into(),
         email: None,
         plan: None,
+        quota_tier: None,
         checked_at: None,
         error: None,
         login: None,
@@ -2583,6 +2586,7 @@ fn apply_event(
             current.status = view.status;
             current.email = view.email;
             current.plan = view.plan;
+            current.quota_tier = view.quota_tier;
             current.checked_at = view.checked_at;
             current.error = view.error;
             current.limits = view.limits;

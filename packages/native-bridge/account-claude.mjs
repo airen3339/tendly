@@ -53,6 +53,7 @@ export function claudeStatusPath(directory, configEnv) {
 }
 
 const CLAUDE_OAUTH_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
+const CLAUDE_OAUTH_PROFILE_URL = 'https://api.anthropic.com/api/oauth/profile';
 const MAX_CLAUDE_CREDENTIAL_BYTES = 512 * 1024;
 
 function claudeOAuthCredential(payload) {
@@ -132,10 +133,10 @@ async function claudeUserAgent(job) {
   return `claude-code/${claudeVersions.get(program)}`;
 }
 
-async function fetchClaudeOAuthUsage(accessToken, userAgent) {
+async function fetchClaudeOAuthUsage(accessToken, userAgent, url = CLAUDE_OAUTH_USAGE_URL) {
   const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 12000);
   try {
-    const response = await fetch(CLAUDE_OAUTH_USAGE_URL, {
+    const response = await fetch(url, {
       method: 'GET',
       redirect: 'error',
       signal: controller.signal,
@@ -152,6 +153,18 @@ async function fetchClaudeOAuthUsage(accessToken, userAgent) {
     if (Buffer.byteLength(raw) > MAX_CLAUDE_CREDENTIAL_BYTES) throw Error('response too large');
     return JSON.parse(raw);
   } finally { clearTimeout(timer); }
+}
+
+// Keep the raw organization/tier pair as the capacity identity, including
+// future tiers we do not yet have a friendly label for.
+export function normalizeClaudeProfile(payload) {
+  const organization = payload?.organization;
+  const type = clean(organization?.organization_type, 80);
+  const tier = clean(organization?.rate_limit_tier, 120);
+  if (!type || !tier) return {};
+  const plan = type === 'claude_max' ? (tier === 'default_claude_max_5x' ? 'max 5x' : tier === 'default_claude_max_20x' ? 'max 20x' : 'max')
+    : type.replace(/^claude_/, '');
+  return { plan, quota_tier: JSON.stringify([type, tier]) };
 }
 
 /**
@@ -210,8 +223,17 @@ async function claudeUsage(job, env) {
   const credential = await readClaudeOAuthCredential(job);
   let failure;
   if (credential?.accessToken && view.status === 'signed_in') {
+    const userAgent = await claudeUserAgent(job);
+    // Profile failures must not hide official percentages or reuse a cached
+    // subscription's capacity. An absent quota_tier disables estimation.
+    const [profile, usage] = await Promise.allSettled([
+      fetchClaudeOAuthUsage(credential.accessToken, userAgent, CLAUDE_OAUTH_PROFILE_URL),
+      fetchClaudeOAuthUsage(credential.accessToken, userAgent),
+    ]);
+    if (profile.status === 'fulfilled') Object.assign(view, normalizeClaudeProfile(profile.value));
     try {
-      const limits = normalizeClaudeLimits(await fetchClaudeOAuthUsage(credential.accessToken, await claudeUserAgent(job)), 'oauth_usage');
+      if (usage.status === 'rejected') throw usage.reason;
+      const limits = normalizeClaudeLimits(usage.value, 'oauth_usage');
       return {
         ...view,
         limits,
