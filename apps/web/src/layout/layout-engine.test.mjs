@@ -6,7 +6,7 @@ import {
   activatePane, applyPreset, cloneNode, closePane, collapseBelowMin, containerId,
   createDefaultLayoutDocument, createPane, dockPane, findNode, findNodes,
   flattenPanes, isPaneNode, normalizeRatio, projectLayout, replacePane, resizeSplit,
-  restoreCollapsed, selectionGroups, snapRatio, splitPane, updatePane, validateLayout,
+  restoreCollapsed, selectionGroups, snapRatio, splitPane, updatePane, validateLayout, validateLayoutDetailed,
 } from './layout-engine.ts';
 
 const pane = (id) => createPane(id, 'agent_chat', `Session ${id}`, { session_id: id, input: `draft-${id}` });
@@ -275,4 +275,33 @@ test('repeated move / preset / close / project operations maintain invariant IDs
     assert.equal(validateLayout(root), true);
   }
   assert.equal(flattenPanes(root).length, 18);
+});
+
+test('a detailed validation names where each problem is', () => {
+  assert.deepEqual(validateLayoutDetailed({ version: 1, root: split('s', pane('a'), pane('b')) }), { valid: true, errors: [] });
+  const broken = {
+    version: 0,
+    root: split('s', { type: 'pane', id: 'a', kind: 'browser' }, stack('t', [pane('a'), { type: 'split', id: 'x' }], 'gone'), 'diagonal', 1),
+    collapsed: 'nope',
+  };
+  const { valid, errors } = validateLayoutDetailed(broken);
+  assert.equal(valid, false);
+  for (const expected of [
+    'version must be a positive integer',
+    'root.direction is invalid',
+    'root.ratio must be finite and between 0 and 1',
+    'root.first.kind is invalid',
+    'duplicate node id: a',
+    'root.second.panes[1] must be a pane',
+    'root.second.activePaneId is missing from tabs',
+    'collapsed must be an array',
+  ]) assert.ok(errors.includes(expected), `${expected} in ${JSON.stringify(errors)}`);
+});
+
+test('validation stops at its safety limit instead of walking a runaway tree', () => {
+  let node = pane('leaf');
+  for (let i = 0; i < 200; i++) node = split(`s${i}`, node, pane(`p${i}`));
+  const result = validateLayoutDetailed(node);
+  assert.equal(result.valid, false);
+  assert.deepEqual(result.errors.filter(e => e === 'layout exceeds safety limit'), ['layout exceeds safety limit'], 'reported once');
 });
