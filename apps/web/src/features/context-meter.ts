@@ -47,3 +47,17 @@ export function compactTokens(value: number): string {
   const millions = value / 1_000_000;
   return `${millions < 10 ? millions.toFixed(1).replace(/\.0$/, '') : Math.round(millions)}M`;
 }
+
+/** The server's answer for a model's window: one the user set, or the published one. */
+export interface KnownWindow { context_window: number | null; source: 'yours' | 'published' | null }
+
+/**
+ * The usage to measure, against the window the user set for this model, else
+ * what the client reports, else the published one. A client behind a gateway
+ * can report a window its model does not have.
+ */
+export function measuredUsage<T extends ContextUsage>(usage: T | undefined, known: KnownWindow | undefined): T | undefined {
+  if (!usage) return usage;
+  const window = known?.source === 'yours' ? known.context_window ?? undefined : usage.context_window ?? known?.context_window ?? undefined;
+  return { ...usage, context_window: window };
+}

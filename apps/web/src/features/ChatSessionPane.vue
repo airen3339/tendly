@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, h, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
-import type { EndpointProfile, ProviderKind, Session, Workspace } from '@tendly/protocol';
-import { ApiConnectionError, assetUrl, errorMessage, json, providerLabel, request, sessionPath, workspacePath } from './api';
+import type { EndpointProfile, Session, Workspace } from '@tendly/protocol';
+import { assetUrl, errorMessage, json, providerLabel, request, sessionPath, workspacePath } from './api';
 import { backendCapabilities } from './backend-capabilities';
-import { AGENT_CLIENTS, agentClient } from './clients';
+import { agentClient } from './clients';
 import { sessionConnections } from './session-connection';
 import { createSessionStream, type SessionStreamState } from './session-stream';
 import { onPageReturn } from './page-return';
@@ -18,12 +18,14 @@ import AgentToolsSwitch from './AgentToolsSwitch.vue';
 import { useMobile } from './mobile';
 import { describeModel, resolvedDefaultName } from './model-description';
 import ContextRing from './ContextRing.vue';
-import { effortLabel, modelEfforts } from './reasoning-effort';
+import { measuredUsage, type KnownWindow } from './context-meter';
+import { effortFill as effortFillFor, effortLabel, effortStops as effortStopsFor, effortVivid as effortVividAt, modelEfforts, restingStop } from './reasoning-effort';
 import { attachmentError, canSendMessage, composeMessage, formatBytes, MAX_ATTACHMENTS_PER_MESSAGE, pastedFile, type Attachment } from './attachment-state';
 import { ACCESS_LABEL, approvalBody, approvalChoices, DECISION_LABEL, type ApprovalDecision } from './chat-approvals';
+import { PERMISSION_LABELS, PERMISSION_NOTES, permissionName as permissionNameFor } from './permission-modes';
 import { applyCommand, matchCommands, moveHighlight, slashQuery, unsupportedCommand } from './slash-commands';
 import { MarkdownContent } from './MarkdownContent';
-import { handoffArrivals, handoffTranscript } from './handoff';
+import { handoffArrivals, handoffChoices as handoffChoicesFor, handoffDraft, handoffTitle, profileNote, type HandoffChoice } from './handoff';
 import { messageQueue, queuedContent, type QueuedMessage } from './message-queue';
 import { lastChatSeq } from './chat-model';
 import { attachedImagePaths } from './markdown-model';
@@ -44,7 +46,7 @@ import { createFileSearch } from './file-search';
 import type { SearchHit } from './file-search';
 import { useI18n } from '../i18n';
 import { isMac } from './shortcuts';
-import { acknowledgeReceipt } from './chat-model';
+import { pendingMessage, settleAccepted, settleFailed } from './message-delivery';
 import { useSessionMenuPosition } from './session-menu-position';
 import { canReopenInTerminal, terminalReopen } from './terminal-reopen';
 import { randomId } from './random-id';
@@ -419,12 +421,8 @@ watch([() => view.value.ready, () => activeProfile.value?.id, () => props.sessio
 const endpointCatalog = computed(() => { const prefix = activeProfile.value?.native_config ? undefined : agentClient(props.session.provider)?.endpointModelPrefix; return prefix ? profileCatalog.value.map(entry => ({ ...entry, id: prefix + entry.id })) : profileCatalog.value; });
 const offeredCatalog = computed(() => { const prefix = activeProfile.value?.native_config ? '' : agentClient(props.session.provider)?.endpointModelPrefix ?? ''; return offeredModels(endpointCatalog.value, (matchingProfiles.value.find(profile => profile.id === props.session.endpoint_profile_id) ?? activeProfile.value)?.models?.map(id => prefix + id)); });
 const models = computed(() => mergeModels(view.value.models, activeProfile.value?.native_config ? [] : offeredCatalog.value, view.value.model ?? activeProfile.value?.model ?? undefined));
-/**
- * The window to measure the context against: the one the user set for this
- * model, else what the client reports, else the published one. A client
- * behind a gateway can report a window its model does not have.
- */
-const modelContext = ref<{ context_window: number | null; source: 'yours' | 'published' | null }>();
+/** The window the server knows for the model in use (context-meter.ts weighs it against the client's). */
+const modelContext = ref<KnownWindow>();
 /** The menu's list, narrowed by what is typed below it: with an endpoint's hundred models, typing finds one. */
 const visibleModels = computed(() => filterModels(models.value, customModel.value));
 // Before the client speaks, the model in use is the profile's, or the one the
@@ -435,15 +433,11 @@ watch(currentModel, async model => {
   modelContext.value = undefined;
   if (!model) return;
   try {
-    const info = await request<{ context_window: number | null; source: 'yours' | 'published' | null }>(`/models/context?model=${encodeURIComponent(model)}`);
+    const info = await request<KnownWindow>(`/models/context?model=${encodeURIComponent(model)}`);
     if (currentModel.value === model) modelContext.value = info;
   } catch { /* An older backend: the client's own figure stands. */ }
 }, { immediate: true });
-const ringUsage = computed(() => {
-  const usage = view.value.usage, known = modelContext.value;
-  const window = known?.source === 'yours' ? known.context_window ?? undefined : usage?.context_window ?? known?.context_window ?? undefined;
-  return usage ? { ...usage, context_window: window } : usage;
-});
+const ringUsage = computed(() => measuredUsage(view.value.usage, modelContext.value));
 const currentModelEntry = computed(() => models.value.find(entry => entry.id === currentModel.value));
 /**
  * A model typed by hand rather than picked from the list.
@@ -480,9 +474,7 @@ const effortChoices = computed(() => {
   if (entry) return entry.efforts ?? [];
   return modelEfforts(provider, activeProfile.value?.model ?? undefined, undefined, selectedEffort.value || activeProfile.value?.effort || undefined);
 });
-/** Stop 0 leaves the depth to the endpoint; the rest are the advertised levels,
- * so dragging never invents a level the client did not offer. */
-const effortStops = computed(() => ['', ...effortChoices.value]);
+const effortStops = computed(() => effortStopsFor(effortChoices.value));
 const liveEffort = computed(() => view.value.effort ?? selectedEffort.value);
 /**
  * A drag is one gesture, and the request belongs at the end of it.
@@ -493,15 +485,14 @@ const liveEffort = computed(() => view.value.effort ?? selectedEffort.value);
  * now, and the level is sent when it is let go.
  */
 const heldEffort = ref<number>();
-const effortIndex = computed(() => heldEffort.value ?? Math.max(0, effortStops.value.indexOf(liveEffort.value)));
+const effortIndex = computed(() => heldEffort.value ?? restingStop(effortStops.value, liveEffort.value));
 /** What the slider is pointing at: where it is being held, or where it rests. */
 const effortStop = computed(() => heldEffort.value === undefined ? liveEffort.value : effortStops.value[heldEffort.value] ?? '');
 const effortName = computed(() => effortStop.value ? effortLabel(effortStop.value) : t('Thinking depth'));
 /** Inside the panel there is room to say what the chip cannot: that nothing has
  * been chosen and the client is deciding. */
 const effortSetting = computed(() => effortStop.value ? effortLabel(effortStop.value) : t('Client default'));
-/** Track fill, as a fraction, for the coloured part left of the thumb. */
-const effortFill = computed(() => effortStops.value.length < 2 ? 0 : effortIndex.value / (effortStops.value.length - 1));
+const effortFill = computed(() => effortFillFor(effortStops.value, effortIndex.value));
 function dragEffort(event: Event) { heldEffort.value = Number((event.target as HTMLInputElement).value); }
 function commitEffort(event: Event) {
   const stop = effortStops.value[Number((event.target as HTMLInputElement).value)];
@@ -514,38 +505,15 @@ function commitEffort(event: Event) {
 // Letting go without changing anything raises no `change` event, so the client
 // reporting its level is the other thing that ends a hold.
 watch(liveEffort, () => { heldEffort.value = undefined; });
-/** The top third of whatever this client offers, so the flourish marks the
- * genuinely expensive end rather than a level name hardcoded here. */
-const effortVivid = computed(() => !!effortStop.value && effortStops.value.length > 2 && effortIndex.value >= effortStops.value.length - 2);
+const effortVivid = computed(() => effortVividAt(effortStops.value, effortIndex.value, effortStop.value));
 const endpointMenu = ref<InstanceType<typeof ChipMenu>>();
 const modelMenu = ref<InstanceType<typeof ChipMenu>>();
-/** Applies immediately: both clients switch in place, so there is no context
- * boundary to confirm and no bridge restart to warn about. */
-/**
- * How tools get approved, for the running session.
- *
- * The list comes from the client — Codex has no plan or accept-edits — and the
- * current value is the one the client reports rather than the one last asked
- * for, so this never claims a mode the client is not in.
- */
-const PERMISSION_LABELS: Record<string, string> = { ask: 'Ask every time', plan: 'Plan first', accept_edits: 'Accept edits', danger: 'Never ask' };
-/**
- * What each mode actually does, next to its name.
- *
- * The names are short enough to be guessed at wrongly -- "accept edits" does
- * not say that everything else still asks -- and this is the one place where
- * there is room to say it. The unattended mode says what it costs rather than
- * what it saves, because that is the part worth reading twice.
- */
-const PERMISSION_NOTES: Record<string, string> = {
-  ask: 'Asks before it runs anything.',
-  plan: 'Works out an approach first and waits for you to accept it.',
-  accept_edits: 'File edits go through; everything else still asks.',
-  danger: 'Runs every tool without asking. Anyone who can reach this workspace can too.',
-};
+/** How tools get approved (permission-modes.ts). A change applies immediately:
+ * both clients switch in place, so there is no context boundary to confirm and
+ * no bridge restart to warn about. */
 const permissionChoices = computed(() => view.value.permissionModes ?? []);
 const livePermission = computed(() => view.value.permissionMode ?? '');
-const permissionName = computed(() => livePermission.value ? t(PERMISSION_LABELS[livePermission.value] ?? livePermission.value) : t('Approval'));
+const permissionName = computed(() => permissionNameFor(livePermission.value, t));
 const permissionDanger = computed(() => livePermission.value === 'danger');
 /**
  * On a phone the composer keeps one row: attach, a single settings button and
@@ -631,18 +599,6 @@ async function applyModelAtLaunch() {
   });
 }
 /**
- * What choosing each configuration actually means.
- *
- * "Isolated" read as the careful, better choice, when what it does is start
- * the client with an empty home: no sign-in, none of the host's settings. The
- * menu is the only place that choice is made, so it is where that is said.
- */
-function profileNote(profile: EndpointProfile) {
-  if (profile.native_config) return t('Uses the sign-in and settings in {path}', { path: profile.native_config.config_dir });
-  if (profile.endpoint_url) return t('Custom endpoint · {url}', { url: profile.endpoint_url });
-  return t('Custom endpoint profile');
-}
-/**
  * Ways to begin, for a conversation that has none yet.
  *
  * Each only fills the composer: what is sent is still the user's to read and
@@ -674,15 +630,7 @@ function useStarter(prompt: string) {
  * box (see handoff.ts). Nothing is sent until the user has read it and said
  * what to do next, and this session is left exactly as it is.
  */
-type HandoffChoice = { provider: ProviderKind; profileId: string | null; name: string; note: string; workspaceId?: string; branch?: string };
-const handoffChoices = computed<HandoffChoice[]>(() => {
-  // Offered with an empty conversation too: then it is simply the same work in another client.
-  if (props.session.provider === 'terminal') return [];
-  return AGENT_CLIENTS.filter(provider => provider !== props.session.provider).flatMap(provider => [
-    ...props.profiles.filter(profile => profile.provider === provider).map(profile => ({ provider, profileId: profile.id, name: profile.name, note: profileNote(profile) })),
-    { provider, profileId: null, name: t('Native · isolated configuration'), note: t('A fresh, empty client home: no host sign-in or settings, so it may ask you to log in.') },
-  ]);
-});
+const handoffChoices = computed(() => handoffChoicesFor(props.session.provider, props.profiles, t));
 const handoffTarget = ref<HandoffChoice>();
 function pickHandoff(choice: HandoffChoice) {
   endpointMenu.value?.close(true);
@@ -693,11 +641,9 @@ async function confirmHandoff() {
   if (!choice || actionBusy.value) return;
   await runAction(async () => {
     const messages = view.value.items.flatMap(item => item.type === 'message' ? [{ role: item.role, text: item.text }] : []);
-    const transcript = handoffTranscript(messages, { user: t('You'), assistant: providerLabel(source.provider), omitted: t('Earlier messages did not fit and were left out') });
-    const created = await request<Session>(`${workspacePath(choice.workspaceId ?? source.workspace_id)}/sessions`, json('POST', { title: choice.branch ? t('{title} · {provider}', { title: source.title, provider: choice.branch }) : t('{title} · {provider}', { title: source.title, provider: providerLabel(choice.provider) }), provider: choice.provider, endpoint_profile_id: choice.profileId, interaction_mode: 'structured' }));
-    // Nothing said yet means nothing to carry: the new session starts clean.
-    if (messages.length) chatDrafts.get(created.id).text = (choice.branch ? t('Here is a conversation I had in another checkout. This session works on branch {branch} in its own worktree; continue the work here, and do not redo what is already done.', { branch: choice.branch }) : t('Here is a conversation I had with {agent}. Pick up the work where it left off: read it first, and do not redo what is already done.', { agent: providerLabel(source.provider) }))
-      + '\n\n<conversation>\n' + transcript.text + '\n</conversation>\n\n' + t('Next:') + ' ';
+    const created = await request<Session>(`${workspacePath(choice.workspaceId ?? source.workspace_id)}/sessions`, json('POST', { title: handoffTitle(source.title, choice, t), provider: choice.provider, endpoint_profile_id: choice.profileId, interaction_mode: 'structured' }));
+    const text = handoffDraft(messages, source.provider, choice, t);
+    if (text) chatDrafts.get(created.id).text = text;
     handoffTarget.value = undefined; handoffArrivals.add(created.id);
     emit('changed'); emit('openSession', created);
   });
@@ -999,8 +945,7 @@ watch(() => [canSendIgnoringText.value, queued.value.length] as const, ([ready, 
   if (!ready || !count || draft.value.pending) return;
   const next = messageQueue.shift(props.session.id); if (!next) return;
   const id = props.session.id, target = draft.value, messageId = randomId();
-  const keep = target.text;
-  target.pending = { id: messageId, content: queuedContent(next), text: keep, state: 'sending', profileId: props.session.endpoint_profile_id, configurationRevision: props.session.configuration_revision??0 }; target.notice = undefined; error.value = '';
+  target.pending = pendingMessage(messageId, queuedContent(next), target.text, props.session); target.notice = undefined; error.value = '';
   void deliver(id, target);
 });
 async function send(queue = false) {
@@ -1017,7 +962,7 @@ async function send(queue = false) {
   const typed = target.text;
   const content = composeMessage(typed, target.attachments ?? []);
   target.attachments = [];
-  target.pending = { id: messageId, content, text: typed, state: 'sending', profileId: props.session.endpoint_profile_id, configurationRevision: props.session.configuration_revision??0 }; target.notice = undefined; error.value = '';
+  target.pending = pendingMessage(messageId, content, typed, props.session); target.notice = undefined; error.value = '';
   await deliver(id, target);
 }
 async function pickAttachments(event: Event) {
@@ -1080,18 +1025,11 @@ async function deliver(id: string, target: ChatDraft) {
   const { id: messageId, content } = pending;
   error.value = '';
   try {
-    const receipt=await request(`${sessionPath(id)}/conversation/message`, json('POST', { id: messageId, content, configuration_revision: pending.configurationRevision??0 }));
-    acknowledgeReceipt(target,receipt);
-    if (target.text === content) target.text = '';
-    // A durable receipt can acknowledge an older, already-trimmed message.
-    // Missing receipts still need the canonical event; never replay automatically.
-    if (target.pending?.id === messageId) { target.pending.state = 'unknown'; target.notice = 'Message accepted. Refresh the conversation if its event has not appeared.'; }
+    const receipt = await request(`${sessionPath(id)}/conversation/message`, json('POST', { id: messageId, content, configuration_revision: pending.configurationRevision ?? 0 }));
+    settleAccepted(target, messageId, content, receipt);
     if (props.session.id === id && mounted.value) { emit('changed'); void load(); }
   } catch (cause) {
-    if (target.pending?.id === messageId) {
-      if (cause instanceof ApiConnectionError || !(cause instanceof Error) || !('status' in cause) || Number(cause.status) >= 500 || Number(cause.status) < 400) { target.pending.state = 'unknown'; target.notice = 'Delivery is uncertain. Your draft is kept; refresh the conversation before deciding what to do. It will not be sent again automatically.'; }
-      else {target.pending = undefined;if(!target.text)target.text=content;}
-    }
+    settleFailed(target, messageId, content, cause);
     if (props.session.id === id && mounted.value) error.value = errorMessage(cause);
   }
 }
@@ -1297,7 +1235,7 @@ function keydown(event: KeyboardEvent) {
       <div v-if="queued.length" class="chat-queue" role="list" :aria-label="t('Queued messages')"><div v-for="(item,index) in queued" :key="item.id" class="chat-queued" role="listitem"><span class="chat-queued-mark">{{ index===0 ? t('Next') : index+1 }}</span><p :title="item.text">{{ item.text.trim() || item.attachments?.map(file=>file.name).join(', ') }}<small v-if="item.text.trim()&&item.attachments?.length" class="chat-queued-files"> · {{ t('{count} attached', { count: item.attachments.length }) }}</small></p><button v-if="view.turn==='running'" type="button" :title="t('Hand this to the running turn; the agent reads it at its next step')" :disabled="steering" @click="steerQueued(item.id)">{{ t('Steer') }}</button><button type="button" :title="t('Interrupt the agent and send this now')" @click="sendQueuedNow(item.id)">{{ t('Send now') }}</button><button type="button" :title="t('Move back into the message box')" @click="editQueued(item.id)">{{ t('Edit') }}</button><button type="button" class="chat-queued-remove" :aria-label="t('Remove from queue')" @click="messageQueue.remove(session.id,item.id)">×</button></div><small>{{ t('Sent in order when the agent finishes.') }}</small></div>
       <textarea ref="composerInput" v-model="draft.text" :aria-label="t('Message your agent')" :placeholder="booting?t('{provider} is starting — you can already type…',{provider:providerLabel(session.provider)}):view.turn==='running'?t(mobile?'Steer the agent…':'Agent is working — Enter steers it, ⌥/Alt+Enter queues for after'):mobile?t('Message {provider}…',{provider:providerLabel(session.provider)}):t('Ask your agent to build, explore, or fix something…')" rows="2" :disabled="!supported||!structuredSession||!!draft.pending" @focus="wake" @paste="pasteFiles" @dragover.prevent @drop="dropFiles" @compositionstart="composing=true" @compositionend="composing=false" @keydown="keydown" @keyup="syncCaret" @click="syncCaret" @input="syncCaret" />
       <ul v-if="attachments.length" class="chat-attachments" :aria-label="t('Attached files')"><li v-for="file in attachments" :key="file.path"><Icon name="file" :size="13"/><span class="chat-attachment-name" :title="file.path">{{ file.name }}</span><small>{{ formatBytes(file.bytes) }}</small><button type="button" :aria-label="t('Remove {name}',{name:file.name})" @click="removeAttachment(file.path)"><Icon name="close" :size="12"/></button></li></ul>
-      <div class="chat-composer-controls"><input ref="fileInput" class="sr-only" type="file" multiple :disabled="isPreview||uploading" @change="pickAttachments"/><button type="button" class="chat-attach" :aria-label="t(uploading?'Uploading…':'Attach files')" :title="t('Attach files to this workspace')" :disabled="isPreview||uploading||!supported" @click="fileInput?.click()"><Icon name="plus" :size="18"/></button><button v-if="mobile" type="button" :class="['chat-options', { danger: permissionDanger }]" :aria-label="t('Session settings')" @click="optionsOpen=true"><Icon name="settings" :size="17"/><span>{{ optionsSummary }}</span><Icon v-if="permissionDanger" class="chat-options-danger" name="shield" :size="14" :title="t('Tools run without asking')" /><Icon name="chevron" :size="12" class="chat-options-caret"/></button><Teleport :to="chipsInSheet ? '#'+optionsTarget : 'body'" :disabled="!chipsInSheet"><div :class="['chat-chip-strip', { 'chip-rows': chipsInSheet }]"><ChipMenu v-if="repoState" ref="branchMenu" class="chat-branch" :caption="t('Branch')" :label="sessionBranch || t('Detached HEAD')" :active="!!session.checkout_path" :disabled="actionBusy||turnBusy" :title="session.checkout_path ? t('Works in worktree {path}', { path: session.checkout_path }) : t('Works in the workspace directory')"><template #mark><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M5 3v7M5 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm0-7a2 2 0 1 0 0-.01M11 5a2 2 0 1 0 0-.01M11 7c0 2-2 3-6 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></template><div class="chat-branch-body"><header>{{ t('Branch for this session') }}</header><p>{{ t('Moves only this session, into that branch\'s own worktree. Other sessions keep their branches.') }}</p><nav><button v-for="name in branchChoices" :key="name" type="button" :class="{selected:name===sessionBranch}" @click="pickBranch(name)"><span>{{ name }}</span><small v-if="name===sessionBranch">{{ t('Current') }}</small><small v-else-if="name===repoState.current">{{ t('Workspace directory') }}</small></button></nav><form @submit.prevent="pickBranch(branchTarget)"><input v-model="branchTarget" :placeholder="t('New branch name')" maxlength="200" spellcheck="false" autocomplete="off" /><button type="submit" :disabled="!branchTarget.trim()">{{ t('Create') }}</button></form></div></ChipMenu><ChipMenu ref="endpointMenu" class="chat-endpoint" :caption="t('Endpoint profile')" :label="endpointName" :disabled="!canOpenEndpoint" :title="t('Endpoint profile')"><template #mark><ProviderIcon :provider="session.provider" :size="14"/></template><nav :aria-label="t('Endpoint profile')"><p v-if="!canConfigure" class="chat-menu-note">{{ t('Wait for the current turn and approvals before changing endpoints.') }}</p><button type="button" :class="{selected:selectedProfile===''}" :disabled="!canConfigure" @click="pickEndpoint('')"><strong>{{ t('Native · isolated configuration') }}</strong><small>{{ t('A fresh, empty client home: no host sign-in or settings, so it may ask you to log in.') }}</small></button><button v-for="profile in matchingProfiles" :key="profile.id" type="button" :class="{selected:selectedProfile===profile.id}" :disabled="!canConfigure" @click="pickEndpoint(profile.id)"><strong>{{ profile.name }}</strong><small>{{ profileNote(profile) }}</small></button><button v-if="session.endpoint_profile_id&&!matchingProfiles.some(p=>p.id===session.endpoint_profile_id)" type="button" class="selected" disabled>{{ endpointName }}</button><template v-if="handoffChoices.length"><p class="chat-menu-section">{{ t('Switch to another client') }}<small>{{ t('Opens a new session with this conversation in its message box; this one stays as it is.') }}</small></p><button v-for="choice in handoffChoices" :key="choice.provider+':'+(choice.profileId??'')" type="button" class="chat-handoff-choice" @click="pickHandoff(choice)"><strong><ProviderIcon :provider="choice.provider" :size="12"/>{{ providerLabel(choice.provider) }} · {{ choice.name }}</strong><small>{{ choice.note }}</small></button></template><button type="button" class="chat-endpoint-manage" @click="endpointMenu?.close(true); emit('profiles')"><Icon name="account" :size="13" />{{ t('Manage endpoint profiles') }}</button></nav></ChipMenu><span v-if="booting" class="chat-boot-chip" role="status"><ProviderIcon class="chat-working-mark" :provider="session.provider" :size="12"/>{{ t('Starting…') }}</span><ChipMenu v-if="canTuneModel&&(models.length||currentModel)" ref="modelMenu" class="chat-model" :caption="t('Model')" :label="modelName" :active="!modelDefault" :disabled="!canPickModel" :title="canPickModel?t('Model'):t('Model: {model}',{model:modelName})"><template #mark><Icon name="spark" :size="12"/></template><nav :aria-label="t('Model')"><button v-for="entry in visibleModels" :key="entry.id" type="button" :class="{selected:entry.id===currentModel}" @click="pickModel(entry.id)"><strong>{{ entry.name }}</strong><code v-if="entry.id.toLocaleLowerCase()!==entry.name.toLocaleLowerCase()" class="chat-model-id">{{ entry.id }}</code><small v-if="entry.description">{{ describeModel(entry.description, t) }}</small></button><button v-if="customPicked&&!models.some(entry=>entry.id===customPicked)" type="button" :class="{selected:customPicked===currentModel}" @click="pickModel(customPicked)"><strong>{{ customPicked }}</strong><small>{{ t('Entered by hand') }}</small></button></nav><div class="chat-model-custom"><input v-model="customModel" type="text" autocomplete="off" spellcheck="false" maxlength="128" :placeholder="t('Find a model, or enter an ID')" :aria-label="t('Other model ID')" @keydown.enter.prevent.stop="pickCustomModel"/><button type="button" :disabled="!customModel.trim()" @click="pickCustomModel">{{ t('Use') }}</button></div><p class="chat-model-hint">{{ t(profileCatalog.length ? 'From the {provider} client on the host and from this endpoint. Type to find a model, or enter an ID.' : 'This list comes from the {provider} client on the host. Upgrade it there to see newer models, or enter an ID.',{provider:providerLabel(session.provider)}) }}</p></ChipMenu><ChipMenu v-if="effortChoices.length" class="chat-effort" :caption="t('Thinking depth')" :class="{vivid:effortVivid}" :label="effortName" :active="!!liveEffort" :disabled="!canConfigure" :title="canConfigure?t('Thinking depth'):t('Wait for the current turn and approvals to finish before changing this.')"><template #mark><Icon :name="effortVivid?'spark':'gauge'" :size="12"/></template><div class="chat-effort-body"><header><strong>{{ t('Thinking depth') }}</strong><em>{{ effortSetting }}</em></header><div class="chat-effort-slider" :style="{'--effort-fill':effortFill}"><span class="chat-effort-track"><i v-for="(stop,index) in effortStops" :key="stop||'default'" :style="{left:effortStops.length<2?'50%':index/(effortStops.length-1)*100+'%'}"/></span><span class="chat-effort-fill"/><span class="chat-effort-thumb"/><input type="range" min="0" :max="effortStops.length-1" step="1" :value="effortIndex" :disabled="!canPickModel" :aria-label="t('Thinking depth')" :aria-valuetext="effortName" @input="dragEffort" @change="commitEffort"/></div><footer><span>{{ t('Faster') }}</span><span>{{ t('Smarter') }}</span></footer></div></ChipMenu><ChipMenu v-if="permissionChoices.length" ref="permissionMenu" class="chat-permission" :caption="t('How tools are approved')" :class="{danger:permissionDanger}" :label="permissionName" :tone="permissionDanger?'danger':undefined" :disabled="!canConfigure" :title="canConfigure?t('How tools are approved'):t('Wait for the current turn and approvals to finish before changing this.')"><template #mark><Icon name="shield" :size="12"/></template><div class="chat-permission-body"><header>{{ t('How tools are approved') }}</header><nav :aria-label="t('How tools are approved')"><button v-for="mode in permissionChoices" :key="mode" type="button" :class="{selected:mode===livePermission,danger:mode==='danger'}" @click="pickPermission(mode)"><span><strong>{{ t(PERMISSION_LABELS[mode] ?? mode) }}</strong><Icon v-if="mode===livePermission" name="check" :size="13"/></span><small v-if="PERMISSION_NOTES[mode]">{{ t(PERMISSION_NOTES[mode]) }}</small></button></nav></div></ChipMenu></div></Teleport><template v-if="view.turn==='running'&&canQueue"><button type="button" class="chat-send chat-steer-send" :aria-label="t('Steer the running turn')" :title="t('Steer the running turn (Enter)')" :disabled="steering" @click="steerDraft">↪</button><ChipMenu ref="steerMenu" class="chat-steer-more" :label="''" :title="t('Other ways to send')"><nav :aria-label="t('Other ways to send')"><button type="button" @click="steerMenu?.close(true);steerDraft()"><strong>{{ t('Steer') }}</strong><small>{{ t('The agent reads it at its next step, without stopping. Enter') }}</small></button><button type="button" @click="steerMenu?.close(true);queueDraft()"><strong>{{ t('After this turn') }}</strong><small>{{ t('Sent as its own turn when this one ends. ⌥/Alt+Enter') }}</small></button><button type="button" class="danger" @click="interruptWithDraft"><strong>{{ t('Interrupt and send') }}</strong><small>{{ t('Stops the current turn; its unfinished work stops too.') }}</small></button></nav></ChipMenu></template><button v-if="view.turn==='running'" type="button" class="chat-send chat-stop" :aria-label="t('Cancel turn')" :disabled="isPreview||actionBusy" @click="interrupt">■</button><button v-else class="chat-send" type="submit" :aria-label="t('Send message')" :disabled="!canSend">↑</button></div>
+      <div class="chat-composer-controls"><input ref="fileInput" class="sr-only" type="file" multiple :disabled="isPreview||uploading" @change="pickAttachments"/><button type="button" class="chat-attach" :aria-label="t(uploading?'Uploading…':'Attach files')" :title="t('Attach files to this workspace')" :disabled="isPreview||uploading||!supported" @click="fileInput?.click()"><Icon name="plus" :size="18"/></button><button v-if="mobile" type="button" :class="['chat-options', { danger: permissionDanger }]" :aria-label="t('Session settings')" @click="optionsOpen=true"><Icon name="settings" :size="17"/><span>{{ optionsSummary }}</span><Icon v-if="permissionDanger" class="chat-options-danger" name="shield" :size="14" :title="t('Tools run without asking')" /><Icon name="chevron" :size="12" class="chat-options-caret"/></button><Teleport :to="chipsInSheet ? '#'+optionsTarget : 'body'" :disabled="!chipsInSheet"><div :class="['chat-chip-strip', { 'chip-rows': chipsInSheet }]"><ChipMenu v-if="repoState" ref="branchMenu" class="chat-branch" :caption="t('Branch')" :label="sessionBranch || t('Detached HEAD')" :active="!!session.checkout_path" :disabled="actionBusy||turnBusy" :title="session.checkout_path ? t('Works in worktree {path}', { path: session.checkout_path }) : t('Works in the workspace directory')"><template #mark><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M5 3v7M5 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm0-7a2 2 0 1 0 0-.01M11 5a2 2 0 1 0 0-.01M11 7c0 2-2 3-6 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></template><div class="chat-branch-body"><header>{{ t('Branch for this session') }}</header><p>{{ t('Moves only this session, into that branch\'s own worktree. Other sessions keep their branches.') }}</p><nav><button v-for="name in branchChoices" :key="name" type="button" :class="{selected:name===sessionBranch}" @click="pickBranch(name)"><span>{{ name }}</span><small v-if="name===sessionBranch">{{ t('Current') }}</small><small v-else-if="name===repoState.current">{{ t('Workspace directory') }}</small></button></nav><form @submit.prevent="pickBranch(branchTarget)"><input v-model="branchTarget" :placeholder="t('New branch name')" maxlength="200" spellcheck="false" autocomplete="off" /><button type="submit" :disabled="!branchTarget.trim()">{{ t('Create') }}</button></form></div></ChipMenu><ChipMenu ref="endpointMenu" class="chat-endpoint" :caption="t('Endpoint profile')" :label="endpointName" :disabled="!canOpenEndpoint" :title="t('Endpoint profile')"><template #mark><ProviderIcon :provider="session.provider" :size="14"/></template><nav :aria-label="t('Endpoint profile')"><p v-if="!canConfigure" class="chat-menu-note">{{ t('Wait for the current turn and approvals before changing endpoints.') }}</p><button type="button" :class="{selected:selectedProfile===''}" :disabled="!canConfigure" @click="pickEndpoint('')"><strong>{{ t('Native · isolated configuration') }}</strong><small>{{ t('A fresh, empty client home: no host sign-in or settings, so it may ask you to log in.') }}</small></button><button v-for="profile in matchingProfiles" :key="profile.id" type="button" :class="{selected:selectedProfile===profile.id}" :disabled="!canConfigure" @click="pickEndpoint(profile.id)"><strong>{{ profile.name }}</strong><small>{{ profileNote(profile, t) }}</small></button><button v-if="session.endpoint_profile_id&&!matchingProfiles.some(p=>p.id===session.endpoint_profile_id)" type="button" class="selected" disabled>{{ endpointName }}</button><template v-if="handoffChoices.length"><p class="chat-menu-section">{{ t('Switch to another client') }}<small>{{ t('Opens a new session with this conversation in its message box; this one stays as it is.') }}</small></p><button v-for="choice in handoffChoices" :key="choice.provider+':'+(choice.profileId??'')" type="button" class="chat-handoff-choice" @click="pickHandoff(choice)"><strong><ProviderIcon :provider="choice.provider" :size="12"/>{{ providerLabel(choice.provider) }} · {{ choice.name }}</strong><small>{{ choice.note }}</small></button></template><button type="button" class="chat-endpoint-manage" @click="endpointMenu?.close(true); emit('profiles')"><Icon name="account" :size="13" />{{ t('Manage endpoint profiles') }}</button></nav></ChipMenu><span v-if="booting" class="chat-boot-chip" role="status"><ProviderIcon class="chat-working-mark" :provider="session.provider" :size="12"/>{{ t('Starting…') }}</span><ChipMenu v-if="canTuneModel&&(models.length||currentModel)" ref="modelMenu" class="chat-model" :caption="t('Model')" :label="modelName" :active="!modelDefault" :disabled="!canPickModel" :title="canPickModel?t('Model'):t('Model: {model}',{model:modelName})"><template #mark><Icon name="spark" :size="12"/></template><nav :aria-label="t('Model')"><button v-for="entry in visibleModels" :key="entry.id" type="button" :class="{selected:entry.id===currentModel}" @click="pickModel(entry.id)"><strong>{{ entry.name }}</strong><code v-if="entry.id.toLocaleLowerCase()!==entry.name.toLocaleLowerCase()" class="chat-model-id">{{ entry.id }}</code><small v-if="entry.description">{{ describeModel(entry.description, t) }}</small></button><button v-if="customPicked&&!models.some(entry=>entry.id===customPicked)" type="button" :class="{selected:customPicked===currentModel}" @click="pickModel(customPicked)"><strong>{{ customPicked }}</strong><small>{{ t('Entered by hand') }}</small></button></nav><div class="chat-model-custom"><input v-model="customModel" type="text" autocomplete="off" spellcheck="false" maxlength="128" :placeholder="t('Find a model, or enter an ID')" :aria-label="t('Other model ID')" @keydown.enter.prevent.stop="pickCustomModel"/><button type="button" :disabled="!customModel.trim()" @click="pickCustomModel">{{ t('Use') }}</button></div><p class="chat-model-hint">{{ t(profileCatalog.length ? 'From the {provider} client on the host and from this endpoint. Type to find a model, or enter an ID.' : 'This list comes from the {provider} client on the host. Upgrade it there to see newer models, or enter an ID.',{provider:providerLabel(session.provider)}) }}</p></ChipMenu><ChipMenu v-if="effortChoices.length" class="chat-effort" :caption="t('Thinking depth')" :class="{vivid:effortVivid}" :label="effortName" :active="!!liveEffort" :disabled="!canConfigure" :title="canConfigure?t('Thinking depth'):t('Wait for the current turn and approvals to finish before changing this.')"><template #mark><Icon :name="effortVivid?'spark':'gauge'" :size="12"/></template><div class="chat-effort-body"><header><strong>{{ t('Thinking depth') }}</strong><em>{{ effortSetting }}</em></header><div class="chat-effort-slider" :style="{'--effort-fill':effortFill}"><span class="chat-effort-track"><i v-for="(stop,index) in effortStops" :key="stop||'default'" :style="{left:effortStops.length<2?'50%':index/(effortStops.length-1)*100+'%'}"/></span><span class="chat-effort-fill"/><span class="chat-effort-thumb"/><input type="range" min="0" :max="effortStops.length-1" step="1" :value="effortIndex" :disabled="!canPickModel" :aria-label="t('Thinking depth')" :aria-valuetext="effortName" @input="dragEffort" @change="commitEffort"/></div><footer><span>{{ t('Faster') }}</span><span>{{ t('Smarter') }}</span></footer></div></ChipMenu><ChipMenu v-if="permissionChoices.length" ref="permissionMenu" class="chat-permission" :caption="t('How tools are approved')" :class="{danger:permissionDanger}" :label="permissionName" :tone="permissionDanger?'danger':undefined" :disabled="!canConfigure" :title="canConfigure?t('How tools are approved'):t('Wait for the current turn and approvals to finish before changing this.')"><template #mark><Icon name="shield" :size="12"/></template><div class="chat-permission-body"><header>{{ t('How tools are approved') }}</header><nav :aria-label="t('How tools are approved')"><button v-for="mode in permissionChoices" :key="mode" type="button" :class="{selected:mode===livePermission,danger:mode==='danger'}" @click="pickPermission(mode)"><span><strong>{{ t(PERMISSION_LABELS[mode] ?? mode) }}</strong><Icon v-if="mode===livePermission" name="check" :size="13"/></span><small v-if="PERMISSION_NOTES[mode]">{{ t(PERMISSION_NOTES[mode]) }}</small></button></nav></div></ChipMenu></div></Teleport><template v-if="view.turn==='running'&&canQueue"><button type="button" class="chat-send chat-steer-send" :aria-label="t('Steer the running turn')" :title="t('Steer the running turn (Enter)')" :disabled="steering" @click="steerDraft">↪</button><ChipMenu ref="steerMenu" class="chat-steer-more" :label="''" :title="t('Other ways to send')"><nav :aria-label="t('Other ways to send')"><button type="button" @click="steerMenu?.close(true);steerDraft()"><strong>{{ t('Steer') }}</strong><small>{{ t('The agent reads it at its next step, without stopping. Enter') }}</small></button><button type="button" @click="steerMenu?.close(true);queueDraft()"><strong>{{ t('After this turn') }}</strong><small>{{ t('Sent as its own turn when this one ends. ⌥/Alt+Enter') }}</small></button><button type="button" class="danger" @click="interruptWithDraft"><strong>{{ t('Interrupt and send') }}</strong><small>{{ t('Stops the current turn; its unfinished work stops too.') }}</small></button></nav></ChipMenu></template><button v-if="view.turn==='running'" type="button" class="chat-send chat-stop" :aria-label="t('Cancel turn')" :disabled="isPreview||actionBusy" @click="interrupt">■</button><button v-else class="chat-send" type="submit" :aria-label="t('Send message')" :disabled="!canSend">↑</button></div>
       <footer><span :title="t('Ctrl / ⌘ Enter also sends. Esc closes menus first; in the message box it cancels the active reply, not the session.')">{{ t(view.turn==='running' ? 'Enter steers · ⌥/Alt+Enter after this turn · Shift+Enter for a new line' : 'Enter to send · Shift+Enter for a new line · Esc to dismiss or cancel') }}</span><span class="chat-usage"><ContextRing :usage="ringUsage"/><span v-if="view.usage.context_window===undefined&&view.usage.context_tokens!==undefined">{{ t('{count} context tokens',{count:view.usage.context_tokens}) }}</span><span v-else-if="view.usage.context_window===undefined&&view.usage.input_tokens!==undefined">{{ t('{count} input tokens',{count:view.usage.input_tokens}) }}</span></span></footer>
     </form>
   </section>
