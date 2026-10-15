@@ -153,7 +153,7 @@ const focusedSession = computed(() => focusedPane.value ? paneSession(focusedPan
 function switchPane(pane: PaneNode) { switcherOpen.value = false; void canvas.value?.focusPane(pane.id); }
 async function closeOpenPane(pane: PaneNode) { await canvas.value?.closePane(pane.id); }
 /** An agent changed something: show it without waiting for the next poll. */
-function agentChanged() { void refreshProfiles(); void refreshResources(); void loadPreferences(true); }
+function agentChanged() { void refreshProfiles(); void refreshResources(); void loadPreferences(true); void loadBalances(); }
 /** An agent pointed at something (tendly_show), or a notice's Open. */
 async function agentShow(target: ShowTarget) {
   if (target.kind === "file") void openReference(target.workspace_id, { path: target.path, line: target.line ?? undefined, checkout: target.checkout });
