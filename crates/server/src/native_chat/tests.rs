@@ -108,7 +108,8 @@ fn a_launch_is_valid_only_with_a_program_an_absolute_directory_and_sane_argument
         provider: "codex".into(),
         program: "codex".into(),
         args: vec!["--model".into(), "x".into()],
-        cwd: "/work".into(),
+        // Absolute on this platform: "/work" is not, on Windows.
+        cwd: std::env::temp_dir().to_string_lossy().into_owned(),
         resume_id: Some("thread-1".into()),
     };
     assert!(valid_init(&base));
