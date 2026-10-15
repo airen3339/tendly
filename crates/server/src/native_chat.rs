@@ -1477,6 +1477,95 @@ impl Drop for NativeAdapter {
 mod tests {
     use super::*;
 
+    /// These mirror JavaScript, which the Node bridge they replace relied on.
+    #[test]
+    fn javascript_truthiness_and_string_conversion() {
+        for falsy in [
+            None,
+            Some(json!(null)),
+            Some(json!(false)),
+            Some(json!(0)),
+            Some(json!(0.0)),
+            Some(json!("")),
+        ] {
+            assert!(!truthy(falsy.as_ref()), "{falsy:?}");
+        }
+        for truthy_value in [json!(true), json!(-1), json!("0"), json!([]), json!({})] {
+            assert!(truthy(Some(&truthy_value)), "{truthy_value}");
+        }
+        assert_eq!(js_string(&json!(null)), "null");
+        assert_eq!(js_string(&json!([1, null, "a", [2, 3]])), "1,,a,2,3");
+        assert_eq!(js_string(&json!({"a": 1})), "[object Object]");
+        assert_eq!(js_string(&json!(2.5)), "2.5");
+    }
+
+    #[test]
+    fn safe_integers_are_whole_and_within_two_to_the_fifty_three() {
+        assert_eq!(safe_integer(Some(&json!(42))), Some(42));
+        assert_eq!(safe_integer(Some(&json!(-7.0))), Some(-7));
+        assert_eq!(
+            safe_integer(Some(&json!(9_007_199_254_740_991_i64))),
+            Some(9_007_199_254_740_991)
+        );
+        assert_eq!(safe_integer(Some(&json!(9_007_199_254_740_993_i64))), None);
+        assert_eq!(safe_integer(Some(&json!(1.5))), None);
+        assert_eq!(safe_integer(Some(&json!("3"))), None);
+        assert_eq!(safe_integer(None), None);
+    }
+
+    #[test]
+    fn native_ids_start_alphanumeric_and_stay_short_and_plain() {
+        for good in ["a", "0b", "thread_1-x", &"a".repeat(128)] {
+            assert!(native_id(good), "{good}");
+        }
+        for bad in ["", "-a", "_a", "a b", "a/b", "a.b", &"a".repeat(129)] {
+            assert!(!native_id(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_launch_is_valid_only_with_a_program_an_absolute_directory_and_sane_arguments() {
+        let base = ChatInit {
+            provider: "codex".into(),
+            program: "codex".into(),
+            args: vec!["--model".into(), "x".into()],
+            cwd: "/work".into(),
+            resume_id: Some("thread-1".into()),
+        };
+        assert!(valid_init(&base));
+        let with = |change: &dyn Fn(&mut ChatInit)| {
+            let mut init = base.clone();
+            change(&mut init);
+            valid_init(&init)
+        };
+        assert!(!with(&|i| i.program.clear()));
+        assert!(!with(&|i| i.program = "co\0dex".into()));
+        assert!(!with(&|i| i.cwd = "relative".into()));
+        assert!(!with(&|i| i.args = vec!["x".into(); 513]));
+        assert!(!with(&|i| i.args = vec!["a\0b".into()]));
+        assert!(!with(&|i| i.resume_id = Some("not valid".into())));
+        assert!(with(&|i| i.resume_id = None));
+    }
+
+    #[test]
+    fn paths_resolve_lexically_like_path_resolve() {
+        assert_eq!(
+            resolve(Path::new("/work"), "src/../lib/./a.rs"),
+            PathBuf::from("/work/lib/a.rs")
+        );
+        assert_eq!(
+            resolve(Path::new("/work"), "/etc/hosts"),
+            PathBuf::from("/etc/hosts")
+        );
+        assert_eq!(resolve(Path::new("/work"), "../../.."), PathBuf::from("/"));
+        assert_eq!(
+            clip_value(Some(&json!(3)), 10),
+            "",
+            "only strings are clipped"
+        );
+        assert_eq!(clip_value(None, 10), "");
+    }
+
     /// A client whose answers never reach it, for what the core does alone.
     struct Unanswerable {
         core: Core<(), (), ()>,

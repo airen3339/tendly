@@ -428,6 +428,15 @@ impl Pi {
         }
     }
 
+    /// One event from Pi's stream:
+    ///
+    /// - `extension_ui_request` is a dialog an extension opens, shown as a question;
+    /// - `agent_start` marks the turn Tendly asked for as started (aborting it
+    ///   at once if it was interrupted meanwhile), or opens a turn Pi began by
+    ///   itself; `agent_settled` ends it as completed, interrupted or failed;
+    /// - `message_*` events stream the assistant's text and, at the end of a
+    ///   message, its usage and any error it stopped on;
+    /// - `tool_execution_*` events become tool calls with their progress and result.
     fn on_notification(&mut self, message: Value) {
         if !message.is_object() {
             return;
@@ -771,6 +780,32 @@ impl NativeClient for Pi {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn message_text_is_its_text_blocks_joined() {
+        assert_eq!(text_of(Some(&json!("plain"))), "plain");
+        assert_eq!(
+            text_of(Some(&json!([
+                {"type": "text", "text": "Hello, "},
+                {"type": "thinking", "text": "hidden"},
+                {"type": "text", "text": null},
+                {"type": "text", "text": "world"}
+            ]))),
+            "Hello, world"
+        );
+        assert_eq!(text_of(Some(&json!(3))), "");
+        assert_eq!(text_of(None), "");
+    }
+
+    #[test]
+    fn a_model_is_named_by_provider_and_id() {
+        assert_eq!(
+            model_name(Some(&json!({"provider": "anthropic", "id": "sonnet"}))).as_deref(),
+            Some("anthropic/sonnet")
+        );
+        assert_eq!(model_name(Some(&json!({"id": "sonnet"}))), None);
+        assert_eq!(model_name(None), None);
+    }
 
     #[test]
     fn pi_reads_flags_inline_or_separate_and_refuses_empty_values() {
