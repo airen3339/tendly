@@ -1676,6 +1676,51 @@ impl NativeClient for Claude {
 mod tests {
     use super::*;
 
+    /// How a launch argument list is read: `--flag value` or `--flag=value`.
+    /// Claude Code accepts an empty value; Codex and Pi do not.
+    #[test]
+    fn claude_reads_flags_inline_or_separate_and_accepts_empty_values() {
+        let launch = claude_launch(&init(&["--model=opus", "--effort", ""])).unwrap();
+        assert_eq!(launch.model.as_deref(), Some("opus"));
+        assert_eq!(launch.effort.as_deref(), Some(""));
+        assert_eq!(
+            claude_launch(&init(&["--model="]))
+                .unwrap()
+                .model
+                .as_deref(),
+            Some("")
+        );
+        assert_eq!(
+            claude_launch(&init(&["--model"])).err().as_deref(),
+            Some("Missing Claude Code launch option value.")
+        );
+        // A leading `=` is not a flag with a value.
+        assert_eq!(
+            claude_launch(&init(&["=opus"])).err().as_deref(),
+            Some("Unsupported Claude Code launch option in structured mode.")
+        );
+        assert_eq!(
+            claude_launch(&init(&["-r=abc"])).unwrap().resume.as_deref(),
+            Some("abc")
+        );
+        assert_eq!(
+            claude_launch(&init(&["--resume", "abc", "-r", "abd"]))
+                .err()
+                .as_deref(),
+            Some("Invalid or conflicting Claude Code resume ID.")
+        );
+        assert_eq!(
+            claude_launch(&init(&["--resume", "not valid"]))
+                .err()
+                .as_deref(),
+            Some("Invalid or conflicting Claude Code resume ID.")
+        );
+        // An empty resume ID from the session is no resume at all.
+        let mut empty = init(&[]);
+        empty.resume_id = Some(String::new());
+        assert_eq!(claude_launch(&empty).unwrap().resume, None);
+    }
+
     fn init(args: &[&str]) -> ChatInit {
         ChatInit {
             provider: "claude_code".into(),

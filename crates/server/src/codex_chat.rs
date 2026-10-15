@@ -1482,6 +1482,41 @@ mod tests {
     use super::*;
 
     #[test]
+    fn codex_reads_flags_inline_or_separate_and_refuses_empty_values() {
+        let init = |args: &[&str]| ChatInit {
+            provider: "codex".into(),
+            program: "codex".into(),
+            args: args.iter().map(|a| a.to_string()).collect(),
+            cwd: "/fixture".into(),
+            resume_id: None,
+        };
+        let launch = codex_launch(&init(&["-m=gpt-5", "--enable", "x"])).unwrap();
+        assert_eq!(launch.thread.get("model"), Some(&json!("gpt-5")));
+        assert_eq!(launch.args, ["app-server", "--enable", "x"]);
+        for args in [&["-m", ""][..], &["-m="][..], &["--model"][..]] {
+            assert_eq!(
+                codex_launch(&init(args)).err().as_deref(),
+                Some("Missing Codex launch option value."),
+                "{args:?}"
+            );
+        }
+        assert_eq!(
+            codex_launch(&init(&["=x"])).err().as_deref(),
+            Some("Unsupported Codex launch option in structured mode.")
+        );
+        assert_eq!(
+            codex_launch(&init(&["resume", "abc", "--resume=abd"]))
+                .err()
+                .as_deref(),
+            Some("Invalid or conflicting Codex resume ID.")
+        );
+        // Unlike Claude Code, an empty resume ID from the session is kept as given.
+        let mut empty = init(&[]);
+        empty.resume_id = Some(String::new());
+        assert_eq!(codex_launch(&empty).unwrap().resume.as_deref(), Some(""));
+    }
+
+    #[test]
     fn launch_arguments_translate_as_the_bridge_translates_them() {
         let init = |args: &[&str]| ChatInit {
             provider: "codex".into(),

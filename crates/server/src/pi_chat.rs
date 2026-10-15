@@ -790,6 +790,35 @@ impl NativeClient for Pi {
 mod tests {
     use super::*;
 
+    #[test]
+    fn pi_reads_flags_inline_or_separate_and_refuses_empty_values() {
+        assert_eq!(
+            pi_launch(&init(&["--model=m", "-n", "chat"])).unwrap(),
+            ["--mode", "rpc", "--model", "m", "-n", "chat"]
+        );
+        for args in [&["--model", ""][..], &["--model="][..], &["--thinking"][..]] {
+            assert_eq!(
+                pi_launch(&init(args)).err().as_deref(),
+                Some("Missing Pi launch option value."),
+                "{args:?}"
+            );
+        }
+        assert_eq!(
+            pi_launch(&init(&["=x"])).err().as_deref(),
+            Some("Unsupported Pi launch option in structured mode.")
+        );
+        assert_eq!(
+            pi_launch(&init(&["--session", "abc", "--session=abd"]))
+                .err()
+                .as_deref(),
+            Some("Invalid or conflicting Pi session ID.")
+        );
+        assert_eq!(
+            pi_launch(&init(&["--session=abc"])).unwrap(),
+            ["--mode", "rpc", "--session", "abc"]
+        );
+    }
+
     fn init(args: &[&str]) -> ChatInit {
         ChatInit {
             provider: "pi".into(),
