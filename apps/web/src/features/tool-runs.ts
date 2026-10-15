@@ -35,6 +35,11 @@ export function toolRunStatus(run: ToolRun): 'running' | 'failed' | 'completed' 
   return run.tools.some(tool => tool.status === 'running') ? 'running' : run.tools.some(tool => tool.status === 'failed') ? 'failed' : 'completed';
 }
 
+/** The mark on a call's card: done, failed, cut off when its session ended, or still working. */
+export function toolIndicator(tool: { status: 'running' | 'failed' | 'completed'; ended?: boolean }): string {
+  return tool.status === 'completed' ? '✓' : tool.status === 'failed' ? '!' : tool.ended ? '–' : '↻';
+}
+
 // The collapsed summary shows where a subagent is now, not where it began.
 export function lastLine(activity: string) {
   const lines = activity.split('\n').filter(line => line.trim() && line !== '…');

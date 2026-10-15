@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, h, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import type { EndpointProfile, ProviderKind, Session, Workspace } from '@tendly/protocol';
-import { ApiConnectionError, assetUrl, errorMessage, json, providerLabel, request, workspacePath } from './api';
+import { ApiConnectionError, assetUrl, errorMessage, json, providerLabel, request, sessionPath, workspacePath } from './api';
 import { backendCapabilities } from './backend-capabilities';
 import { AGENT_CLIENTS, agentClient } from './clients';
 import { sessionConnections } from './session-connection';
@@ -36,7 +36,8 @@ import { estimateRowHeight, rowHeights } from './row-heights';
 import { followsAfterScroll, PERSON_WINDOW_MS, UPWARD_KEYS } from './scroll-follow';
 import { filterModels, mergeModels, resolveModel, offeredModels } from './model-choices';
 import { openLightbox } from './image-lightbox';
-import { cachedPercent, compactCount, descendants, dockRoots, inDock, isLive, lastLine, runningSubagents, stalledFor, toolRuns, toolRunNames, toolRunStatus, toolsById, type ToolRun } from './tool-runs';
+import { compactCount, descendants, dockRoots, inDock, isLive, lastLine, runningSubagents, stalledFor, toolRuns, toolRunNames, toolIndicator, toolRunStatus, toolsById, type ToolRun } from './tool-runs';
+import { dockHeading as dockHeadingText, statsLine as formatStats, turnUsageLine as formatTurnUsage, turnUsageTitle as formatTurnUsageTitle } from './chat-format';
 import { mentionQuery, applyMention } from './file-mentions';
 import { createFileSearch } from './file-search';
 import type { SearchHit } from './file-search';
@@ -122,7 +123,7 @@ async function readOlder() {
   if (before === undefined || isPreview.value || !el) return;
   loadingOlder.value = true;
   try {
-    const page = parseConversationPage(await request<unknown>('/sessions/' + encodeURIComponent(id) + '/conversation?before=' + before));
+    const page = parseConversationPage(await request<unknown>(`${sessionPath(id)}/conversation?before=${before}`));
     if (own !== generation || props.session.id !== id || !mounted.value) return;
     // The first row in view, and how far it sits below the top, before and after.
     const anchor = windowed()?.getVirtualItems().find(item => item.end > el.scrollTop);
@@ -167,7 +168,7 @@ async function runSearch(query: string) {
   if (!query.trim()) { searchHits.value = []; searchIndex.value = -1; searchBusy.value = false; paintHighlights(); return; }
   searchBusy.value = true;
   try {
-    const result = parseSearchResult(await request<unknown>('/sessions/' + encodeURIComponent(id) + '/conversation/search?q=' + encodeURIComponent(query.trim())));
+    const result = parseSearchResult(await request<unknown>(`${sessionPath(id)}/conversation/search?q=${encodeURIComponent(query.trim())}`));
     if (own !== searchGeneration || props.session.id !== id) return;
     searchHits.value = result.hits; searchMore.value = result.more; searchIndex.value = -1; searchBusy.value = false;
     if (result.hits.length) await showHit(0); else paintHighlights();
@@ -329,14 +330,7 @@ const dockAgents = computed(() => {
   return dockIds.value.flatMap(id => { const tool = tools.get(id); return tool && !tool.ended ? [tool] : []; });
 });
 const dockRunning = computed(() => dockAgents.value.filter(isLive).length);
-/** What the dock's heading says: subagents and commands are counted apart. */
-const dockHeading = computed(() => {
-  const live = dockAgents.value.filter(isLive), agents = live.filter(tool => SUBAGENT_TOOLS.has(tool.name)).length, commands = live.length - agents;
-  if (!live.length) return t(dockAgents.value.every(tool => SUBAGENT_TOOLS.has(tool.name)) ? 'Subagents finished' : 'Background work finished');
-  if (!commands) return agents === 1 ? t('1 subagent running') : t('{count} subagents running', { count: agents });
-  if (!agents) return commands === 1 ? t('1 background command running') : t('{count} background commands running', { count: commands });
-  return t('{agents} subagents and {commands} commands running', { agents, commands });
-});
+const dockHeading = computed(() => dockHeadingText(dockAgents.value, t));
 function dismissAgent(id: string) { dockIds.value = dockIds.value.filter(entry => entry !== id); if (expandedAgent.value === id) expandedAgent.value = null; }
 function clearFinished() { for (const agent of dockAgents.value) if (agent.status !== 'running') dismissAgent(agent.id); }
 // The open log follows the newest line, unless it was scrolled back to read.
@@ -347,30 +341,13 @@ watch(() => dockAgents.value.find(agent => agent.id === expandedAgent.value)?.ac
   if (!followLog) return;
   void nextTick(() => { const log = dock.value?.querySelector<HTMLElement>('.subagent-log'); if (log) log.scrollTop = log.scrollHeight; });
 }, { flush: 'post' });
-function duration(ms: number) {
-  const seconds = Math.round(ms / 1000);
-  return seconds < 60 ? t('{seconds}s', { seconds }) : t('{minutes}m {seconds}s', { minutes: Math.floor(seconds / 60), seconds: seconds % 60 });
-}
-function statsLine(stats: ToolStats) {
-  const parts: string[] = [];
-  if (stats.tools !== undefined) parts.push(t('{count} tool uses', { count: stats.tools }));
-  if (stats.tokens !== undefined) parts.push(t('{count} tokens', { count: compactCount(stats.tokens) }));
-  if (stats.ms !== undefined) parts.push(duration(stats.ms));
-  return parts.join(' · ');
-}
+const statsLine = (stats: ToolStats) => formatStats(stats, t);
 /** Below this a result is too small to matter to the context, and a size on
  * every card would only be noise. */
 const NOTABLE_RESULT = 1000;
 const sizeWorthShowing = (tool: ToolItem) => (tool.result_tokens ?? 0) >= NOTABLE_RESULT;
-/** "↑ 23.4k · ↓ 1.2k · 缓存 99.8%": read, written, and how much of the read was cached. */
-function turnUsageLine(spent: TurnUsage) {
-  const parts = [`↑ ${compactCount(spent.input ?? 0)}`, `↓ ${compactCount(spent.output ?? 0)}`];
-  if (spent.input && spent.cached) parts.push(t('{percent}% cached', { percent: cachedPercent(spent.input, spent.cached) }));
-  return parts.join(' · ');
-}
-function turnUsageTitle(spent: TurnUsage) {
-  return t('This turn read {input} tokens ({cached} from the prompt cache) and wrote {output}', { input: (spent.input ?? 0).toLocaleString(), cached: (spent.cached ?? 0).toLocaleString(), output: (spent.output ?? 0).toLocaleString() });
-}
+const turnUsageLine = (spent: TurnUsage) => formatTurnUsage(spent, t);
+const turnUsageTitle = (spent: TurnUsage) => formatTurnUsageTitle(spent, t);
 function quietLine(tool: ToolItem) {
   const quiet = running.value ? stalledFor(tool, now.value) : undefined;
   return quiet === undefined ? '' : t('No progress for {minutes} min', { minutes: Math.floor(quiet / 60_000) });
@@ -578,7 +555,7 @@ async function pickPermission(mode: string) {
   const session = props.session.id;
   actionBusy.value = true; error.value = '';
   try {
-    const ack = await request<{ pending?: boolean }>('/sessions/' + encodeURIComponent(session) + '/conversation/permission', json('POST', { mode }));
+    const ack = await request<{ pending?: boolean }>(`${sessionPath(session)}/conversation/permission`, json('POST', { mode }));
     // Not running (stopped, or exited after a failed turn): the server keeps
     // the choice for the next start rather than refusing it.
     if (ack?.pending && props.session.id === session && mounted.value) notice.value = 'This permission mode applies when the session next starts.';
@@ -594,7 +571,7 @@ async function pickModel(id: string) {
   try {
     // Only send a depth when one was actually chosen; otherwise the client
     // keeps whatever it is already using.
-    await request('/sessions/' + encodeURIComponent(session) + '/conversation/model', json('POST', selectedEffort.value ? { model: id, effort: selectedEffort.value } : { model: id }));
+    await request(`${sessionPath(session)}/conversation/model`, json('POST', selectedEffort.value ? { model: id, effort: selectedEffort.value } : { model: id }));
     // The client answers on the event stream, not in this response: a refusal
     // arrives moments later as an error. Some endpoints reject the availability
     // probe a live switch makes, and for those the only way onto that model is
@@ -633,7 +610,7 @@ async function clearContext() {
   if (!clearAvailable.value) return;
   const id = props.session.id, messageId = randomId();
   actionBusy.value = true; error.value = '';
-  try { await request('/sessions/' + encodeURIComponent(id) + '/conversation/message', json('POST', { id: messageId, content: '/clear' })); }
+  try { await request(`${sessionPath(id)}/conversation/message`, json('POST', { id: messageId, content: '/clear' })); }
   catch (cause) { if (props.session.id === id && mounted.value) error.value = errorMessage(cause); }
   finally { if (props.session.id === id) actionBusy.value = false; }
 }
@@ -646,7 +623,7 @@ async function applyModelAtLaunch() {
   actionBusy.value = true; error.value = '';
   try {
     const payload = sessionConfigurationPayload(props.session, props.profiles, selectedProfile.value || null, true, { mode: mode.value, ready: view.value.ready, busy: view.value.turn === 'running', awaitingApproval: view.value.awaitingApproval }, { model, effort: selectedEffort.value });
-    await request<Session>('/sessions/' + encodeURIComponent(id) + '/configuration', json('PATCH', payload));
+    await request<Session>(`${sessionPath(id)}/configuration`, json('PATCH', payload));
     if (props.session.id === id && mounted.value) { launchFallback.value = ''; notice.value = 'Endpoint changed. The next message starts a fresh native context; earlier messages stay visible here only.'; emit('changed'); await load(); }
   } catch (cause) { if (props.session.id === id && mounted.value) error.value = errorMessage(cause); }
   finally { if (props.session.id === id) actionBusy.value = false; }
@@ -758,7 +735,7 @@ async function moveToBranch(branch: string) {
   const id = props.session.id;
   branchConfirm.value = ''; actionBusy.value = true; error.value = '';
   try {
-    await request<Session>(`/sessions/${encodeURIComponent(id)}/checkout`, json('POST', { branch, create: !branchChoices.value.includes(branch) }));
+    await request<Session>(`${sessionPath(id)}/checkout`, json('POST', { branch, create: !branchChoices.value.includes(branch) }));
     branchTarget.value = '';
     if (props.session.id === id && mounted.value) { emit('changed'); void loadRepo(); }
   } catch (cause) { if (props.session.id === id && mounted.value) error.value = errorMessage(cause); }
@@ -871,7 +848,7 @@ function attach(id: string, own: number) {
       batch.push(message);
     },
   });
-  const url = new URL('/api/sessions/' + encodeURIComponent(id) + '/chat/ws', window.location.href); url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  const url = new URL(`/api${sessionPath(id)}/chat/ws`, window.location.href); url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   stream.connect(() => { const after = lastChatSeq(events.value); if (after === undefined) url.searchParams.delete('after'); else url.searchParams.set('after', String(after)); return url.href; });
 }
 async function load(consumeOpenIntent = false) {
@@ -890,7 +867,7 @@ async function load(consumeOpenIntent = false) {
     // stopped-session remount has no permission to start a process.
     if (consumeOpenIntent) { await sessionConnections.ensure(props.session); if (own !== generation) return; emit('changed'); }
     if (cached) { attach(id, own); return; }
-    const snapshot = await request<unknown>('/sessions/' + encodeURIComponent(id) + '/conversation', { signal: readController.signal });
+    const snapshot = await request<unknown>(`${sessionPath(id)}/conversation`, { signal: readController.signal });
     if (!mounted.value || own !== generation || props.session.id !== id) return;
     updateSnapshot(snapshot);
     // A legacy PTY session is rendered in this shell but its terminal stream
@@ -976,7 +953,7 @@ async function steerText(text: string): Promise<boolean> {
   // Already composed: any attachments are named in it.
   if (!content || steering.value) return false;
   steering.value = true; error.value = '';
-  try { await request(`/sessions/${encodeURIComponent(id)}/conversation/steer`, json('POST', { id: randomId(), content })); return true; }
+  try { await request(`${sessionPath(id)}/conversation/steer`, json('POST', { id: randomId(), content })); return true; }
   catch (cause) { if (props.session.id === id) error.value = errorMessage(cause); return false; }
   finally { steering.value = false; }
 }
@@ -1079,7 +1056,7 @@ async function uploadFiles(files: File[]) {
       const reason = attachmentError(file, target.attachments?.length ?? 0);
       if (reason) { error.value = t(reason, { count: MAX_ATTACHMENTS_PER_MESSAGE }); break; }
       const saved = await request<Attachment>(
-        '/workspaces/' + encodeURIComponent(props.session.workspace_id) + '/attachments?name=' + encodeURIComponent(file.name),
+        `${workspacePath(props.session.workspace_id)}/attachments?name=${encodeURIComponent(file.name)}`,
         { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', 'X-Tendly-Client': 'web' }, body: file },
       );
       target.attachments = [...(target.attachments ?? []), saved];
@@ -1102,7 +1079,7 @@ async function deliver(id: string, target: ChatDraft) {
   const { id: messageId, content } = pending;
   error.value = '';
   try {
-    const receipt=await request('/sessions/' + encodeURIComponent(id) + '/conversation/message', json('POST', { id: messageId, content, configuration_revision: pending.configurationRevision??0 }));
+    const receipt=await request(`${sessionPath(id)}/conversation/message`, json('POST', { id: messageId, content, configuration_revision: pending.configurationRevision??0 }));
     acknowledgeReceipt(target,receipt);
     if (target.text === content) target.text = '';
     // A durable receipt can acknowledge an older, already-trimmed message.
@@ -1120,7 +1097,7 @@ async function deliver(id: string, target: ChatDraft) {
 async function explicitOpen() {
   if (isPreview.value || actionBusy.value || loading.value || !supported.value || mode.value === 'pty' && running.value) return;
   const id = props.session.id; actionBusy.value = true; error.value = '';
-  try { await request('/sessions/' + encodeURIComponent(id) + '/conversation/open', json('POST', {})); if (props.session.id === id && mounted.value) { emit('changed'); await load(); } }
+  try { await request(`${sessionPath(id)}/conversation/open`, json('POST', {})); if (props.session.id === id && mounted.value) { emit('changed'); await load(); } }
   catch (cause) { if (props.session.id === id && mounted.value) error.value = errorMessage(cause); }
   finally { if (props.session.id === id) actionBusy.value = false; }
 }
@@ -1142,7 +1119,7 @@ async function openInTerminal() {
 async function interrupt() {
   if (isPreview.value || actionBusy.value || view.value.turn !== 'running') return;
   const id = props.session.id; actionBusy.value = true; error.value = '';
-  try { await request('/sessions/' + encodeURIComponent(id) + '/conversation/interrupt', json('POST', {})); if (props.session.id === id && mounted.value) { emit('changed'); await load(); } }
+  try { await request(`${sessionPath(id)}/conversation/interrupt`, json('POST', {})); if (props.session.id === id && mounted.value) { emit('changed'); await load(); } }
   catch (cause) { if (props.session.id === id && mounted.value) error.value = errorMessage(cause); }
   finally { if (props.session.id === id) actionBusy.value = false; }
 }
@@ -1150,7 +1127,7 @@ async function endSession() {
   if (isPreview.value || actionBusy.value || !confirmEnd.value) return;
   const id = props.session.id; actionBusy.value = true; error.value = '';
   try {
-    await request('/sessions/' + encodeURIComponent(id) + '/stop', json('POST'));
+    await request(`${sessionPath(id)}/stop`, json('POST'));
     sessionConnections.ended(id);
     if (props.session.id === id && mounted.value) { confirmEnd.value = false; emit('changed'); await load(); }
   } catch (cause) { if (props.session.id === id && mounted.value) error.value = errorMessage(cause); }
@@ -1220,7 +1197,7 @@ async function approve(item: Extract<ChatItem, { type: 'approval' }>, decision: 
   if (isPreview.value || approvalBusy.value || item.resolved || !approvalChoices(item).includes(decision) || decision === 'accept' && incompleteAnswers(item)) return;
   const id = props.session.id; approvalBusy.value = item.id; error.value = '';
   const answers = decision === 'accept' ? approvalPayloadAnswers(item.questions, approvalAnswers[item.id], approvalOther[item.id]) : {};
-  try { await request('/sessions/' + encodeURIComponent(id) + '/conversation/approval', json('POST', { request_id: item.id, decision, ...(Object.keys(answers).length ? { answers } : {}) })); if (props.session.id === id && mounted.value) { clearAnswers(item.id); await load(); } }
+  try { await request(`${sessionPath(id)}/conversation/approval`, json('POST', { request_id: item.id, decision, ...(Object.keys(answers).length ? { answers } : {}) })); if (props.session.id === id && mounted.value) { clearAnswers(item.id); await load(); } }
   catch (cause) { if (props.session.id === id && mounted.value) error.value = errorMessage(cause); }
   finally { if (props.session.id === id) approvalBusy.value = ''; }
 }
@@ -1229,7 +1206,7 @@ async function configure() {
   const id = props.session.id; actionBusy.value = true; error.value = '';
   try {
     const payload = sessionConfigurationPayload(props.session, props.profiles, selectedProfile.value || null, true, { mode: mode.value, ready: view.value.ready, busy: view.value.turn === 'running', awaitingApproval: view.value.awaitingApproval }, { effort: selectedEffort.value });
-    await request<Session>('/sessions/' + encodeURIComponent(id) + '/configuration', json('PATCH', payload));
+    await request<Session>(`${sessionPath(id)}/configuration`, json('PATCH', payload));
     if (props.session.id === id && mounted.value) { endpointConfirm.value = false; selectedEffort.value = ''; notice.value = 'Endpoint changed. The next message starts a fresh native context; earlier messages stay visible here only.'; emit('changed'); await load(); }
   } catch (cause) { if (props.session.id === id && mounted.value) error.value = errorMessage(cause); }
   finally { if (props.session.id === id) actionBusy.value = false; }
@@ -1243,7 +1220,7 @@ async function applyEffort(level: string) {
   const session = props.session.id;
   actionBusy.value = true; error.value = '';
   try {
-    await request('/sessions/' + encodeURIComponent(session) + '/conversation/model', json('POST', { effort: level }));
+    await request(`${sessionPath(session)}/conversation/model`, json('POST', { effort: level }));
   } catch (cause) { if (props.session.id === session && mounted.value) error.value = errorMessage(cause); }
   finally { if (props.session.id === session) actionBusy.value = false; }
 }
@@ -1323,7 +1300,7 @@ function keydown(event: KeyboardEvent) {
       <div v-if="older!==undefined" ref="olderSentinel" class="chat-history-older" role="status">{{ loadingOlder ? t('Loading earlier messages…') : '' }}</div>
       <VirtualRows ref="rowsList" v-slot="{ row: item }" :rows="rows.rows" :keys="rows.keys" :scroll-element="viewport" :scroll-margin="rowsMargin" :estimate="rowHeight" :measured="rememberRowHeight" :memo="[running, now, locale]" @resize="onRowsResize" @range="onRowsRange">
         <article v-if="item.type==='message'" :class="['chat-message',item.role]"><div class="chat-message-label"><ProviderIcon v-if="item.role==='assistant'" :provider="session.provider" :size="15" /><span>{{ item.role==='user'?t('You'):providerLabel(session.provider) }}</span><em v-if="item.steered" class="chat-steered" :title="t('Written while the agent worked, and read inside that turn')">{{ t('Steer') }}</em></div><div v-if="item.role==='user'&&attachedImagePaths(item.text).length" class="chat-attached-images"><img v-for="path in attachedImagePaths(item.text)" :key="path" :src="workspaceImage(path)" :alt="path" :title="path" loading="lazy" @click="openLightbox(workspaceImage(path), path)" /></div><MarkdownContent :text="item.text" :image-url="workspaceImage" :host-image-url="hostImage" :open-file="openReference" /><div class="chat-message-foot"><div class="chat-message-actions"><CopyButton :text="item.text" label="Copy message" compact /></div><span v-if="item.role==='assistant'&&item.usage" class="chat-turn-usage" :title="turnUsageTitle(item.usage)">{{ turnUsageLine(item.usage) }}</span></div></article>
-        <component :is="item.type==='tool_run'&&item.tools.length>1?'details':'div'" v-else-if="item.type==='tool_run'" :class="item.tools.length>1?['chat-tool-run',toolRunStatus(item)]:'chat-tool-solo'"><summary v-if="item.tools.length>1"><span :class="['tool-indicator',toolRunStatus(item)]">{{ toolRunStatus(item)==='completed'?'✓':toolRunStatus(item)==='failed'?'!':'↻' }}</span><strong>{{ t('{count} tool calls',{count:item.tools.length}) }}</strong><small>{{ toolRunStatus(item)==='running' ? runningLine(item) : toolRunNames(item) }}</small><Icon class="chat-tool-chevron" name="chevron" :size="14" /></summary><details v-for="tool in item.tools" :key="tool.id" class="chat-tool" :data-tool-id="tool.id"><summary><span :class="['tool-indicator',tool.status]">{{ tool.status==='completed'?'✓':tool.status==='failed'?'!':tool.ended?'–':'↻' }}</span><strong>{{ tool.name }}<template v-if="tool.label"> · {{ tool.label }}</template></strong><small>{{ tool.activity && tool.status==='running' ? lastLine(tool.activity) : t(tool.status==='running'?(running&&!tool.ended?'Working…':'Session ended'):tool.status==='failed'?'Failed':'Completed') }}</small><span v-if="tool.stats" class="chat-tool-stats">{{ statsLine(tool.stats) }}</span><span v-else-if="sizeWorthShowing(tool)" class="chat-tool-stats" :title="t('Its result added about {count} tokens to the context', { count: tool.result_tokens! })">≈ {{ t('{count} tokens', { count: compactCount(tool.result_tokens!) }) }}</span><em v-if="quietLine(tool)" class="chat-tool-stalled">{{ quietLine(tool) }}</em><Icon class="chat-tool-chevron" name="chevron" :size="14" /></summary><pre v-if="tool.activity" class="tool-activity">{{ tool.activity }}</pre><div v-if="tool.children?.length" class="chat-tool-children"><details v-for="entry in descendants(tool)" :key="entry.tool.id" class="chat-tool-nested" :style="{'--depth':entry.depth}" :data-tool-id="entry.tool.id"><summary><span :class="['tool-indicator',entry.tool.status]">{{ entry.tool.status==='completed'?'✓':entry.tool.status==='failed'?'!':entry.tool.ended?'–':'↻' }}</span><strong>{{ entry.tool.name }}<template v-if="entry.tool.label"> · {{ entry.tool.label }}</template></strong><small>{{ entry.tool.activity && entry.tool.status==='running' ? lastLine(entry.tool.activity) : t(entry.tool.status==='running'?(running&&!entry.tool.ended?'Working…':'Session ended'):entry.tool.status==='failed'?'Failed':'Completed') }}</small><span v-if="entry.tool.stats" class="chat-tool-stats">{{ statsLine(entry.tool.stats) }}</span><span v-else-if="sizeWorthShowing(entry.tool)" class="chat-tool-stats" :title="t('Its result added about {count} tokens to the context', { count: entry.tool.result_tokens! })">≈ {{ t('{count} tokens', { count: compactCount(entry.tool.result_tokens!) }) }}</span><em v-if="quietLine(entry.tool)" class="chat-tool-stalled">{{ quietLine(entry.tool) }}</em></summary><pre v-if="entry.tool.activity" class="tool-activity">{{ entry.tool.activity }}</pre><pre v-if="entry.tool.text">{{ entry.tool.text }}</pre></details></div><pre v-if="tool.text">{{ tool.text }}</pre><p v-else-if="!tool.activity&&!tool.children?.length">{{ t('The client did not provide tool output.') }}</p></details></component>
+        <component :is="item.type==='tool_run'&&item.tools.length>1?'details':'div'" v-else-if="item.type==='tool_run'" :class="item.tools.length>1?['chat-tool-run',toolRunStatus(item)]:'chat-tool-solo'"><summary v-if="item.tools.length>1"><span :class="['tool-indicator',toolRunStatus(item)]">{{ toolIndicator({ status: toolRunStatus(item) }) }}</span><strong>{{ t('{count} tool calls',{count:item.tools.length}) }}</strong><small>{{ toolRunStatus(item)==='running' ? runningLine(item) : toolRunNames(item) }}</small><Icon class="chat-tool-chevron" name="chevron" :size="14" /></summary><details v-for="tool in item.tools" :key="tool.id" class="chat-tool" :data-tool-id="tool.id"><summary><span :class="['tool-indicator',tool.status]">{{ toolIndicator(tool) }}</span><strong>{{ tool.name }}<template v-if="tool.label"> · {{ tool.label }}</template></strong><small>{{ tool.activity && tool.status==='running' ? lastLine(tool.activity) : t(tool.status==='running'?(running&&!tool.ended?'Working…':'Session ended'):tool.status==='failed'?'Failed':'Completed') }}</small><span v-if="tool.stats" class="chat-tool-stats">{{ statsLine(tool.stats) }}</span><span v-else-if="sizeWorthShowing(tool)" class="chat-tool-stats" :title="t('Its result added about {count} tokens to the context', { count: tool.result_tokens! })">≈ {{ t('{count} tokens', { count: compactCount(tool.result_tokens!) }) }}</span><em v-if="quietLine(tool)" class="chat-tool-stalled">{{ quietLine(tool) }}</em><Icon class="chat-tool-chevron" name="chevron" :size="14" /></summary><pre v-if="tool.activity" class="tool-activity">{{ tool.activity }}</pre><div v-if="tool.children?.length" class="chat-tool-children"><details v-for="entry in descendants(tool)" :key="entry.tool.id" class="chat-tool-nested" :style="{'--depth':entry.depth}" :data-tool-id="entry.tool.id"><summary><span :class="['tool-indicator',entry.tool.status]">{{ toolIndicator(entry.tool) }}</span><strong>{{ entry.tool.name }}<template v-if="entry.tool.label"> · {{ entry.tool.label }}</template></strong><small>{{ entry.tool.activity && entry.tool.status==='running' ? lastLine(entry.tool.activity) : t(entry.tool.status==='running'?(running&&!entry.tool.ended?'Working…':'Session ended'):entry.tool.status==='failed'?'Failed':'Completed') }}</small><span v-if="entry.tool.stats" class="chat-tool-stats">{{ statsLine(entry.tool.stats) }}</span><span v-else-if="sizeWorthShowing(entry.tool)" class="chat-tool-stats" :title="t('Its result added about {count} tokens to the context', { count: entry.tool.result_tokens! })">≈ {{ t('{count} tokens', { count: compactCount(entry.tool.result_tokens!) }) }}</span><em v-if="quietLine(entry.tool)" class="chat-tool-stalled">{{ quietLine(entry.tool) }}</em></summary><pre v-if="entry.tool.activity" class="tool-activity">{{ entry.tool.activity }}</pre><pre v-if="entry.tool.text">{{ entry.tool.text }}</pre></details></div><pre v-if="tool.text">{{ tool.text }}</pre><p v-else-if="!tool.activity&&!tool.children?.length">{{ t('The client did not provide tool output.') }}</p></details></component>
         <p v-else-if="item.type==='approval'" :class="['chat-approval-record',{pending:!item.resolved}]"><Icon :name="item.resolved?'check':'shield'" :size="13"/><span>{{ item.title }}</span><small>{{ t(item.resolved?'Resolved':'Waiting for you below') }}</small></p>
         <div v-else-if="item.type==='configuration'" class="chat-boundary"><span>{{ t('New native context') }} · {{ item.profile_name }}</span><p>{{ t(item.text) }}</p></div>
         <p v-else-if="item.type==='error'" class="chat-alert" role="alert">{{ item.text }}</p>
@@ -1332,7 +1309,7 @@ function keydown(event: KeyboardEvent) {
       <p v-if="draft.pending" class="chat-delivery" role="status">{{ t(draft.notice??(draft.pending.state==='sending'?'Sending your message…':'Waiting for delivery confirmation.')) }}<button v-if="draft.pending.state==='unknown'" class="chat-link" @click="load()">{{ t('Refresh conversation') }}</button><button v-if="draft.pending.state==='unknown'&&!isPreview" class="chat-link" :disabled="loading||actionBusy||streamState!=='connected'" @click="retryDelivery">{{ t('Retry the same message request') }}</button></p>
       <div v-if="supported&&!loading&&mode!=='structured'" class="chat-native-note"><p>{{ t(running?'This session is running in the native client. End it there before enabling chat; it will not be taken over automatically.':'Enable chat explicitly to continue this native session in a conversation view.') }}</p><button class="chat-primary" :disabled="isPreview||actionBusy||running" @click="explicitOpen">{{ t('Enable conversation view') }}</button><button v-if="legacyAvailable" class="chat-link" @click="emit('legacy')">{{ t('Open native client view') }}</button></div>
     </div>
-    <section v-if="dockAgents.length" ref="dock" :class="['subagent-dock',{collapsed:!dockOpen}]" :aria-label="t('Subagents')"><header><button type="button" class="subagent-dock-head" :aria-expanded="dockOpen" @click="dockOpen=!dockOpen"><span :class="['subagent-dock-dot',{idle:!dockRunning}]" /><strong>{{ dockHeading }}</strong><small v-if="!dockOpen&&dockAgents[0]!.activity">{{ lastLine(dockAgents[0]!.activity!) }}</small><Icon class="subagent-dock-chevron" name="chevron" :size="14" /></button><button v-if="dockAgents.some(agent=>agent.status!=='running')" type="button" class="subagent-dock-clear" @click="clearFinished">{{ t('Clear finished') }}</button></header><ul v-if="dockOpen"><li v-for="agent in dockAgents" :key="agent.id" :class="['subagent-item',agent.status,{open:expandedAgent===agent.id}]"><div class="subagent-row"><button type="button" class="subagent-toggle" :aria-expanded="expandedAgent===agent.id" @click="expandedAgent=expandedAgent===agent.id?null:agent.id"><span :class="['tool-indicator',agent.status]">{{ agent.status==='completed'?'✓':agent.status==='failed'?'!':agent.ended?'–':'↻' }}</span><strong><Icon v-if="!SUBAGENT_TOOLS.has(agent.name)" class="subagent-kind" name="terminal" :size="12" />{{ agent.label || agent.name }}</strong><small>{{ agent.activity ? lastLine(agent.activity) : t(agent.status==='running'?'Working…':agent.status==='failed'?'Failed':'Completed') }}</small><span v-if="agent.stats" class="chat-tool-stats">{{ statsLine(agent.stats) }}</span><em v-if="quietLine(agent)" class="chat-tool-stalled">{{ quietLine(agent) }}</em><Icon class="subagent-chevron" name="chevron" :size="14" /></button><button v-if="agent.status!=='running'" type="button" class="subagent-dismiss" :aria-label="t('Dismiss')" :title="t('Dismiss')" @click="dismissAgent(agent.id)">×</button></div><div v-if="expandedAgent===agent.id" class="subagent-preview"><pre v-if="agent.activity" class="tool-activity subagent-log" @scroll="logScrolled">{{ agent.activity }}</pre><div v-if="agent.children?.length" class="chat-tool-children"><details v-for="entry in descendants(agent)" :key="entry.tool.id" class="chat-tool-nested" :style="{'--depth':entry.depth}"><summary><span :class="['tool-indicator',entry.tool.status]">{{ entry.tool.status==='completed'?'✓':entry.tool.status==='failed'?'!':entry.tool.ended?'–':'↻' }}</span><strong>{{ entry.tool.name }}<template v-if="entry.tool.label"> · {{ entry.tool.label }}</template></strong><small>{{ entry.tool.activity && entry.tool.status==='running' ? lastLine(entry.tool.activity) : t(entry.tool.status==='running'?(entry.tool.ended?'Session ended':'Working…'):entry.tool.status==='failed'?'Failed':'Completed') }}</small><span v-if="entry.tool.stats" class="chat-tool-stats">{{ statsLine(entry.tool.stats) }}</span></summary><pre v-if="entry.tool.activity" class="tool-activity">{{ entry.tool.activity }}</pre><pre v-if="entry.tool.text">{{ entry.tool.text }}</pre></details></div><template v-if="!agent.activity&&!agent.children?.length"><pre v-if="agent.text" class="subagent-log">{{ agent.text }}</pre><p v-else class="subagent-empty">{{ t('Nothing reported yet.') }}</p></template></div></li></ul></section>
+    <section v-if="dockAgents.length" ref="dock" :class="['subagent-dock',{collapsed:!dockOpen}]" :aria-label="t('Subagents')"><header><button type="button" class="subagent-dock-head" :aria-expanded="dockOpen" @click="dockOpen=!dockOpen"><span :class="['subagent-dock-dot',{idle:!dockRunning}]" /><strong>{{ dockHeading }}</strong><small v-if="!dockOpen&&dockAgents[0]!.activity">{{ lastLine(dockAgents[0]!.activity!) }}</small><Icon class="subagent-dock-chevron" name="chevron" :size="14" /></button><button v-if="dockAgents.some(agent=>agent.status!=='running')" type="button" class="subagent-dock-clear" @click="clearFinished">{{ t('Clear finished') }}</button></header><ul v-if="dockOpen"><li v-for="agent in dockAgents" :key="agent.id" :class="['subagent-item',agent.status,{open:expandedAgent===agent.id}]"><div class="subagent-row"><button type="button" class="subagent-toggle" :aria-expanded="expandedAgent===agent.id" @click="expandedAgent=expandedAgent===agent.id?null:agent.id"><span :class="['tool-indicator',agent.status]">{{ toolIndicator(agent) }}</span><strong><Icon v-if="!SUBAGENT_TOOLS.has(agent.name)" class="subagent-kind" name="terminal" :size="12" />{{ agent.label || agent.name }}</strong><small>{{ agent.activity ? lastLine(agent.activity) : t(agent.status==='running'?'Working…':agent.status==='failed'?'Failed':'Completed') }}</small><span v-if="agent.stats" class="chat-tool-stats">{{ statsLine(agent.stats) }}</span><em v-if="quietLine(agent)" class="chat-tool-stalled">{{ quietLine(agent) }}</em><Icon class="subagent-chevron" name="chevron" :size="14" /></button><button v-if="agent.status!=='running'" type="button" class="subagent-dismiss" :aria-label="t('Dismiss')" :title="t('Dismiss')" @click="dismissAgent(agent.id)">×</button></div><div v-if="expandedAgent===agent.id" class="subagent-preview"><pre v-if="agent.activity" class="tool-activity subagent-log" @scroll="logScrolled">{{ agent.activity }}</pre><div v-if="agent.children?.length" class="chat-tool-children"><details v-for="entry in descendants(agent)" :key="entry.tool.id" class="chat-tool-nested" :style="{'--depth':entry.depth}"><summary><span :class="['tool-indicator',entry.tool.status]">{{ toolIndicator(entry.tool) }}</span><strong>{{ entry.tool.name }}<template v-if="entry.tool.label"> · {{ entry.tool.label }}</template></strong><small>{{ entry.tool.activity && entry.tool.status==='running' ? lastLine(entry.tool.activity) : t(entry.tool.status==='running'?(entry.tool.ended?'Session ended':'Working…'):entry.tool.status==='failed'?'Failed':'Completed') }}</small><span v-if="entry.tool.stats" class="chat-tool-stats">{{ statsLine(entry.tool.stats) }}</span></summary><pre v-if="entry.tool.activity" class="tool-activity">{{ entry.tool.activity }}</pre><pre v-if="entry.tool.text">{{ entry.tool.text }}</pre></details></div><template v-if="!agent.activity&&!agent.children?.length"><pre v-if="agent.text" class="subagent-log">{{ agent.text }}</pre><p v-else class="subagent-empty">{{ t('Nothing reported yet.') }}</p></template></div></li></ul></section>
     <button v-if="!followBottom" class="chat-latest" @click="scrollToLatest(true)">↓ {{ t('Latest message') }}</button>
     <BottomSheet v-if="mobile && optionsOpen" :title="t('Session settings')" @opened="chipsInSheet=true" @close="optionsClosed"><div v-if="error" class="chat-alert chat-options-alert" role="alert">{{ error }}</div><div v-else-if="notice" class="chat-notice chat-options-alert" role="status">{{ t(notice) }}</div><div :id="optionsTarget" class="chat-options-body" /></BottomSheet>
     <section v-if="dockedApproval" class="chat-approval-dock" :aria-label="t('Waiting for you')">
