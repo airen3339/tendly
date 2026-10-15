@@ -87,3 +87,27 @@ test('natural directory-first sorting does not mutate the API response', () => {
   assert.deepEqual(sortTreeEntries(files).map(row => row.path), ['A', 'z', 'part2.ts', 'part10.ts']);
   assert.equal(files[0].path, 'part10.ts');
 });
+
+test('the tree keys move, open, expand and collapse as a tree view does', async () => {
+  const { treeKeyAction } = await import('./tree-model.ts');
+  const row = (path, kind, parent, expanded = false) => ({ entry: { path, name: path.split('/').pop(), kind }, parent, depth: 0, position: 0, siblings: 0, expanded });
+  const src = row('src', 'directory', '', true), main = row('src/main.ts', 'file', 'src'), docs = row('docs', 'directory', '');
+  const rows = [src, main, docs];
+  assert.deepEqual(treeKeyAction('ArrowDown', false, rows, src), { kind: 'focus', path: 'src/main.ts' });
+  assert.equal(treeKeyAction('ArrowDown', false, rows, docs), 'none', 'nothing below the last row');
+  assert.deepEqual(treeKeyAction('ArrowUp', false, rows, main), { kind: 'focus', path: 'src' });
+  assert.deepEqual(treeKeyAction('End', false, rows, src), { kind: 'focus', path: 'docs' });
+  assert.deepEqual(treeKeyAction('Enter', false, rows, main), { kind: 'open' });
+  assert.deepEqual(treeKeyAction(' ', false, rows, main), { kind: 'open' });
+  // Right opens a closed folder, then steps into an open one; on a file it does nothing.
+  assert.deepEqual(treeKeyAction('ArrowRight', false, rows, docs), { kind: 'expand' });
+  assert.deepEqual(treeKeyAction('ArrowRight', false, rows, src), { kind: 'focus', path: 'src/main.ts' });
+  assert.equal(treeKeyAction('ArrowRight', false, rows, main), 'none');
+  // Left closes an open folder, otherwise goes up to the parent.
+  assert.deepEqual(treeKeyAction('ArrowLeft', false, rows, src), { kind: 'collapse', path: 'src' });
+  assert.deepEqual(treeKeyAction('ArrowLeft', false, rows, main), { kind: 'focus', path: 'src' });
+  assert.equal(treeKeyAction('ArrowLeft', false, rows, docs), 'none', 'already at the top');
+  // Not the tree's keys.
+  assert.equal(treeKeyAction('a', false, rows, main), 'ignore');
+  assert.equal(treeKeyAction('ArrowDown', true, rows, main), 'ignore', 'a modified key is left alone');
+});
