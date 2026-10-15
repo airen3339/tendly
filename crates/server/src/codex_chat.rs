@@ -15,72 +15,13 @@
 //! that asked (`this.active === active`) are kept, as turn indexes.
 use crate::chat_adapter::{Answers, ChatInit, Decision};
 use crate::native_chat::{
-    Core, MAX_TEXT, NativeAdapter, NativeClient, Protocol, clip, clip_value, js_string,
-    json_rpc_frame, native_id, resolve, stringify, truthy, valid_init,
+    Core, LaunchArgs, MAX_TEXT, NativeAdapter, NativeClient, Protocol, approval_scope, clip,
+    clip_value, js_string, json_rpc_frame, native_id, resolve, stringify, take_resume, truthy,
+    valid_init,
 };
 use indexmap::IndexMap;
 use serde_json::{Map, Value, json};
-use std::{
-    collections::{BTreeMap, HashSet},
-    path::Path,
-};
-
-/// `approvalScope`: the kind of access a request asks for, and any path in it
-/// that lies outside the working directory.
-pub fn approval_scope(
-    cwd: &str,
-    access: Option<&str>,
-    paths: &[Value],
-    command: Option<&Value>,
-) -> Option<Value> {
-    let root = (!cwd.is_empty()).then(|| resolve(Path::new("/"), cwd));
-    let mut outside: Vec<String> = Vec::new();
-    if let Some(root) = &root {
-        let mut seen = HashSet::new();
-        let prefix = {
-            let text = root.to_string_lossy().into_owned();
-            if text.ends_with(std::path::MAIN_SEPARATOR) {
-                text
-            } else {
-                format!("{text}{}", std::path::MAIN_SEPARATOR)
-            }
-        };
-        for path in paths.iter().filter_map(Value::as_str) {
-            let length = path.encode_utf16().count();
-            if length == 0 || length > 1024 || path.contains('\0') {
-                continue;
-            }
-            let resolved = resolve(root, path).to_string_lossy().into_owned();
-            if !seen.insert(resolved.clone()) {
-                continue;
-            }
-            if resolved != root.to_string_lossy() && !resolved.starts_with(&prefix) {
-                outside.push(resolved);
-            }
-        }
-        outside.truncate(8);
-    }
-    let mut scope = Map::new();
-    if let Some(access) = access.filter(|a| ["read", "write", "execute", "network"].contains(a)) {
-        scope.insert("access".into(), json!(access));
-    }
-    if !outside.is_empty() {
-        scope.insert("outside".into(), json!(outside));
-    }
-    if let Some(command) = command
-        .and_then(Value::as_str)
-        .filter(|c| !c.trim().is_empty())
-    {
-        let chars: Vec<u16> = command.encode_utf16().collect();
-        let text = if chars.len() > 600 {
-            format!("{}…", String::from_utf16_lossy(&chars[..599]))
-        } else {
-            command.to_owned()
-        };
-        scope.insert("command".into(), json!(text));
-    }
-    (!scope.is_empty()).then_some(Value::Object(scope))
-}
+use std::{collections::BTreeMap, path::Path};
 
 /// `pathsIn`: absolute paths anywhere in a permission request.
 fn paths_in(value: &Value, found: &mut Vec<Value>, depth: usize) {
@@ -125,25 +66,10 @@ pub fn codex_launch(init: &ChatInit) -> Result<Launch, String> {
     let mut thread = Map::new();
     thread.insert("cwd".into(), json!(init.cwd));
     let mut resume = init.resume_id.clone();
-    let mut i = 0;
-    while i < init.args.len() {
-        let arg = &init.args[i];
-        let (flag, inline) = match arg.find('=') {
-            Some(at) if at > 0 => (&arg[..at], Some(arg[at + 1..].to_owned())),
-            _ => (arg.as_str(), None),
-        };
-        let mut value = || -> Result<String, String> {
-            let result = match &inline {
-                Some(value) => Some(value.clone()),
-                None => {
-                    i += 1;
-                    init.args.get(i).cloned()
-                }
-            };
-            result
-                .filter(|v| !v.is_empty())
-                .ok_or_else(|| "Missing Codex launch option value.".to_owned())
-        };
+    let mut launch = LaunchArgs::new(&init.args, "Codex", false);
+    while let Some(arg) = launch.next_flag() {
+        let flag = arg.name;
+        let mut value = || launch.value(&arg);
         match flag {
             "-c" | "--config" => {
                 let v = value()?;
@@ -178,16 +104,13 @@ pub fn codex_launch(init: &ChatInit) -> Result<Launch, String> {
                 }
             }
             "resume" | "--resume" => {
-                let id = value()?;
-                if !native_id(&id) || resume.as_ref().is_some_and(|r| *r != id) {
+                if !take_resume(&mut resume, value()?) {
                     return Err("Invalid or conflicting Codex resume ID.".into());
                 }
-                resume = Some(id);
             }
             "--no-alt-screen" | "app-server" => {}
             _ => return Err("Unsupported Codex launch option in structured mode.".into()),
         }
-        i += 1;
     }
     Ok(Launch {
         args,

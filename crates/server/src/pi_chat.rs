@@ -8,8 +8,8 @@
 //! what it does ask comes from extensions, as `extension_ui_request` dialogs.
 use crate::chat_adapter::{Answers, ChatInit, Decision};
 use crate::native_chat::{
-    Core, MAX_TEXT, NativeAdapter, NativeClient, Protocol, clip, js_string, native_id,
-    safe_integer, stringify, valid_init,
+    Core, LaunchArgs, MAX_TEXT, NativeAdapter, NativeClient, Protocol, clip, js_string,
+    safe_integer, stringify, take_resume, valid_init,
 };
 use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
@@ -18,40 +18,22 @@ use std::collections::BTreeMap;
 pub fn pi_launch(init: &ChatInit) -> Result<Vec<String>, String> {
     let mut args = vec!["--mode".to_owned(), "rpc".to_owned()];
     let mut resume = init.resume_id.clone();
-    let mut i = 0;
-    while i < init.args.len() {
-        let arg = &init.args[i];
-        let (flag, inline) = match arg.find('=') {
-            Some(at) if at > 0 => (&arg[..at], Some(arg[at + 1..].to_owned())),
-            _ => (arg.as_str(), None),
-        };
-        let mut value = || -> Result<String, String> {
-            let result = match &inline {
-                Some(value) => Some(value.clone()),
-                None => {
-                    i += 1;
-                    init.args.get(i).cloned()
-                }
-            };
-            result
-                .filter(|v| !v.is_empty())
-                .ok_or_else(|| "Missing Pi launch option value.".to_owned())
-        };
+    let mut launch = LaunchArgs::new(&init.args, "Pi", false);
+    while let Some(arg) = launch.next_flag() {
+        let flag = arg.name;
+        let mut value = || launch.value(&arg);
         match flag {
             "--model" | "--provider" | "--thinking" | "--name" | "-n" => {
                 let v = value()?;
                 args.extend([flag.to_owned(), v]);
             }
             "--session" => {
-                let id = value()?;
-                if !native_id(&id) || resume.as_ref().is_some_and(|r| *r != id) {
+                if !take_resume(&mut resume, value()?) {
                     return Err("Invalid or conflicting Pi session ID.".into());
                 }
-                resume = Some(id);
             }
             _ => return Err("Unsupported Pi launch option in structured mode.".into()),
         }
-        i += 1;
     }
     if let Some(resume) = resume {
         args.extend(["--session".to_owned(), resume]);

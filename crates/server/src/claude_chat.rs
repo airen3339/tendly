@@ -9,10 +9,9 @@
 //! requests either way. Tool approvals arrive as the client's own
 //! `can_use_tool` requests and are answered on the same channel.
 use crate::chat_adapter::{Answers, ChatInit, Decision};
-use crate::codex_chat::approval_scope;
 use crate::native_chat::{
-    Core, MAX_TEXT, NativeAdapter, NativeClient, Protocol, clip, clip_value, js_string, native_id,
-    safe_integer, stringify, truthy, valid_init,
+    Core, LaunchArgs, MAX_TEXT, NativeAdapter, NativeClient, Protocol, approval_scope, clip,
+    clip_value, js_string, native_id, safe_integer, stringify, take_resume, truthy, valid_init,
 };
 use indexmap::{IndexMap, IndexSet};
 use serde_json::{Map, Value, json};
@@ -89,29 +88,14 @@ pub fn claude_launch(init: &ChatInit) -> Result<Launch, String> {
     let mut session_id: Option<String> = None;
     let mut model = None;
     let mut effort = None;
-    let mut i = 0;
-    while i < init.args.len() {
-        let arg = &init.args[i];
-        let equal = arg.find('=').filter(|at| *at > 0);
-        let flag = equal.map_or(arg.as_str(), |at| &arg[..at]);
-        let mut value = || -> Result<String, String> {
-            match equal {
-                Some(at) => Ok(arg[at + 1..].to_owned()),
-                None => {
-                    i += 1;
-                    init.args
-                        .get(i)
-                        .cloned()
-                        .ok_or_else(|| "Missing Claude Code launch option value.".to_owned())
-                }
-            }
-        };
+    let mut launch = LaunchArgs::new(&init.args, "Claude Code", true);
+    while let Some(arg) = launch.next_flag() {
+        let flag = arg.name;
+        let mut value = || launch.value(&arg);
         if flag == "--resume" || flag == "-r" {
-            let id = value()?;
-            if !native_id(&id) || resume.as_ref().is_some_and(|known| *known != id) {
+            if !take_resume(&mut resume, value()?) {
                 return Err("Invalid or conflicting Claude Code resume ID.".into());
             }
-            resume = Some(id);
         } else if flag == "--session-id" {
             let id = value()?;
             if !native_id(&id) {
@@ -158,7 +142,6 @@ pub fn claude_launch(init: &ChatInit) -> Result<Launch, String> {
         } else {
             return Err("Unsupported Claude Code launch option in structured mode.".into());
         }
-        i += 1;
     }
     if let (Some(resume), Some(session)) = (&resume, &session_id)
         && resume != session
