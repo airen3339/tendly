@@ -3,6 +3,9 @@ import { nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
+import type { WTerm } from "@wterm/dom";
+import type { GhosttyCore } from "@wterm/ghostty";
+import "@wterm/dom/css";
 import Icon from "../features/Icon.vue";
 import { useI18n } from "../i18n";
 import { createSessionStream, TERMINAL_VIEW_ERROR } from "../features/session-stream";
@@ -12,6 +15,7 @@ import { arrowSequence, ctrlSequence, ENTER_SEQUENCE, ESCAPE_SEQUENCE, isTap, re
 import { swipeAxis } from "../features/pane-swipe";
 import { addSample, flingStep, releaseVelocity, type TouchSample } from "../features/terminal-scroll";
 import { terminalDark as dark } from "../features/theme";
+import { quietGhostty, terminalEngine } from "../features/terminal-engine";
 import { filesFrom, imageCaveat, isImage, pasteText, uploadName, uploadProblem, uploadToSession } from "../features/terminal-uploads";
 import { showToast } from "../features/toasts";
 const { t } = useI18n();
@@ -55,6 +59,12 @@ const pasteDraft = ref<string>();
 const pasteField = ref<HTMLTextAreaElement>();
 let terminal: Terminal | undefined;
 let fit: FitAddon | undefined;
+const engine = terminalEngine();
+/**
+ * The wterm view, once its emulator has loaded. Output that arrives while it
+ * loads waits in `early`; `wtermSurface` is the element it scrolls.
+ */
+let wterm: WTerm | undefined, wtermCore: GhosttyCore | undefined, wtermSurface: HTMLDivElement | undefined, early: Uint8Array[] | undefined;
 let observer: ResizeObserver | undefined;
 let resizeFrame = 0, sized = false;
 let disposed = false;
@@ -80,11 +90,11 @@ const stream = createSessionStream({
       if (framed) {
         if (data.byteLength < 8) return;
         resume = { runtime: resume?.runtime ?? "", seq: Number(new DataView(data).getBigUint64(0)) };
-        terminal?.write(new Uint8Array(data, 8));
+        writeOutput(new Uint8Array(data, 8));
       } else {
         // A server that does not number its frames replays everything.
-        if (redrawPending) { redrawPending = false; terminal?.reset(); }
-        terminal?.write(new Uint8Array(data));
+        if (redrawPending) { redrawPending = false; resetView(); }
+        writeOutput(new Uint8Array(data));
       }
       // A size sent as the socket opens can reach the server before a reopened
       // session's process exists, leaving the shell at the size it started
@@ -103,7 +113,7 @@ const stream = createSessionStream({
     if (control.type === "stream") {
       const hello = control as { runtime?: unknown; resumed?: unknown };
       framed = true; redrawPending = false;
-      if (hello.resumed !== true || typeof hello.runtime !== "string" || hello.runtime !== resume?.runtime) terminal?.reset();
+      if (hello.resumed !== true || typeof hello.runtime !== "string" || hello.runtime !== resume?.runtime) resetView();
       resume = typeof hello.runtime === "string" ? { runtime: hello.runtime, seq: hello.resumed === true && resume ? resume.seq : 0 } : undefined;
     } else if (control.type === "exit") {
       // The shell around this pane says the process exited and offers to start it again.
@@ -120,23 +130,72 @@ const stream = createSessionStream({
 function resize() {
   cancelAnimationFrame(resizeFrame);
   resizeFrame = requestAnimationFrame(() => {
-    if (disposed || !terminal || !host.value || host.value.clientWidth < 30 || host.value.clientHeight < 30) return;
-    try { fit?.fit(); } catch { return; }
-    stream.send(JSON.stringify({ type: "resize", cols: terminal.cols, rows: terminal.rows }));
+    if (disposed || !viewReady() || !host.value || host.value.clientWidth < 30 || host.value.clientHeight < 30) return;
+    try { if (terminal) fit?.fit(); else wterm?.fit(); } catch { return; }
+    const size = viewSize();
+    if (size) stream.send(JSON.stringify({ type: "resize", ...size }));
   });
+}
+
+/* The few things the pane asks of whichever library is drawing. */
+function viewReady() { return engine === "wterm" ? !!wterm : !!terminal; }
+function viewSize() { const view = terminal ?? wterm; return view ? { cols: view.cols, rows: view.rows } : undefined; }
+function writeOutput(bytes: Uint8Array) {
+  if (engine === "xterm") terminal?.write(bytes);
+  else if (!wterm) early?.push(bytes.slice());
+  else if (burst) burst.push(bytes);
+  else { wterm.write(bytes); burst = []; burstFrame = requestAnimationFrame(flushBurst); }
+}
+/**
+ * A busy client's output arrives as thousands of small frames, and handing
+ * wterm each one on its own costs more in per-write bookkeeping than the
+ * parsing does. The first frame after a quiet spell is written at once, so a
+ * keystroke echoes without delay; the rest of a burst is gathered and written
+ * once per animation frame until the output goes quiet again.
+ */
+let burst: Uint8Array[] | undefined, burstFrame = 0;
+function flushBurst() {
+  const pending = burst;
+  burst = undefined;
+  if (!pending?.length || !wterm) return;
+  const joined = new Uint8Array(pending.reduce((size, part) => size + part.byteLength, 0));
+  let offset = 0;
+  for (const part of pending) { joined.set(part, offset); offset += part.byteLength; }
+  wterm.write(joined);
+  burst = []; burstFrame = requestAnimationFrame(flushBurst);
+}
+function resetView() {
+  if (engine === "xterm") terminal?.reset();
+  else if (wterm) { burst?.splice(0); wterm.write("\x1bc"); }
+  else early?.splice(0);
+}
+/** Paste as the terminal would: line breaks as Enter, bracketed when the program asked for it. */
+function pasteInto(text: string) {
+  if (engine === "xterm") { terminal?.paste(text); return; }
+  if (!wterm) return;
+  const body = text.replace(/\r?\n/g, "\r");
+  stream.send(new TextEncoder().encode(wtermCore?.bracketedPaste() ? `\x1b[200~${body}\x1b[201~` : body));
+}
+function focusView() { terminal?.focus(); wterm?.focus(); }
+function applicationCursorKeys() { return engine === "xterm" ? !!terminal?.modes.applicationCursorKeysMode : !!wtermCore?.cursorKeysApp(); }
+/** What the keyboard typed, with any armed on-screen modifier applied. */
+function typed(data: string) {
+  if (shiftArmed.value) { shiftArmed.value = false; data = shiftSequence(data); }
+  if (ctrlArmed.value) { ctrlArmed.value = false; data = ctrlSequence(data); }
+  stream.send(new TextEncoder().encode(data));
 }
 
 /** Send exactly the bytes the physical key would, so the client sees a key. */
 function sendKeys(sequence: string) {
-  if (!sequence || !terminal) return;
+  if (!sequence || !viewReady()) return;
   // A key on the bar is the key the modifiers were armed for, if any; they are
   // released rather than left waiting for the keyboard.
   ctrlArmed.value = false; shiftArmed.value = false;
   stream.send(new TextEncoder().encode(sequence));
 }
 function pressArrow(key: ArrowKey) {
-  if (!terminal) return;
-  sendKeys(arrowSequence(key, terminal.modes.applicationCursorKeysMode, { shift: shiftArmed.value, ctrl: ctrlArmed.value }));
+  if (!viewReady()) return;
+  sendKeys(arrowSequence(key, applicationCursorKeys(), { shift: shiftArmed.value, ctrl: ctrlArmed.value }));
 }
 function pressEnter() { sendKeys(ENTER_SEQUENCE); }
 function pressEscape() { sendKeys(ESCAPE_SEQUENCE); }
@@ -163,7 +222,7 @@ async function pressPaste() {
     }
     if (images.length) { void sendFiles(images); return; }
     const text = await navigator.clipboard?.readText?.();
-    if (text) { terminal?.paste(text); return; }
+    if (text) { pasteInto(text); return; }
   } catch { /* Not permitted here; fall back to the field. */ }
   pasteDraft.value = "";
   await nextTick(); pasteField.value?.focus();
@@ -200,7 +259,7 @@ async function uploadOne(entry: Upload): Promise<string | undefined> {
 /** Upload files and paste their paths, as dragging them into a local terminal would. */
 async function sendFiles(files: File[]) {
   if (!files.length) return;
-  if (!terminal || state.value !== "connected") { showToast(t("Connect the terminal before adding files."), { tone: "warn" }); return; }
+  if (!viewReady() || state.value !== "connected") { showToast(t("Connect the terminal before adding files."), { tone: "warn" }); return; }
   const batch = files.map(file => {
     const name = uploadName(file);
     const entry: Upload = { id: ++uploadSeq, file, name, progress: 0, preview: isImage(name, file.type) ? URL.createObjectURL(file) : undefined };
@@ -209,12 +268,12 @@ async function sendFiles(files: File[]) {
   });
   const paths = await Promise.all(batch.map(uploadOne));
   const done = paths.filter((path): path is string => !!path);
-  if (done.length) { terminal?.paste(pasteText(done)); terminal?.focus(); }
+  if (done.length) { pasteInto(pasteText(done)); focusView(); }
   for (const [index, entry] of batch.entries()) if (paths[index]) dropUpload(entry.id);
 }
 async function retryUpload(entry: Upload) {
   const path = await uploadOne(entry);
-  if (path) { terminal?.paste(pasteText([path])); terminal?.focus(); dropUpload(entry.id); }
+  if (path) { pasteInto(pasteText([path])); focusView(); dropUpload(entry.id); }
 }
 /** A paste carrying files is theirs; plain text is left to the terminal untouched. */
 function onPaste(event: ClipboardEvent) {
@@ -251,16 +310,16 @@ function onFieldPaste(event: ClipboardEvent) {
 function sendPaste() {
   const text = pasteDraft.value;
   pasteDraft.value = undefined;
-  if (text) terminal?.paste(text);
-  terminal?.focus();
+  if (text) pasteInto(text);
+  focusView();
 }
-function cancelPaste() { pasteDraft.value = undefined; terminal?.focus(); }
+function cancelPaste() { pasteDraft.value = undefined; focusView(); }
 /**
  * Bring up the on-screen keyboard by focusing the terminal's own input target.
  * A mobile browser only opens it from inside a real gesture, which is why this
  * runs on click and why the other controls refuse focus instead of taking it.
  */
-function showKeyboard() { terminal?.focus(); }
+function showKeyboard() { focusView(); }
 /** Keep the caret in the terminal so tapping a control never closes the keyboard. */
 function keepFocus(event: Event) { event.preventDefault(); }
 
@@ -277,16 +336,29 @@ function gestureStart(event: PointerEvent) { gesture = { x: event.clientX, y: ev
 function gestureEnd(event: PointerEvent) {
   const start = gesture;
   gesture = undefined;
-  if (!start || !tapSelect.value || !terminal || !host.value) return;
+  if (!start || !tapSelect.value || !viewReady() || !host.value) return;
   const moved = Math.hypot(event.clientX - start.x, event.clientY - start.y);
-  if (!isTap({ movedPx: moved, elapsedMs: Date.now() - start.at, hasSelection: terminal.hasSelection() })) return;
-  const viewport = host.value.querySelector(".xterm-screen") ?? host.value;
-  const bounds = viewport.getBoundingClientRect();
-  if (bounds.height < 1 || terminal.rows < 1) return;
-  const row = Math.floor((event.clientY - bounds.top) / (bounds.height / terminal.rows));
-  if (row < 0 || row >= terminal.rows) return;
-  const move = selectionPresses(terminal.buffer.active.cursorY, row);
-  if (move) sendKeys(repeatArrow(move.key, move.count, terminal.modes.applicationCursorKeysMode));
+  const hasSelection = terminal ? terminal.hasSelection() : !!wterm?.getSelectionText();
+  if (!isTap({ movedPx: moved, elapsedMs: Date.now() - start.at, hasSelection })) return;
+  const target = tappedRow(event.clientY);
+  if (!target) return;
+  const move = selectionPresses(target.cursor, target.row);
+  if (move) sendKeys(repeatArrow(move.key, move.count, applicationCursorKeys()));
+}
+/** The screen row a tap landed on, and the row the cursor is on, both counted from the top of the screen. */
+function tappedRow(clientY: number): { row: number; cursor: number } | undefined {
+  if (terminal && host.value) {
+    const viewport = host.value.querySelector(".xterm-screen") ?? host.value;
+    const bounds = viewport.getBoundingClientRect();
+    if (bounds.height < 1 || terminal.rows < 1) return undefined;
+    const row = Math.floor((clientY - bounds.top) / (bounds.height / terminal.rows));
+    return row >= 0 && row < terminal.rows ? { row, cursor: terminal.buffer.active.cursorY } : undefined;
+  }
+  if (!wtermSurface || !wtermCore) return undefined;
+  // wterm keeps the live screen's rows apart from the history rows above them.
+  const rows = [...wtermSurface.querySelectorAll(".term-row:not(.term-scrollback-row)")];
+  const row = rows.findIndex(element => { const bounds = element.getBoundingClientRect(); return clientY >= bounds.top && clientY < bounds.bottom; });
+  return row >= 0 ? { row, cursor: wtermCore.getCursor().row } : undefined;
 }
 
 /**
@@ -306,6 +378,8 @@ let fling: { frame: number; velocity: number; carry: number; at: number; x: numb
 function stopFling() { if (fling) cancelAnimationFrame(fling.frame); fling = undefined; }
 function touchScrollStart(event: TouchEvent) {
   stopFling();
+  // wterm's rows are page text in a scrolling element: the browser scrolls them itself.
+  if (engine === "wterm") return;
   const touch = event.touches[0];
   touchScroll = event.touches.length === 1 && touch ? { x: touch.clientX, y: touch.clientY, carry: 0, samples: [{ y: touch.clientY, at: event.timeStamp }] } : undefined;
 }
@@ -359,15 +433,21 @@ function scrollByPixels(pixels: number, clientX: number, clientY: number): numbe
   return pixels - lines * rowHeight;
 }
 function updateScrolledBack() {
+  if (engine === "wterm") {
+    const surface = wtermSurface;
+    scrolledBack.value = !!wterm && !!surface && surface.scrollHeight - surface.scrollTop - surface.clientHeight > 5;
+    return;
+  }
   const buffer = terminal?.buffer.active;
   scrolledBack.value = !!buffer && buffer.type === "normal" && buffer.viewportY < buffer.baseY;
 }
-function scrollToLatest() { stopFling(); terminal?.scrollToBottom(); updateScrolledBack(); }
+function scrollToLatest() { stopFling(); terminal?.scrollToBottom(); if (wterm && wtermSurface) wtermSurface.scrollTop = wtermSurface.scrollHeight; updateScrolledBack(); }
 
 function streamUrl(sessionId: string) {
   const url = new URL(`/api/sessions/${encodeURIComponent(sessionId)}/pty/ws`, window.location.href);
   url.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  if (terminal) { url.searchParams.set("cols", String(terminal.cols)); url.searchParams.set("rows", String(terminal.rows)); }
+  const size = viewSize();
+  if (size) { url.searchParams.set("cols", String(size.cols)); url.searchParams.set("rows", String(size.rows)); }
   url.searchParams.set("framed", "true");
   if (resume?.runtime) { url.searchParams.set("runtime", resume.runtime); url.searchParams.set("after", String(resume.seq)); }
   return url.toString();
@@ -392,11 +472,12 @@ function terminalTheme() {
     cyan: "#087e80", brightCyan: "#058587", white: "#607080", brightWhite: "#384658",
   };
 }
-watch(dark, () => { if (terminal) terminal.options.theme = terminalTheme(); });
+watch(dark, () => { if (terminal) terminal.options.theme = terminalTheme(); if (wtermSurface) wtermColors(wtermSurface); });
 
 function initializeTerminal() {
-  if (terminal) return;
+  if (terminal || wtermSurface) return;
   if (!host.value) throw new Error("Terminal host is unavailable");
+  if (engine === "wterm") { initializeWterm(host.value); return; }
   terminal = new Terminal({
     cursorBlink: true, fontSize: 12, lineHeight: 1.22, scrollback: 5000,
     // A wheel notch glides instead of jumping three lines at once; a trackpad
@@ -409,14 +490,53 @@ function initializeTerminal() {
   });
   fit = new FitAddon(); terminal.loadAddon(fit); terminal.open(host.value);
   useWebgl(terminal);
-  subscriptions.push(terminal.onData(data => {
-    if (shiftArmed.value) { shiftArmed.value = false; data = shiftSequence(data); }
-    if (ctrlArmed.value) { ctrlArmed.value = false; data = ctrlSequence(data); }
-    stream.send(new TextEncoder().encode(data));
-  }));
+  subscriptions.push(terminal.onData(typed));
   subscriptions.push(terminal.onScroll(updateScrolledBack), terminal.onWriteParsed(updateScrolledBack));
   subscriptions.push(terminal.onBinary(data => { stream.send(Uint8Array.from(data, value => value.charCodeAt(0) & 255)); }));
   observer = new ResizeObserver(resize); observer.observe(host.value);
+}
+/**
+ * Draw with wterm: Ghostty's emulator, compiled to WebAssembly, with the rows
+ * laid out as page text in an element the browser scrolls. Scrolling back then
+ * moves by the pixel on the compositor, with the platform's own momentum,
+ * instead of repainting a canvas a whole row at a time. The emulator loads
+ * asynchronously; output that arrives meanwhile is written once it is up.
+ */
+function initializeWterm(target: HTMLElement) {
+  const surface = document.createElement("div");
+  surface.className = "wterm-surface";
+  target.replaceChildren(surface);
+  wtermSurface = surface; early = [];
+  wtermColors(surface); quietGhostty();
+  observer = new ResizeObserver(resize); observer.observe(target);
+  void (async () => {
+    try {
+      const [{ WTerm }, { GhosttyCore }, { default: wasmPath }] = await Promise.all([
+        import("@wterm/dom"), import("@wterm/ghostty"), import("@wterm/ghostty/ghostty-vt.wasm?url"),
+      ]);
+      // Ghostty budgets history in bytes; this keeps several thousand wide rows.
+      const core = await GhosttyCore.load({ wasmPath, scrollbackLimit: 8_000_000 });
+      const view = new WTerm(surface, { core, cursorBlink: true, onData: typed, onBinary: data => stream.send(data) });
+      await view.init();
+      if (wtermSurface !== surface) { view.destroy(); core.dispose(); return; }
+      wterm = view; wtermCore = core;
+      for (const bytes of early?.splice(0) ?? []) view.write(bytes);
+      early = undefined;
+      surface.addEventListener("scroll", updateScrolledBack, { passive: true });
+      resize();
+    } catch { if (wtermSurface === surface) { stream.fail(TERMINAL_VIEW_ERROR); cleanupTerminal(); } }
+  })();
+}
+/** The pane's palette, as the CSS variables wterm paints with. */
+function wtermColors(surface: HTMLElement) {
+  const theme: Record<string, string | undefined> = terminalTheme();
+  const names = ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white"];
+  const set = (name: string, value: string | undefined) => value ? surface.style.setProperty(name, value) : surface.style.removeProperty(name);
+  set("--term-fg", theme.foreground); set("--term-bg", theme.background); set("--term-cursor", theme.cursor);
+  names.forEach((name, index) => {
+    set(`--term-color-${index}`, theme[name]);
+    set(`--term-color-${index + 8}`, theme[`bright${name[0]!.toUpperCase()}${name.slice(1)}`]);
+  });
 }
 /**
  * Draw with the GPU where there is one.
@@ -435,11 +555,13 @@ function useWebgl(target: Terminal) {
   } catch { /* No WebGL here; the DOM renderer stays. */ }
 }
 function cleanupTerminal() {
-  cancelAnimationFrame(resizeFrame); stopFling(); scrolledBack.value = false;
+  cancelAnimationFrame(resizeFrame); cancelAnimationFrame(burstFrame); burst = undefined; stopFling(); scrolledBack.value = false;
   observer?.disconnect(); observer = undefined;
   for (const subscription of subscriptions.splice(0)) try { subscription.dispose(); } catch { /* Best-effort cleanup after partial initialization. */ }
   try { terminal?.dispose(); } catch { /* A broken renderer should remain retryable. */ }
-  terminal = undefined; fit = undefined; host.value?.replaceChildren();
+  wtermSurface?.removeEventListener("scroll", updateScrolledBack);
+  try { wterm?.destroy(); wtermCore?.dispose(); } catch { /* As above. */ }
+  terminal = undefined; fit = undefined; wterm = undefined; wtermCore = undefined; wtermSurface = undefined; early = undefined; host.value?.replaceChildren();
 }
 onMounted(() => {
   // `any-pointer: coarse` rather than `pointer: coarse`: a laptop with a
@@ -458,12 +580,12 @@ onMounted(() => {
   stopPageReturn = onPageReturn(stale => {
     // A view that never got a terminal starts over; any other is woken, which
     // retries a dropped socket, replaces a stale one and probes the rest.
-    if (!terminal && state.value === "error") connect(); else stream.wake(stale);
+    if (!viewReady() && state.value === "error") connect(); else stream.wake(stale);
   });
 });
 watch(() => props.sessionId, async (_next, _previous, onCleanup) => {
   let current = true; onCleanup(() => { current = false; });
-  stream.disconnect(); resume = undefined; terminal?.reset(); await nextTick(); if (current) connect();
+  stream.disconnect(); resume = undefined; resetView(); await nextTick(); if (current) connect();
 });
 onUnmounted(() => { for (const entry of uploads.value) { entry.abort?.(); if (entry.preview) URL.revokeObjectURL(entry.preview); } stopPageReturn(); disposed = true; stream.dispose(); cleanupTerminal(); emit("status", false); });
 </script>

@@ -20,6 +20,8 @@
     "@tanstack/vue-virtual": "3.13.39",
     "@tendly/protocol": "workspace:*",
     "@vitejs/plugin-vue": "6.0.8",
+    "@wterm/dom": "0.5.4",
+    "@wterm/ghostty": "0.5.4",
     "@xterm/addon-fit": "0.11.0",
     "@xterm/addon-webgl": "0.19.0",
     "@xterm/xterm": "6.0.0",

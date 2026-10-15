@@ -4,3 +4,6 @@ packages:
 
 onlyBuiltDependencies:
   - esbuild
+
+patchedDependencies:
+  '@wterm/dom@0.5.4': patches/@wterm__dom@0.5.4.patch

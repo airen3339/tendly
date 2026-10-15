@@ -1,0 +1,17 @@
+diff --git a/dist/renderer.js b/dist/renderer.js
+index 688ad09a7ea32990d94b751642fb496c3999f1c5..f05d9498d8c34f82d7cb3c2d3e7b138399a3f895 100644
+--- a/dist/renderer.js
++++ b/dist/renderer.js
+@@ -671,7 +671,11 @@ export class Renderer {
+         else {
+             // Replace only the changed middle, retaining the native text nodes and
+             // layout objects of the matching prefix and suffix. Links stay atomic.
+-            const range = row.ownerDocument.createRange();
++            // One Range for the renderer's lifetime. Every Range stays attached
++            // to its document until garbage collected, and each DOM mutation
++            // updates all attached Ranges, so a new one per row update made
++            // every later update slower in a page that collects rarely.
++            const range = (this.rowRange ??= row.ownerDocument.createRange());
+             range.setStart(row, start);
+             range.setEnd(row, oldEnd);
+             range.deleteContents();
