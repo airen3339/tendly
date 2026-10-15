@@ -239,7 +239,7 @@ impl Store {
         append(
             &tx,
             id,
-            json!({"type":"configuration","id":Uuid::new_v4().to_string(),"profile_name":snapshot.as_ref().map(|p|p.name.as_str()).unwrap_or("Isolated configuration"),"text":"A new native conversation will use this configuration. Earlier displayed history is not sent to the new endpoint."}),
+            json!({"type":"configuration","id":Uuid::new_v4().to_string(),"profile_name":snapshot.as_ref().map(|p|p.name.as_str()).unwrap_or("Isolated configuration"),"text":"A new native conversation will use this configuration. The conversation above goes to it with the next message."}),
         )?;
         tx.commit()?;
         Ok(true)
@@ -278,7 +278,7 @@ impl Store {
         append(
             &tx,
             id,
-            json!({"type":"configuration","id":Uuid::new_v4().to_string(),"profile_name":label,"text":"The session now works in this checkout. A new native conversation starts there; earlier displayed history is not sent to it."}),
+            json!({"type":"configuration","id":Uuid::new_v4().to_string(),"profile_name":label,"text":"The session now works in this checkout. A new native conversation starts there, and the conversation above goes to it with the next message."}),
         )?;
         tx.commit()?;
         Ok(true)
@@ -475,6 +475,117 @@ impl Store {
             )?
             .collect::<Result<_>>()?;
         Ok((events.len() <= limit).then_some(events))
+    }
+
+    /// What was said before the latest fresh native context, written out for
+    /// the first message sent into it, or `None` once that context has been
+    /// spoken to, when it never began, or when nothing was said before it.
+    ///
+    /// An endpoint or checkout change starts the client over with nothing, and
+    /// the two clients' native histories cannot be moved between homes and
+    /// endpoints. The words can: they go ahead of the next message, in front of
+    /// the client only -- the stored message, and so the view, stays as typed.
+    /// Tool calls are left out, and a `/clear` ends what is carried. The most
+    /// recent messages within `budget` bytes are kept.
+    pub fn carried_transcript(&self, id: SessionId, budget: usize) -> Result<Option<String>> {
+        let conn = self.connection.lock().expect("sqlite lock");
+        let session = id.to_string();
+        let Some(boundary) = conn
+            .query_row(
+                "SELECT max(seq) FROM conversation_events WHERE session_id=?1 AND json_extract(event_json,'$.type')='configuration'",
+                [&session],
+                |r| r.get::<_, Option<i64>>(0),
+            )?
+        else {
+            return Ok(None);
+        };
+        let spoken: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM conversation_events WHERE session_id=?1 AND seq>?2 AND json_extract(event_json,'$.type') IN ('message','cleared') AND coalesce(json_extract(event_json,'$.role'),'user')='user')",
+            params![session, boundary],
+            |r| r.get(0),
+        )?;
+        if spoken {
+            return Ok(None);
+        }
+        let mut stmt = conn.prepare(
+            "SELECT event_json FROM conversation_events WHERE session_id=?1 AND seq<?2 \
+             AND json_extract(event_json,'$.type') IN ('message','configuration','cleared') ORDER BY seq",
+        )?;
+        let events = stmt
+            .query_map(params![session, boundary], |r| {
+                serde_json::from_str::<Value>(&r.get::<_, String>(0)?).map_err(conversion_error)
+            })?
+            .collect::<Result<Vec<_>>>()?;
+        // Streamed pieces add up to a message and the finished one replaces
+        // them, as the view reads them. A fresh context may reuse message IDs.
+        let mut said: Vec<(bool, String)> = Vec::new();
+        let mut index = std::collections::HashMap::<String, usize>::new();
+        for event in &events {
+            match event["type"].as_str() {
+                Some("cleared") => {
+                    said.clear();
+                    index.clear();
+                }
+                Some("configuration") => index.clear(),
+                _ => {
+                    let (Some(owner), Some(text)) = (event["id"].as_str(), event["text"].as_str())
+                    else {
+                        continue;
+                    };
+                    let user = event["role"].as_str() == Some("user");
+                    let delta = event["delta"].as_bool() == Some(true);
+                    match index.get(owner) {
+                        Some(&at) if said[at].0 == user => {
+                            if delta {
+                                said[at].1.push_str(text);
+                            } else {
+                                said[at].1 = text.to_owned();
+                            }
+                        }
+                        _ => {
+                            index.insert(owner.to_owned(), said.len());
+                            said.push((user, text.to_owned()));
+                        }
+                    }
+                }
+            }
+        }
+        let blocks: Vec<String> = said
+            .iter()
+            .filter(|(_, text)| !text.trim().is_empty())
+            .map(|(user, text)| {
+                format!(
+                    "{}:\n{}",
+                    if *user { "User" } else { "Assistant" },
+                    text.trim()
+                )
+            })
+            .collect();
+        if blocks.is_empty() {
+            return Ok(None);
+        }
+        let mut kept = Vec::new();
+        let mut used = 0;
+        for block in blocks.iter().rev() {
+            if used + block.len() + 2 > budget {
+                break;
+            }
+            used += block.len() + 2;
+            kept.push(block.as_str());
+        }
+        kept.reverse();
+        if kept.is_empty() {
+            return Ok(None);
+        }
+        let omitted = if kept.len() < blocks.len() {
+            "Earlier messages did not fit and are left out.\n\n"
+        } else {
+            ""
+        };
+        Ok(Some(format!(
+            "[The conversation so far in this session, from before it moved to a new endpoint or checkout. Take it as context; do not redo what is already done.]\n\n{omitted}{}\n\n[End of the earlier conversation. The new message follows.]\n\n",
+            kept.join("\n\n")
+        )))
     }
 
     pub fn append_conversation_event(&self, id: SessionId, event: Value) -> Result<Value> {
@@ -738,6 +849,59 @@ mod tests {
             None
         );
         assert_eq!(preview_line(&"字".repeat(90)).unwrap().chars().count(), 81);
+    }
+
+    #[test]
+    fn the_first_message_after_an_endpoint_change_carries_what_was_said_before_it() {
+        let path = std::env::temp_dir().join(format!("tendly-carried-{}.db", Uuid::new_v4()));
+        let store = Store::open(&path).unwrap();
+        let workspace = store.create_workspace("Fixture", "/fixture").unwrap();
+        let id = store
+            .create_session(workspace.id, ProviderKind::ClaudeCode, "Claude session")
+            .unwrap()
+            .id;
+        let append = |event: Value| store.append_conversation_event(id, event).unwrap();
+        append(json!({"type":"message","id":"old","role":"user","text":"cleared away"}));
+        append(json!({"type":"cleared"}));
+        // No boundary yet: the native context is the one that heard all this.
+        assert_eq!(store.carried_transcript(id, 4096).unwrap(), None);
+        append(json!({"type":"message","id":"u","role":"user","text":"fix the retry backoff"}));
+        append(json!({"type":"message","id":"a","role":"assistant","text":"Look","delta":true}));
+        append(json!({"type":"message","id":"a","role":"assistant","text":"ing","delta":true}));
+        append(json!({"type":"tool","id":"t","name":"Bash","status":"completed","text":"ls"}));
+        append(
+            json!({"type":"message","id":"a","role":"assistant","text":"It is 50 ms in src/net.rs."}),
+        );
+        assert!(store.switch_session_configuration(id, None, None).unwrap());
+
+        let carried = store.carried_transcript(id, 4096).unwrap().unwrap();
+        assert!(
+            carried
+                .contains("User:\nfix the retry backoff\n\nAssistant:\nIt is 50 ms in src/net.rs.")
+        );
+        assert!(
+            !carried.contains("cleared away"),
+            "a /clear ends what is carried"
+        );
+        assert!(!carried.contains("Bash") && !carried.contains("Looking"));
+        // Only the latest turns that fit, and saying so.
+        let short = store.carried_transcript(id, 40).unwrap().unwrap();
+        assert!(short.contains("left out") && !short.contains("fix the retry"));
+
+        // A second change carries both contexts, even where IDs repeat.
+        append(json!({"type":"message","id":"u","role":"user","text":"now add a test"}));
+        assert_eq!(
+            store.carried_transcript(id, 4096).unwrap(),
+            None,
+            "the new context has been spoken to"
+        );
+        append(json!({"type":"message","id":"a","role":"assistant","text":"Added."}));
+        assert!(store.switch_session_configuration(id, None, None).unwrap());
+        let both = store.carried_transcript(id, 4096).unwrap().unwrap();
+        assert!(
+            both.contains("It is 50 ms") && both.contains("now add a test\n\nAssistant:\nAdded.")
+        );
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]

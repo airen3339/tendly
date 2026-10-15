@@ -88,6 +88,9 @@ struct MessageInput {
     content: String,
     configuration_revision: Option<u64>,
 }
+/// How much of the earlier conversation goes ahead of the first message after
+/// an endpoint or checkout change: the most recent turns, about 16k tokens.
+const CARRIED_BYTES: usize = 64 * 1024;
 pub(super) type CommandAck = (StatusCode, Json<Value>);
 pub(super) fn accepted(id: Option<&str>, duplicate: bool) -> CommandAck {
     (
@@ -140,6 +143,9 @@ async fn message(
             "Wait for the active turn and its approvals before sending another message",
         ));
     }
+    // Read before the message is stored: storing it is what marks the new
+    // context as spoken to.
+    let carried = db(&state, move |s| s.carried_transcript(id, CARRIED_BYTES)).await?;
     let mid = input.id.clone();
     let content = input.content.clone();
     match db(&state, move |s| s.submit_chat_message(id, &mid, &content)).await? {
@@ -153,7 +159,7 @@ async fn message(
     }
     runtime.busy.store(true, Ordering::Release);
     if let Err(error) = runtime
-        .send(json!({"type":"message","id":input.id,"content":input.content}))
+        .send(json!({"type":"message","id":input.id,"content":carried.unwrap_or_default() + &input.content}))
         .await
     {
         // try_send failed before the value entered the queue. Keep the durable
