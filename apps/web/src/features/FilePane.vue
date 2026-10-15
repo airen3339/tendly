@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import type { TextFile } from "@tendly/protocol";
 import { ApiError, assetUrl, errorMessage, json, request, workspacePath } from "./api";
 import { fileDraft } from "./file-drafts";
+import { caretBand, EDITOR_TOP, LINE_HEIGHT, lineOfOffset, modeChoices, parseMarkdownMode, visibleMode, type MarkdownMode } from "./file-view";
 import { lineRange, pendingJump, takeJump } from "./file-jumps";
 import { onFilesChanged, touchesFile } from "./file-watch";
 import { escapeHtml, languageFor, loadHighlighter, MAX_HIGHLIGHT_BYTES, wrapsProse } from "./highlighting";
@@ -120,7 +121,8 @@ function followScroll() {
  * Past a few thousand lines of prose that measuring costs more than numbers
  * are worth, and they are left out.
  */
-const LINE = 20, TOP = 12;
+/** The template places line numbers with the same metrics the band uses. */
+const LINE = LINE_HEIGHT, TOP = EDITOR_TOP;
 const numbersTrack = ref<HTMLElement>(), bandTrack = ref<HTMLElement>();
 const lineCount = computed(() => draft.value.content.split("\n").length);
 const digits = computed(() => Math.max(2, String(lineCount.value).length));
@@ -140,17 +142,9 @@ const caretLine = ref(-1);
 function trackCaret() {
   const input = editor.value;
   if (!input || document.activeElement !== input) { caretLine.value = -1; return; }
-  let line = 0;
-  for (let at = input.value.indexOf("\n"); at !== -1 && at < input.selectionStart; at = input.value.indexOf("\n", at + 1)) line++;
-  caretLine.value = line;
+  caretLine.value = lineOfOffset(input.value, input.selectionStart);
 }
-const band = computed(() => {
-  const line = caretLine.value;
-  if (line < 0) return undefined;
-  if (!wrapped.value) return { top: TOP + line * LINE, height: LINE };
-  const top = rows.value.tops[line];
-  return top === undefined ? undefined : { top, height: rows.value.heights[line] ?? LINE };
-});
+const band = computed(() => caretBand(caretLine.value, wrapped.value, rows.value));
 
 /**
  * Prose wraps; code does not.
@@ -174,10 +168,9 @@ const crumbs = computed(() => [props.workspaceName, ...(props.path?.split("/").s
  * keeps its place when it does. The chosen view is remembered per browser.
  */
 const isMarkdown = computed(() => language.value === "markdown");
-type MarkdownMode = "preview" | "split" | "source";
 const MODE_KEY = "tendly.markdown-mode.v1";
 function readMode(): MarkdownMode {
-  try { const value = localStorage.getItem(MODE_KEY); return value === "preview" || value === "source" || value === "split" ? value : "split"; }
+  try { return parseMarkdownMode(localStorage.getItem(MODE_KEY)); }
   catch { return "split"; }
 }
 const mode = ref<MarkdownMode>(readMode());
@@ -185,12 +178,10 @@ const pane = ref<HTMLElement>(), preview = ref<HTMLElement>(), mirror = ref<HTML
 const paneWidth = ref(0);
 const canSplit = computed(() => paneWidth.value >= 720);
 /** What is on screen. Two columns that do not fit become the rendered view. */
-const view = computed<MarkdownMode>(() => !isMarkdown.value ? "source" : mode.value === "split" && !canSplit.value ? "preview" : mode.value);
+const view = computed<MarkdownMode>(() => visibleMode(isMarkdown.value, mode.value, canSplit.value));
 const showEditor = computed(() => view.value !== "preview");
 const showPreview = computed(() => isMarkdown.value && view.value !== "source");
-const modeChoices = computed<{ mode: MarkdownMode; label: string }[]>(() => canSplit.value
-  ? [{ mode: "preview", label: "Preview" }, { mode: "split", label: "Split" }, { mode: "source", label: "Source" }]
-  : [{ mode: "preview", label: "Preview" }, { mode: "source", label: "Edit" }]);
+const choices = computed(() => modeChoices(canSplit.value));
 let paneWatcher: ResizeObserver | undefined;
 watch(pane, element => {
   paneWatcher?.disconnect(); paneWatcher = undefined;
@@ -397,7 +388,7 @@ onBeforeUnmount(() => { revision++; document.removeEventListener("selectionchang
 <template>
   <div v-if="!path" class="pane-empty"><span class="empty-icon"><Icon name="file" :size="28" /></span><h3>{{ t('Your files, right here') }}</h3><p>{{ t('Open a file from Explorer, or drag it into this pane.') }}</p><button class="secondary-button" @click="emit('browse')">{{ t('Browse files') }}</button></div>
   <div v-else ref="pane" class="file-pane" @keydown.meta.s.prevent="save" @keydown.ctrl.s.prevent="save">
-    <div class="content-toolbar"><span class="file-crumbs" :title="workspaceName ? `${workspaceName} / ${path}` : path"><Icon name="folder" :size="12" /><span class="file-crumbs-path">{{ crumbs }}</span><strong>{{ fileName }}</strong><b v-if="dirty" class="dirty-indicator" :title="t('Unsaved changes')">●</b></span><div class="toolbar-buttons"><a class="icon-button" :href="url" download :aria-label="t('Download {path}', { path })"><Icon name="download" :size="15" /></a><div v-if="isMarkdown && kind === 'text'" class="md-modes" role="group" :aria-label="t('Markdown view')"><button v-for="choice in modeChoices" :key="choice.mode" type="button" :class="{ active: view === choice.mode }" :aria-pressed="view === choice.mode" @click="setMode(choice.mode)">{{ t(choice.label) }}</button></div><template v-if="kind === 'text'"><button class="icon-button" :aria-label="t('Reload file from host')" :disabled="loading || saving" @click="reload"><Icon name="refresh" :size="15" /></button><button class="small-button primary" :disabled="!dirty || saving || loading" @click="save"><Icon name="save" :size="13" />{{ t(saving ? 'Saving…' : dirty ? 'Save' : 'Saved') }}</button></template></div></div>
+    <div class="content-toolbar"><span class="file-crumbs" :title="workspaceName ? `${workspaceName} / ${path}` : path"><Icon name="folder" :size="12" /><span class="file-crumbs-path">{{ crumbs }}</span><strong>{{ fileName }}</strong><b v-if="dirty" class="dirty-indicator" :title="t('Unsaved changes')">●</b></span><div class="toolbar-buttons"><a class="icon-button" :href="url" download :aria-label="t('Download {path}', { path })"><Icon name="download" :size="15" /></a><div v-if="isMarkdown && kind === 'text'" class="md-modes" role="group" :aria-label="t('Markdown view')"><button v-for="choice in choices" :key="choice.mode" type="button" :class="{ active: view === choice.mode }" :aria-pressed="view === choice.mode" @click="setMode(choice.mode)">{{ t(choice.label) }}</button></div><template v-if="kind === 'text'"><button class="icon-button" :aria-label="t('Reload file from host')" :disabled="loading || saving" @click="reload"><Icon name="refresh" :size="15" /></button><button class="small-button primary" :disabled="!dirty || saving || loading" @click="save"><Icon name="save" :size="13" />{{ t(saving ? 'Saving…' : dirty ? 'Save' : 'Saved') }}</button></template></div></div>
     <div v-if="error" class="inline-error" role="alert">{{ conflict ? t(error) : error }}</div>
     <div v-if="success" class="inline-success" role="status">{{ t(success) }}</div>
     <div v-if="confirmReload" class="confirmation-bar">{{ t('Reloading discards this unsaved draft.') }}<button class="small-button danger" @click="read">{{ t('Discard draft & reload') }}</button><button class="small-button" @click="confirmReload = false">{{ t('Keep draft') }}</button></div>
