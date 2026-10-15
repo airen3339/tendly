@@ -49,6 +49,7 @@ import { paneDisplayTitle, paneString, paneWorkspace, paneSession, filePane, cha
 import { isEphemeralSession } from "./features/session-list";
 import { lastQuickProvider, planQuickSession, rememberQuickProvider } from "./features/quick-session";
 import { backendCapabilities, setBackendCapabilities, type BackendHealth } from "./features/backend-capabilities";
+import { loadBalances } from "./features/balance-store";
 import { browserStorage, canvasStorageKey } from "./features/canvas-cache";
 import { readPanelVisibility, sidebarIsRail, useSidebarWidth, writePanelVisibility } from "./features/panel-state";
 import { hasDirtyDrafts } from "./features/file-drafts";
@@ -212,6 +213,8 @@ function selectPane(pane: PaneNode) {
     void refreshGit(workspace.id);
   }
 }
+// Custom balances show in every message box, so read them once the backend says it has them.
+watch(() => backendCapabilities.customBalances, enabled => { if (enabled) void loadBalances(); }, { immediate: true });
 watch(() => contextWorkspace.value?.id, id => { if (id && !explorerPinned.value) explorerWorkspaceId.value = id; });
 // A tab keeps the name its session had when it opened. The server renames a
 // session too -- after its first message -- so every change in the list

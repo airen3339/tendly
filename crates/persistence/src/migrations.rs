@@ -10,7 +10,7 @@ impl Store {
         connection.pragma_update(None, "journal_mode", "WAL")?;
         connection.pragma_update(None, "foreign_keys", "ON")?;
         let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        if version > 20 {
+        if version > 21 {
             return Err(rusqlite::Error::InvalidQuery);
         }
         let tx = connection.transaction()?;
@@ -112,6 +112,11 @@ impl Store {
         if version < 20 {
             tx.execute_batch(include_str!("../../../migrations/0020_session_preview.sql"))?;
         }
+        if version < 21 {
+            tx.execute_batch(include_str!(
+                "../../../migrations/0021_endpoint_balances.sql"
+            ))?;
+        }
         // Capture the endpoint settings for legacy M0 sessions once, before templates change.
         let legacy = {
             let mut stmt = tx.prepare("SELECT s.id,p.id FROM sessions s JOIN endpoint_profiles p ON p.id=s.endpoint_profile_id WHERE s.endpoint_snapshot IS NULL")?;
@@ -130,7 +135,7 @@ impl Store {
                 params![snapshot, id],
             )?;
         }
-        tx.pragma_update(None, "user_version", 20)?;
+        tx.pragma_update(None, "user_version", 21)?;
         tx.commit()?;
         Ok(Self {
             connection: Mutex::new(connection),

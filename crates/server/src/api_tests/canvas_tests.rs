@@ -402,6 +402,7 @@ async fn shared_canvas_uses_existing_authentication_and_health_capabilities() {
             "workspace_file_search",
             "session_terminal_escape",
             "stored_secrets",
+            "custom_balances",
             "agent_tools",
             "self_update",
             "resource_monitoring",

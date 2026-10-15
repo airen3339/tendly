@@ -2,6 +2,7 @@ use super::*;
 pub(super) use tower::ServiceExt;
 mod agent_tools_tests;
 mod archive_tests;
+mod balance_tests;
 mod canvas_tests;
 mod conversation_tests;
 mod git_ops_tests;

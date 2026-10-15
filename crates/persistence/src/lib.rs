@@ -10,6 +10,7 @@
 
 mod conversations;
 pub use conversations::{ConversationPage, MessageSubmission, SearchHit, StoredConversation};
+mod balances;
 mod canvas;
 pub mod metrics;
 mod migrations;

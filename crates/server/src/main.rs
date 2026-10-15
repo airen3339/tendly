@@ -8,6 +8,7 @@ mod agent_sessions;
 #[cfg(test)]
 mod api_tests;
 mod app;
+mod balances;
 mod bridge;
 mod canvas;
 mod chat_adapter;
@@ -394,6 +395,7 @@ fn router(state: AppState) -> Router {
         .merge(session_routes::routes())
         .merge(pty_routes::routes())
         .merge(profile_routes::routes())
+        .merge(balances::routes())
         .merge(file_routes::routes())
         .merge(git_routes::routes())
         .merge(layout_routes::routes())
@@ -456,7 +458,7 @@ fn compressible(
 
 async fn health() -> Json<Value> {
     Json(
-        json!({"ok":true,"service":"tendly-server","platform":env::consts::OS,"mode":"trusted-single-user","api_version":2,"capabilities":["shared_canvas","native_configurations","native_history","host_directories","endpoint_models","session_environment","structured_chat","official_accounts","session_configuration","session_archive","account_import_native","agent_clients","ephemeral_sessions","session_model","workspace_file_search","session_terminal_escape","stored_secrets","agent_tools","self_update","resource_monitoring","tailnet"],"instance_label":env::var("TENDLY_INSTANCE_LABEL").ok(),"version":env!("CARGO_PKG_VERSION")}),
+        json!({"ok":true,"service":"tendly-server","platform":env::consts::OS,"mode":"trusted-single-user","api_version":2,"capabilities":["shared_canvas","native_configurations","native_history","host_directories","endpoint_models","session_environment","structured_chat","official_accounts","session_configuration","session_archive","account_import_native","agent_clients","ephemeral_sessions","session_model","workspace_file_search","session_terminal_escape","stored_secrets","custom_balances","agent_tools","self_update","resource_monitoring","tailnet"],"instance_label":env::var("TENDLY_INSTANCE_LABEL").ok(),"version":env!("CARGO_PKG_VERSION")}),
     )
 }
 

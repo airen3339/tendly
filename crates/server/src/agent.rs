@@ -213,6 +213,7 @@ Tendly is the workspace this agent may be running in: a local web app that runs 
 
 - Start with tendly_status to learn which session, workspace and endpoint you are.
 - tendly_list shows workspaces, sessions (titles and status only, never conversations), endpoint profiles and installed clients.
+- tendly_balance configures custom endpoint balances with a reviewed JS script, or reads/tests/refreshes a saved balance. Money keeps its original currency; percentage means remaining.
 - tendly_endpoint creates, changes, tests or imports endpoint profiles. To set up an API endpoint, call create with the provider, URL and model: the person confirms in the Tendly window and types the key there. Then call test to check it works.
 - Never ask the person to paste an API key into the conversation, and never put one in a tool argument. Tendly collects keys in its own window.
 - tendly_preferences sets what new sessions start with, and the light or dark theme of the interface and its terminals; tendly_workspace adds a directory as a workspace.
@@ -248,6 +249,7 @@ pub fn tools() -> Vec<Value> {
             }),
         ),
     ];
+    tools.push(crate::balances::tool());
     tools.extend(crate::agent_config::tools());
     tools.extend(crate::agent_sessions::tools());
     tools.extend(crate::agent_canvas::tools());
@@ -295,6 +297,7 @@ async fn call_tool(
     result(match input.name.as_str() {
         "tendly_status" => status(&state, caller).await,
         "tendly_list" => list(&state, caller, &arguments).await,
+        "tendly_balance" => crate::balances::call(&state, caller, &arguments).await,
         "tendly_endpoint" => crate::agent_config::endpoint(&state, caller, &arguments).await,
         "tendly_preferences" => crate::agent_config::preferences(&state, caller, &arguments).await,
         "tendly_workspace" => crate::agent_config::workspace(&state, caller, &arguments).await,

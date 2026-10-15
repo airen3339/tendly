@@ -8,6 +8,7 @@ import { environmentRows, newEnvironmentRow, type EnvironmentRow } from "./envir
 import { limitKey, nextLimits, validWindow, windowValue, type Limits } from "./model-limits";
 import ModelSelection from "./ModelSelection.vue";
 import { offeredModels } from "./model-choices";
+import EndpointBalanceEditor from "./EndpointBalanceEditor.vue";
 import EnvironmentEditor from "./EnvironmentEditor.vue";
 import { AGENT_CLIENTS, DEFAULT_CLIENT, clientInfo, clientLabel } from "./clients";
 import { SLOTS, followingRows, setSlot, slotState, slotSummary, type SlotVariable } from "./claude-slots";
@@ -29,6 +30,7 @@ const embedded = computed(() => props.embedded === true);
 const emit = defineEmits<{ close: []; changed: [profile?: EndpointProfile]; accounts: [] }>();
 // The settings shell owns the outer close, so it needs this page's unsaved guard.
 defineExpose({ requestLeave: (action: () => void) => requestLeave(action) });
+const balanceEditor = ref<InstanceType<typeof EndpointBalanceEditor>>();
 const editing = ref<string>(), deleteId = ref<string>();
 const editingRecord = ref<EndpointProfile>();
 const editingProfile = computed(() => props.profiles.find(profile => profile.id === editing.value) ?? editingRecord.value);
@@ -187,11 +189,11 @@ function payload(includeEnvironment = true) {
   return { ...profilePayload(form, editingProfile.value, aliases.value.value, chosenModels.value, !!client.value.apis?.length), ...environment };
 }
 function requestLeave(action: () => void) {
-  if (busy.value) return;
-  if (formVisible.value && environmentDirty.value) { pendingNavigation.value = action; return; }
+  if (busy.value || balanceEditor.value?.busy) return;
+  if (formVisible.value && (environmentDirty.value || balanceEditor.value?.dirty)) { pendingNavigation.value = action; return; }
   action();
 }
-function discardEnvironmentDraft() { const action = pendingNavigation.value; pendingNavigation.value = undefined; environmentDraft.value = initialEnvironment.value.map(row => ({ ...row })); action?.(); }
+function discardEnvironmentDraft() { balanceEditor.value?.reset(); const action = pendingNavigation.value; pendingNavigation.value = undefined; environmentDraft.value = initialEnvironment.value.map(row => ({ ...row })); action?.(); }
 function edit(p?: EndpointProfile) {
   pendingNavigation.value = undefined;
   // A new profile starts on the default client, whose slots follow its main model.
@@ -327,7 +329,7 @@ onBeforeUnmount(()=>{discoveryRevision++;});
           <div v-if="error" class="inline-error" role="alert">{{ error }}</div>
           <div v-if="deleteId" class="confirmation-bar">{{ t(deletingProfile?.native_config?'Remove this profile reference? Native settings, sign-in and history stay on the host. Existing sessions retain their reference.':'Delete this profile? Existing session snapshots remain.') }} {{ deletingProfile?.name }}<div class="toolbar-buttons"><button class="small-button danger" :disabled="busy" @click="remove">{{ t('Confirm delete') }}</button><button class="small-button" :disabled="busy" @click="deleteId=undefined">{{ t('Keep profile') }}</button></div></div>
         </div>
-        <div v-if="pendingNavigation" class="confirmation-bar" role="alert">{{ t('Discard unsaved environment changes?') }}<div class="toolbar-buttons"><button type="button" class="small-button danger" @click="discardEnvironmentDraft">{{ t('Discard environment changes') }}</button><button type="button" class="small-button" @click="pendingNavigation=undefined">{{ t('Keep editing') }}</button></div></div>
+        <div v-if="pendingNavigation" class="confirmation-bar" role="alert">{{ t('Discard unsaved configuration changes?') }}<div class="toolbar-buttons"><button type="button" class="small-button danger" @click="discardEnvironmentDraft">{{ t('Discard changes') }}</button><button type="button" class="small-button" @click="pendingNavigation=undefined">{{ t('Keep editing') }}</button></div></div>
         <form v-if="formVisible" class="form-stack" @submit.prevent="save">
           <h3>{{ editing ? t('Edit profile') : t('Create profile') }}</h3>
           <div class="form-columns">
@@ -386,12 +388,14 @@ onBeforeUnmount(()=>{discoveryRevision++;});
           <p v-if="form.model" class="model-effective">{{ t('Effective model') }}: <code>{{ resolved }}</code></p>
           <label>{{ t('Permission intent') }}<select v-model="form.permission_mode"><option value="native">{{ t('Native · provider defaults') }}</option><template v-if="client.approvals"><option value="interactive">{{ t('Interactive · conservative native prompts') }}</option><option value="trusted">{{ t('Trusted · native file-edit trust') }}</option></template><option v-if="client.profilePlan" value="plan">{{ t('Plan · review before edits') }}</option><option value="blocked">{{ t('Blocked · do not start') }}</option></select></label>
           </template>
+          <p v-if="backendCapabilities.customBalances && !editing" class="form-help">{{ t('Save this profile first to configure a custom balance query.') }}</p>
           <EnvironmentEditor v-model="environmentDraft" :supported="backendCapabilities.environment" :disabled="busy" />
           <p v-if="environmentError" class="inline-error" role="alert">{{ t(environmentError) }}</p>
           <p v-if="editingManaged" class="form-help">{{ t('Manage this account from Official accounts. Its profile cannot be removed separately from its account.') }}</p>
           <div class="dialog-actions"><button v-if="editing && !editingManaged" type="button" class="text-button danger-text" :disabled="busy" @click="deleteId=editing">{{ t(editingNative?'Remove profile reference':'Delete profile') }}</button><button v-if="editing && !editingNative" type="button" class="text-button" :disabled="busy" @click="duplicate(editingProfile!)">{{ t('Duplicate as new profile') }}</button><span class="flex-spacer" /><button type="button" class="secondary-button" :disabled="busy" @click="cancelForm">{{ t('Cancel') }}</button><button class="primary-button" :disabled="busy||!canSave">{{ busy?t('Saving…'):t('Save profile') }}</button></div>
         </form>
         <div v-else class="pane-empty"><p>{{ t('Select a profile to edit, or create one for a different account or endpoint.') }}</p></div>
+        <EndpointBalanceEditor v-if="backendCapabilities.customBalances && formVisible && editing" :key="editing" ref="balanceEditor" :profile-id="editing" :disabled="busy" />
       </div>
     </div>
     <ContextMenu v-if="menu" :x="menu.x" :y="menu.y" :label="t('Actions for {profile}', { profile: menu.profile.name })" @close="menu = undefined">

@@ -2,6 +2,8 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import type { Session, Workspace } from '@tendly/protocol';
 import { ApiError, errorMessage, json, providerLabel, request } from './api';
+import { backendCapabilities } from './backend-capabilities';
+import EndpointBalances from './EndpointBalances.vue';
 import PageShell from './PageShell.vue';
 import ProviderIcon from './ProviderIcon.vue';
 import Icon from './Icon.vue';
@@ -24,10 +26,12 @@ const RANGES = [{ id: 'today', label: 'Today', days: 1 }, { id: '24h', label: '2
 type RangeId = typeof RANGES[number]['id'];
 const range = ref<RangeId>('30d');
 const filter = reactive({ provider: '' as UsageProvider | '', model: '', project: '' });
+const endpointBalances = ref<InstanceType<typeof EndpointBalances>>();
 const report = ref<UsageReport>(), allowance = ref<Allowance[]>([]), loading = ref(false), error = ref(''), unsupported = ref(false);
 
 async function load() {
   loading.value = true; error.value = '';
+  void endpointBalances.value?.load();
   const now = Math.floor(Date.now() / 1000);
   const chosen = RANGES.find(entry => entry.id === range.value)!;
   const from = 'hours' in chosen ? now - chosen.hours * 3600 : rangeStart(chosen.days);
@@ -175,6 +179,7 @@ const insights = computed(() => report.value ? usageInsights(report.value, t, we
       <p v-if="unsupported" class="inline-notice">{{ t('This backend does not report usage. Update Tendly on the host to see it.') }}</p>
       <p v-else-if="error" class="inline-error" role="alert">{{ error }}</p>
 
+      <EndpointBalances v-if="backendCapabilities.customBalances" ref="endpointBalances" />
       <section v-if="accounts.length" class="quota-row" :aria-label="t('Subscription allowance')">
         <article v-for="account in accounts" :key="account.id" class="quota-card">
           <header><ProviderIcon :provider="account.provider" :size="15" /><strong>{{ account.name }}</strong><span v-if="account.plan" class="plan">{{ account.plan }}</span><button v-if="canRefreshQuota(account.id)" type="button" class="icon-button quota-refresh" :class="{ busy: quotaBusy === account.id }" :disabled="!!quotaBusy || quotaWait(account.id) > 0" :aria-label="quotaRefreshTitle(account.id)" :title="quotaRefreshTitle(account.id)" @click="refreshQuota(account.id)"><Icon name="refresh" :size="13" /><small v-if="quotaWait(account.id) > 0">{{ quotaWait(account.id) }}</small></button></header>

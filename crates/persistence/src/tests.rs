@@ -936,7 +936,7 @@ fn version_three_migration_preserves_profiles_and_legacy_snapshots() {
                 .unwrap()
                 .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
                 .unwrap(),
-            20
+            21
         );
         let current = store.get_endpoint_profile(profile.id).unwrap().unwrap();
         assert!(current.native_config.is_none());
@@ -1326,7 +1326,7 @@ fn version_four_shared_canvas_migration_leaves_legacy_resources_unchanged() {
                 .unwrap()
                 .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
                 .unwrap(),
-            20
+            21
         );
         assert!(matches!(
             store.get_session(session_id).unwrap().unwrap().status,
