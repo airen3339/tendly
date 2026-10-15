@@ -64,6 +64,19 @@ const terminalReopenAvailable = computed(() => !isPreview.value && mode.value ==
 // Shown before it can be used too, disabled, so it is found before it is needed.
 const terminalReopenOffered = computed(() => !isPreview.value && mode.value === 'structured' && capabilities.sessionTerminalEscape === true && props.session.provider !== 'terminal');
 const mounted = ref(false), loading = ref(false), actionBusy = ref(false), error = ref(''), notice = ref('');
+/**
+ * Runs one of the pane's session actions with the pane marked busy. A failure
+ * is shown only while the pane still shows the session it was for, and only
+ * that session clears the busy mark, so switching sessions mid-request neither
+ * shows a stale error nor unlocks the new one early.
+ */
+async function runAction(work: (id: string) => Promise<void>) {
+  const id = props.session.id;
+  actionBusy.value = true; error.value = '';
+  try { await work(id); }
+  catch (cause) { if (props.session.id === id && mounted.value) error.value = errorMessage(cause); }
+  finally { if (props.session.id === id) actionBusy.value = false; }
+}
 const streamState = ref<SessionStreamState>(isPreview.value ? 'connected' : 'disconnected'), streamNotice = ref('');
 const viewport = ref<HTMLElement>(), followBottom = ref(true), endpointConfirm = ref(false), selectedProfile = ref(props.session.endpoint_profile_id ?? '');
 const confirmEnd = ref(false);
@@ -552,23 +565,17 @@ const permissionMenu = ref<InstanceType<typeof ChipMenu>>();
 async function pickPermission(mode: string) {
   permissionMenu.value?.close(true);
   if (!canConfigure.value || mode === livePermission.value) return;
-  const session = props.session.id;
-  actionBusy.value = true; error.value = '';
-  try {
+  await runAction(async session => {
     const ack = await request<{ pending?: boolean }>(`${sessionPath(session)}/conversation/permission`, json('POST', { mode }));
     // Not running (stopped, or exited after a failed turn): the server keeps
     // the choice for the next start rather than refusing it.
     if (ack?.pending && props.session.id === session && mounted.value) notice.value = 'This permission mode applies when the session next starts.';
-  }
-  catch (cause) { if (props.session.id === session && mounted.value) error.value = errorMessage(cause); }
-  finally { if (props.session.id === session) actionBusy.value = false; }
+  });
 }
 async function pickModel(id: string) {
   modelMenu.value?.close(true);
   if (!canPickModel.value || id === currentModel.value) return;
-  const session = props.session.id;
-  actionBusy.value = true; error.value = '';
-  try {
+  await runAction(async session => {
     // Only send a depth when one was actually chosen; otherwise the client
     // keeps whatever it is already using.
     await request(`${sessionPath(session)}/conversation/model`, json('POST', selectedEffort.value ? { model: id, effort: selectedEffort.value } : { model: id }));
@@ -579,8 +586,7 @@ async function pickModel(id: string) {
     // begins a new context.
     await new Promise(resolve => setTimeout(resolve, 2500));
     if (props.session.id === session && mounted.value && view.value.model !== id) launchFallback.value = id;
-  } catch (cause) { if (props.session.id === session && mounted.value) error.value = errorMessage(cause); }
-  finally { if (props.session.id === session) actionBusy.value = false; }
+  });
 }
 /**
  * Timeline context menu.
@@ -608,25 +614,20 @@ async function copyFromTimeline(value: string) {
 async function clearContext() {
   closeTimelineMenu();
   if (!clearAvailable.value) return;
-  const id = props.session.id, messageId = randomId();
-  actionBusy.value = true; error.value = '';
-  try { await request(`${sessionPath(id)}/conversation/message`, json('POST', { id: messageId, content: '/clear' })); }
-  catch (cause) { if (props.session.id === id && mounted.value) error.value = errorMessage(cause); }
-  finally { if (props.session.id === id) actionBusy.value = false; }
+  const messageId = randomId();
+  await runAction(async id => { await request(`${sessionPath(id)}/conversation/message`, json('POST', { id: messageId, content: '/clear' })); });
 }
 /** A model the live switch could not reach, offered as a launch choice. */
 const launchFallback = ref('');
 const launchFallbackName = computed(() => models.value.find(entry => entry.id === launchFallback.value)?.name ?? launchFallback.value);
 async function applyModelAtLaunch() {
-  const id = props.session.id, model = launchFallback.value;
+  const model = launchFallback.value;
   if (!model || !canConfigure.value) return;
-  actionBusy.value = true; error.value = '';
-  try {
+  await runAction(async id => {
     const payload = sessionConfigurationPayload(props.session, props.profiles, selectedProfile.value || null, true, { mode: mode.value, ready: view.value.ready, busy: view.value.turn === 'running', awaitingApproval: view.value.awaitingApproval }, { model, effort: selectedEffort.value });
     await request<Session>(`${sessionPath(id)}/configuration`, json('PATCH', payload));
     if (props.session.id === id && mounted.value) { launchFallback.value = ''; notice.value = 'Endpoint changed. The next message starts a fresh native context; earlier messages stay visible here only.'; emit('changed'); await load(); }
-  } catch (cause) { if (props.session.id === id && mounted.value) error.value = errorMessage(cause); }
-  finally { if (props.session.id === id) actionBusy.value = false; }
+  });
 }
 /**
  * What choosing each configuration actually means.
@@ -689,8 +690,7 @@ function pickHandoff(choice: HandoffChoice) {
 async function confirmHandoff() {
   const choice = handoffTarget.value, source = props.session;
   if (!choice || actionBusy.value) return;
-  actionBusy.value = true; error.value = '';
-  try {
+  await runAction(async () => {
     const messages = view.value.items.flatMap(item => item.type === 'message' ? [{ role: item.role, text: item.text }] : []);
     const transcript = handoffTranscript(messages, { user: t('You'), assistant: providerLabel(source.provider), omitted: t('Earlier messages did not fit and were left out') });
     const created = await request<Session>(`${workspacePath(choice.workspaceId ?? source.workspace_id)}/sessions`, json('POST', { title: choice.branch ? t('{title} · {provider}', { title: source.title, provider: choice.branch }) : t('{title} · {provider}', { title: source.title, provider: providerLabel(choice.provider) }), provider: choice.provider, endpoint_profile_id: choice.profileId, interaction_mode: 'structured' }));
@@ -699,8 +699,7 @@ async function confirmHandoff() {
       + '\n\n<conversation>\n' + transcript.text + '\n</conversation>\n\n' + t('Next:') + ' ';
     handoffTarget.value = undefined; handoffArrivals.add(created.id);
     emit('changed'); emit('openSession', created);
-  } catch (cause) { if (props.session.id === source.id && mounted.value) error.value = errorMessage(cause); }
-  finally { if (props.session.id === source.id) actionBusy.value = false; }
+  });
 }
 /**
  * The branch this session works on, and moving it to another.
@@ -732,14 +731,12 @@ function pickBranch(name: string) {
   else void moveToBranch(name);
 }
 async function moveToBranch(branch: string) {
-  const id = props.session.id;
-  branchConfirm.value = ''; actionBusy.value = true; error.value = '';
-  try {
+  branchConfirm.value = '';
+  await runAction(async id => {
     await request<Session>(`${sessionPath(id)}/checkout`, json('POST', { branch, create: !branchChoices.value.includes(branch) }));
     branchTarget.value = '';
     if (props.session.id === id && mounted.value) { emit('changed'); void loadRepo(); }
-  } catch (cause) { if (props.session.id === id && mounted.value) error.value = errorMessage(cause); }
-  finally { if (props.session.id === id) actionBusy.value = false; }
+  });
 }
 function pickEndpoint(id: string) {
   if (!canConfigure.value) return;
@@ -1096,10 +1093,7 @@ async function deliver(id: string, target: ChatDraft) {
 }
 async function explicitOpen() {
   if (isPreview.value || actionBusy.value || loading.value || !supported.value || mode.value === 'pty' && running.value) return;
-  const id = props.session.id; actionBusy.value = true; error.value = '';
-  try { await request(`${sessionPath(id)}/conversation/open`, json('POST', {})); if (props.session.id === id && mounted.value) { emit('changed'); await load(); } }
-  catch (cause) { if (props.session.id === id && mounted.value) error.value = errorMessage(cause); }
-  finally { if (props.session.id === id) actionBusy.value = false; }
+  await runAction(async id => { await request(`${sessionPath(id)}/conversation/open`, json('POST', {})); if (props.session.id === id && mounted.value) { emit('changed'); await load(); } });
 }
 /**
  * Open this conversation in a real terminal, for the interactive commands the
@@ -1108,30 +1102,22 @@ async function explicitOpen() {
  */
 async function openInTerminal() {
   if (isPreview.value || actionBusy.value || !terminalReopenAvailable.value) return;
-  const id = props.session.id; actionBusy.value = true; error.value = '';
-  try {
+  await runAction(async id => {
     const opened = await terminalReopen(props.session);
     if (props.session.id === id && mounted.value) { emit('changed'); emit('openSession', opened); }
-  }
-  catch (cause) { if (props.session.id === id && mounted.value) error.value = errorMessage(cause); }
-  finally { if (props.session.id === id) actionBusy.value = false; }
+  });
 }
 async function interrupt() {
   if (isPreview.value || actionBusy.value || view.value.turn !== 'running') return;
-  const id = props.session.id; actionBusy.value = true; error.value = '';
-  try { await request(`${sessionPath(id)}/conversation/interrupt`, json('POST', {})); if (props.session.id === id && mounted.value) { emit('changed'); await load(); } }
-  catch (cause) { if (props.session.id === id && mounted.value) error.value = errorMessage(cause); }
-  finally { if (props.session.id === id) actionBusy.value = false; }
+  await runAction(async id => { await request(`${sessionPath(id)}/conversation/interrupt`, json('POST', {})); if (props.session.id === id && mounted.value) { emit('changed'); await load(); } });
 }
 async function endSession() {
   if (isPreview.value || actionBusy.value || !confirmEnd.value) return;
-  const id = props.session.id; actionBusy.value = true; error.value = '';
-  try {
+  await runAction(async id => {
     await request(`${sessionPath(id)}/stop`, json('POST'));
     sessionConnections.ended(id);
     if (props.session.id === id && mounted.value) { confirmEnd.value = false; emit('changed'); await load(); }
-  } catch (cause) { if (props.session.id === id && mounted.value) error.value = errorMessage(cause); }
-  finally { if (props.session.id === id) actionBusy.value = false; }
+  });
 }
 function closeSessionMenu(restoreFocus = false) {
   const menu = sessionMenu.value;
@@ -1203,13 +1189,11 @@ async function approve(item: Extract<ChatItem, { type: 'approval' }>, decision: 
 }
 async function configure() {
   if (!canConfigure.value || !endpointConfirm.value) return;
-  const id = props.session.id; actionBusy.value = true; error.value = '';
-  try {
+  await runAction(async id => {
     const payload = sessionConfigurationPayload(props.session, props.profiles, selectedProfile.value || null, true, { mode: mode.value, ready: view.value.ready, busy: view.value.turn === 'running', awaitingApproval: view.value.awaitingApproval }, { effort: selectedEffort.value });
     await request<Session>(`${sessionPath(id)}/configuration`, json('PATCH', payload));
     if (props.session.id === id && mounted.value) { endpointConfirm.value = false; selectedEffort.value = ''; notice.value = 'Endpoint changed. The next message starts a fresh native context; earlier messages stay visible here only.'; emit('changed'); await load(); }
-  } catch (cause) { if (props.session.id === id && mounted.value) error.value = errorMessage(cause); }
-  finally { if (props.session.id === id) actionBusy.value = false; }
+  });
 }
 function chooseEndpoint() { endpointConfirm.value = selectedProfile.value !== (props.session.endpoint_profile_id ?? '') || !!selectedEffort.value; }
 /** Thinking depth applies in place, exactly like the model. Routing it through
@@ -1217,12 +1201,9 @@ function chooseEndpoint() { endpointConfirm.value = selectedProfile.value !== (p
  * a model or depth on that path at all, because those belong to its own client. */
 async function applyEffort(level: string) {
   if (!canPickModel.value) return;
-  const session = props.session.id;
-  actionBusy.value = true; error.value = '';
-  try {
+  await runAction(async session => {
     await request(`${sessionPath(session)}/conversation/model`, json('POST', { effort: level }));
-  } catch (cause) { if (props.session.id === session && mounted.value) error.value = errorMessage(cause); }
-  finally { if (props.session.id === session) actionBusy.value = false; }
+  });
 }
 function syncCaret(event: Event) {
   const input = event.target as HTMLTextAreaElement;
