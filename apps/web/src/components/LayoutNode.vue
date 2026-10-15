@@ -3,6 +3,8 @@ import { computed, inject, nextTick, onMounted, onBeforeUnmount, ref, watch } fr
 import type { LayoutNode, LeafPaneKind, PaneNode, SplitDirection } from "@tendly/protocol/layout";
 import type { ProviderKind } from "@tendly/protocol";
 import { isPaneNode, normalizeRatio, snapRatio, SPLIT_GAP, type DockPosition } from "../layout/layout-engine";
+import { dockPosition, keyedRatio, keyedTab, splitGrid, tabsAround } from "../features/layout-node";
+import { paneDisplayTitle } from "../features/pane-context";
 import { useI18n } from "../i18n";
 import TabIcon from "../features/TabIcon.vue";
 import Icon from "../features/Icon.vue";
@@ -61,17 +63,10 @@ async function openSessionActions(pane: PaneNode) {
 
 const sessionActions = inject(SESSION_ACTIONS, null);
 const menuSession = computed(() => { const id = tabMenu.value?.pane.metadata?.session_id; return typeof id === "string" ? sessionActions?.session(id) : undefined; });
-const menuOthers = computed(() => tabMenu.value ? tabs.value.filter(pane => pane.id !== tabMenu.value!.pane.id) : []);
-const menuLeft = computed(() => {
-  const current = tabMenu.value; if (!current) return [];
-  const index = tabs.value.findIndex(pane => pane.id === current.pane.id);
-  return index < 0 ? [] : tabs.value.slice(0, index);
-});
-const menuRight = computed(() => {
-  const current = tabMenu.value; if (!current) return [];
-  const index = tabs.value.findIndex(pane => pane.id === current.pane.id);
-  return index < 0 ? [] : tabs.value.slice(index + 1);
-});
+const menuTabs = computed(() => tabMenu.value ? tabsAround(tabs.value, tabMenu.value.pane.id) : { left: [], right: [], others: [] });
+const menuOthers = computed(() => menuTabs.value.others);
+const menuLeft = computed(() => menuTabs.value.left);
+const menuRight = computed(() => menuTabs.value.right);
 /** Right-click on a pane's empty space: the tab strip beside the tabs, or an
  * empty pane. Offers what the "+" menu and the header buttons do. */
 const paneMenu = ref<{ x: number; y: number } | null>(null);
@@ -104,16 +99,12 @@ async function revealActiveTab() {
 watch(() => [activePane.value?.id, tabs.value.map(pane => pane.id).join(',')], revealActiveTab);
 onMounted(() => { void revealActiveTab(); window.addEventListener('resize', revealActiveTab); });
 const targetId = computed(() => props.node.type === "stack" ? props.node.collapsedFrom ?? props.node.id : props.node.id);
-const splitStyle = computed(() => {
-  if (props.node.type !== "split") return {};
-  const ratio = normalizeRatio(props.node.ratio);
-  const tracks = `minmax(0, ${ratio}fr) ${SPLIT_GAP}px minmax(0, ${1 - ratio}fr)`;
-  return props.node.direction === "horizontal" ? { gridTemplateColumns: tracks, gridTemplateRows: "minmax(0, 1fr)" } : { gridTemplateRows: tracks, gridTemplateColumns: "minmax(0, 1fr)" };
-});
+const splitStyle = computed(() => props.node.type === "split" ? splitGrid(props.node.direction, props.node.ratio) : {});
 /**
- * Views that are meaningful while still empty. A session pane is not one of
- * them: an agent tab bound to no session is a dead placeholder, and "+" now
- * consistently means "new session" — created through the entries above these.
+ * Views that are meaningful while still empty, offered by "+". A session pane
+ * is not one of them: an agent tab bound to no session is a dead placeholder,
+ * and "+" consistently means "new session" — created through the entries above
+ * these.
  */
 const paneTypes: { kind: LeafPaneKind; title: string }[] = [
   { kind: "git_diff", title: "Git Changes" },
@@ -136,12 +127,7 @@ function tabStatus(pane: PaneNode) {
   const status = typeof id === "string" ? sessionStatuses[id] : undefined;
   return status === "waiting" || status === "running" || status === "starting" ? status : undefined;
 }
-function titleFor(pane: PaneNode) {
-  // Persist canonical built-in titles, not the chosen display language. Native
-  // session/file titles may coincide with UI copy and must remain verbatim.
-  if (pane.title && (pane.metadata?.session_id || pane.metadata?.path)) return pane.title;
-  return t(pane.title || paneTypes.find((entry) => entry.kind === pane.kind)?.title || pane.kind);
-}
+const titleFor = (pane: PaneNode) => paneDisplayTitle(pane, t);
 /** A branch only when the session has one of its own -- a worktree. One in
  * the workspace directory shares the branch the status bar already names. */
 function branchFor(pane: PaneNode) {
@@ -158,8 +144,8 @@ function select(pane: PaneNode) { emit("select", pane, props.node.type === "stac
 function tabKey(event: KeyboardEvent, pane: PaneNode) {
   if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
   event.preventDefault();
-  const index = tabs.value.findIndex((item) => item.id === pane.id);
-  const nextIndex = event.key === "Home" ? 0 : event.key === "End" ? tabs.value.length - 1 : (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.value.length) % tabs.value.length;
+  const nextIndex = keyedTab(event.key, tabs.value.findIndex((item) => item.id === pane.id), tabs.value.length);
+  if (nextIndex === undefined) return;
   const next = tabs.value[nextIndex];
   if (next) { select(next); paneElement.value?.querySelectorAll<HTMLElement>("[role=tab]")[nextIndex]?.focus(); }
 }
@@ -211,12 +197,10 @@ function beginResize(event: PointerEvent) {
 }
 function keyboardResize(event: KeyboardEvent) {
   if (props.node.type !== "split") return;
-  const horizontal = props.node.direction === "horizontal";
-  const decrease = event.key === (horizontal ? "ArrowLeft" : "ArrowUp");
-  const increase = event.key === (horizontal ? "ArrowRight" : "ArrowDown");
-  if (!decrease && !increase && event.key !== "Home") return;
+  const ratio = keyedRatio(event.key, props.node.direction, props.node.ratio, event.shiftKey);
+  if (ratio === undefined) return;
   event.preventDefault();
-  emit("resize", props.node.id, event.key === "Home" ? 0.5 : normalizeRatio(props.node.ratio + (increase ? 1 : -1) * (event.shiftKey ? 0.1 : 0.025)), true);
+  emit("resize", props.node.id, ratio, true);
 }
 function dragStart(event: DragEvent, pane: PaneNode) {
   if (!event.dataTransfer) return;
@@ -226,14 +210,7 @@ function dragStart(event: DragEvent, pane: PaneNode) {
 function isPaneDrag(event: DragEvent) { return event.dataTransfer?.types.includes("application/tendly-pane"); }
 function detectPosition(event: DragEvent): DockPosition {
   const bounds = paneElement.value?.getBoundingClientRect();
-  if (!bounds) return "center";
-  const x = event.clientX - bounds.left;
-  const y = event.clientY - bounds.top;
-  const marginX = Math.min(76, bounds.width * 0.23);
-  const marginY = Math.min(58, bounds.height * 0.23);
-  const candidates: [DockPosition, number][] = [["left", x / marginX], ["right", (bounds.width - x) / marginX], ["top", y / marginY], ["bottom", (bounds.height - y) / marginY]];
-  const nearest = candidates.sort((a, b) => a[1] - b[1])[0];
-  return nearest[1] < 1 ? nearest[0] : "center";
+  return bounds ? dockPosition(event.clientX - bounds.left, event.clientY - bounds.top, bounds.width, bounds.height) : "center";
 }
 function dragOver(event: DragEvent) {
   if (!isPaneDrag(event)) return;

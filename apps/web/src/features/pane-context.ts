@@ -130,3 +130,16 @@ export function scopeLegacyLayout(document: LayoutDocument, ownerId: string, ses
   if (!validateLayout(result)) throw new Error("Invalid migrated layout");
   return result;
 }
+
+/** The names built-in panes are shown under when they carry no title of their own. */
+const PANE_NAMES: Record<string, string> = { agent_chat: "Agent session", git_diff: "Git Changes", editor: "File editor", file_preview: "File preview", terminal: "Terminal" };
+
+/**
+ * What a pane is called on screen. A session's or a file's title is its own
+ * and shown as it is; built-in names, stored in English so a layout reads the
+ * same in any language, are translated.
+ */
+export function paneDisplayTitle(pane: PaneNode, translate: (text: string) => string): string {
+  if (pane.title && (pane.metadata?.session_id || pane.metadata?.path)) return pane.title;
+  return translate(pane.title || PANE_NAMES[pane.kind] || pane.kind);
+}

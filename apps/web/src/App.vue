@@ -46,7 +46,7 @@ import { useI18n } from "./i18n";
 import { ApiConnectionError, ApiError, errorMessage, json, providerLabel, request, workspacePath } from "./features/api";
 import { AGENT_CLIENTS, DEFAULT_CLIENT, PROVIDER_KINDS } from "./features/clients";
 import { loadPreferences, preferenceFor } from "./features/preferences";
-import { paneString, paneWorkspace, paneSession, filePane, changesPane, sessionPane, renameSessionPanes, scopeLegacyLayout, acceptsScopedPane, ephemeralSessionIds, markEphemeralPanes, withoutDiscardedPanes } from "./features/pane-context";
+import { paneDisplayTitle, paneString, paneWorkspace, paneSession, filePane, changesPane, sessionPane, renameSessionPanes, scopeLegacyLayout, acceptsScopedPane, ephemeralSessionIds, markEphemeralPanes, withoutDiscardedPanes } from "./features/pane-context";
 import { isEphemeralSession } from "./features/session-list";
 import { lastQuickProvider, planQuickSession, rememberQuickProvider } from "./features/quick-session";
 import { backendCapabilities, setBackendCapabilities, type BackendHealth } from "./features/backend-capabilities";
@@ -143,9 +143,7 @@ let wasDesktop = window.innerWidth > 1100;
 const mobile = useMobile();
 const switcherOpen = ref(false);
 const openPanes = computed(() => flattenPanes(layout.value.root));
-const paneTitles: Record<string, string> = { agent_chat: "Agent session", git_diff: "Git Changes", editor: "File editor", file_preview: "File preview", terminal: "Terminal" };
-/** Session and file titles are verbatim; built-in pane names are translated. */
-function paneTitle(pane: PaneNode) { return pane.title && (pane.metadata?.session_id || pane.metadata?.path) ? pane.title : t(pane.title || paneTitles[pane.kind] || pane.kind); }
+const paneTitle = (pane: PaneNode) => paneDisplayTitle(pane, t);
 function paneDetail(pane: PaneNode) {
   const session = paneSession(pane, sessions.value), workspace = paneWorkspace(pane, workspaces.value, sessions.value);
   const branch = session?.checkout_branch ?? (workspace ? gitStatuses.value[workspace.id]?.branch : undefined);
