@@ -1,10 +1,10 @@
 /**
  * Which library draws the terminal.
  *
- * Trial switch: xterm.js paints a canvas and moves it a whole row at a time;
  * wterm lays the rows out as page text, so the browser scrolls them by the
- * pixel. `?terminal=wterm` (or `xterm`) in the address picks one and is
- * remembered for this browser.
+ * pixel; xterm.js paints a canvas and moves it a whole row at a time. wterm
+ * draws by default. `?terminal=xterm` in the address switches this browser
+ * back to xterm.js, and `?terminal=wterm` returns it; the choice is remembered.
  */
 export type TerminalEngine = "xterm" | "wterm";
 const KEY = "tendly.terminalEngine";
@@ -13,8 +13,8 @@ export function terminalEngine(): TerminalEngine {
   try {
     const asked = new URL(window.location.href).searchParams.get("terminal");
     if (asked === "wterm" || asked === "xterm") localStorage.setItem(KEY, asked);
-    return localStorage.getItem(KEY) === "wterm" ? "wterm" : "xterm";
-  } catch { return "xterm"; }
+    return localStorage.getItem(KEY) === "xterm" ? "xterm" : "wterm";
+  } catch { return "wterm"; }
 }
 
 /**
