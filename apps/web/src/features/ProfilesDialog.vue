@@ -21,7 +21,8 @@ import ModelPicker from "./ModelPicker.vue";
 import ContextMenu from "./ContextMenu.vue";
 import ProfileCopyDialog from "./ProfileCopyDialog.vue";
 import { showToast } from "./toasts";
-import { isStored, ownStoredSecret, referencedSecret, secretNameFor, type SecretName } from "./secret-names";
+import { isStored, ownStoredSecret, referencedSecret, secretNameFor, secretStatus, type SecretName } from "./secret-names";
+import { profilePayload, profileSummary as describeProfile } from "./profile-form";
 const { t } = useI18n();
 const props = defineProps<{ profiles: EndpointProfile[]; embedded?: boolean }>();
 const embedded = computed(() => props.embedded === true);
@@ -51,12 +52,13 @@ const secretValid = computed(() => secretMode.value === "stored" || !form.secret
 const secretMode = ref<"stored" | "env">("stored"), apiKey = ref("");
 const storedSecrets = ref<SecretName[]>([]);
 const otherReferences = computed(() => props.profiles.filter(profile => profile.id !== editing.value).map(profile => profile.secret_ref));
+const secret = computed(() => secretStatus(form.secret_ref, storedSecrets.value));
 /** The stored key this profile uses now, shown as "saved". */
-const storedKey = computed(() => { const name = referencedSecret(form.secret_ref); return name && isStored(storedSecrets.value, name) ? name : undefined; });
+const storedKey = computed(() => secret.value.stored);
 /** The variable the server sets that this profile reads, while Tendly has no copy of it. */
-const adoptable = computed(() => { const name = referencedSecret(form.secret_ref); return name && !isStored(storedSecrets.value, name) && storedSecrets.value.some(entry => entry.name === name && entry.source === "environment") ? name : undefined; });
+const adoptable = computed(() => secret.value.adoptable);
 /** The server also sets the stored key's name, and wins while it does. */
-const shadowed = computed(() => !!storedKey.value && storedSecrets.value.some(entry => entry.name === storedKey.value && entry.source === "environment"));
+const shadowed = computed(() => secret.value.shadowed);
 const adopting = ref(false);
 /** Keep the server's value in Tendly: read and written on the server, never sent here. */
 async function adoptKey() {
@@ -182,14 +184,7 @@ watch(() => form.provider, provider => {
 function payload(includeEnvironment = true) {
   if (editingNative.value) return includeEnvironment ? nativeProfileUpdatePayload(form.name, environmentDraft.value, backendCapabilities.environment, initialEnvironment.value) : nativeProfileRenamePayload(form.name);
   const environment = includeEnvironment ? profileEnvironmentPayload(environmentDraft.value, backendCapabilities.environment, initialEnvironment.value) : {};
-  const old=editingProfile.value;
-  return { name:form.name.trim(), provider:form.provider, endpoint_url:form.endpoint_url.trim()||null, model:form.model.trim()||null, permission_mode:form.permission_mode, secret_ref:form.secret_ref.trim()||null,
-    ...(form.proxy_url.trim()||old?.proxy_url!==undefined ? {proxy_url:form.proxy_url.trim()||null}:{}),
-    ...(Object.keys(aliases.value.value).length||old?.model_aliases!==undefined ? {model_aliases:aliases.value.value}:{}),
-    ...(form.effort.trim()||old?.effort!==undefined ? {effort:form.effort.trim()||null}:{}),
-    ...(chosenModels.value.length||old?.models!==undefined ? {models:chosenModels.value}:{}),
-    // Only a client with a choice of API takes one; switching to another client drops it.
-    ...(client.value.apis?.length&&(form.api||old?.api) ? {api:form.api||null}:{}), ...environment };
+  return { ...profilePayload(form, editingProfile.value, aliases.value.value, chosenModels.value, !!client.value.apis?.length), ...environment };
 }
 function requestLeave(action: () => void) {
   if (busy.value) return;
@@ -245,12 +240,7 @@ async function remove(){
 }
 /** One line per profile: the provider is already its icon, and the directory
  * is shown once the profile is opened. */
-function profileSummary(p: EndpointProfile) {
-  if (p.native_config) return sharesHostConfig(p.native_config) ? t('Host configuration · shared sign-in') : t('Isolated configuration · this account only');
-  let host = '';
-  try { host = p.endpoint_url ? new URL(p.endpoint_url).host : ''; } catch { host = p.endpoint_url ?? ''; }
-  return [p.model || t('Native client default'), host || t('Official endpoint'), p.proxy_url ? t('Proxy configured') : ''].filter(Boolean).join(' · ');
-}
+const profileSummary = (p: EndpointProfile) => describeProfile(p, t);
 /** Cancelling goes back to a profile rather than to an empty page. */
 function cancelForm() {
   requestLeave(() => {
