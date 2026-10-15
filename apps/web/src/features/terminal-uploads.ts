@@ -1,3 +1,4 @@
+import { ref } from "vue";
 import type { Attachment } from "./attachment-state";
 import { MAX_ATTACHMENT_BYTES } from "./attachment-state";
 import { mediaKind } from "./media-kind";
@@ -79,4 +80,127 @@ export function uploadToSession(sessionId: string, file: File, name: string, pro
     xhr.send(file);
   });
   return { promise, abort: () => xhr.abort() };
+}
+
+/** A file on its way into the terminal, shown as a chip while it uploads. */
+export interface Upload { id: number; file: File; name: string; progress: number; failed?: string; retryable?: boolean; preview?: string; abort?: () => void }
+
+export interface TerminalUploadOptions {
+  sessionId: () => string;
+  /** Whether a terminal is connected to type the paths into. */
+  canUpload: () => boolean;
+  /** Type text into the terminal as a paste. */
+  paste: (text: string) => void;
+  /** Give the keyboard back to the terminal once the paths are in. */
+  focus: () => void;
+  translate: (text: string) => string;
+  warn: (message: string) => void;
+  upload?: typeof uploadToSession;
+}
+
+/**
+ * Files on their way into the terminal. Each shows as a chip while it uploads;
+ * when a batch is in, the paths are pasted in the order the files came, and a
+ * failed one stays as a chip to retry or dismiss, pasting nothing half-made.
+ * Pasting, dropping and picking all end up in `sendFiles`.
+ */
+export function useTerminalUploads(options: TerminalUploadOptions) {
+  const upload = options.upload ?? uploadToSession;
+  const uploads = ref<Upload[]>([]);
+  const dragging = ref(false);
+  let seq = 0;
+
+  function dismiss(id: number) {
+    const entry = uploads.value.find(item => item.id === id);
+    entry?.abort?.();
+    if (entry?.preview) URL.revokeObjectURL(entry.preview);
+    uploads.value = uploads.value.filter(item => item.id !== id);
+  }
+  async function uploadOne(entry: Upload): Promise<string | undefined> {
+    const problem = uploadProblem(entry.file);
+    if (problem) {
+      entry.failed = options.translate(problem);
+      entry.retryable = false;
+      return undefined;
+    }
+    entry.failed = undefined;
+    entry.progress = 0;
+    const job = upload(options.sessionId(), entry.file, entry.name, fraction => { entry.progress = fraction; });
+    entry.abort = job.abort;
+    try {
+      const saved = await job.promise;
+      const caveat = imageCaveat(saved.name);
+      if (caveat) options.warn(options.translate(caveat));
+      return saved.absolute;
+    } catch (cause) {
+      entry.failed = cause instanceof Error ? options.translate(cause.message) : options.translate("Upload failed");
+      entry.retryable = true;
+      return undefined;
+    } finally {
+      entry.abort = undefined;
+    }
+  }
+  /** Upload files and paste their paths, as dragging them into a local terminal would. */
+  async function sendFiles(files: File[]) {
+    if (!files.length) return;
+    if (!options.canUpload()) {
+      options.warn(options.translate("Connect the terminal before adding files."));
+      return;
+    }
+    const batch = files.map(file => {
+      const name = uploadName(file);
+      const entry: Upload = { id: ++seq, file, name, progress: 0, preview: isImage(name, file.type) ? URL.createObjectURL(file) : undefined };
+      uploads.value = [...uploads.value, entry];
+      // The reactive copy, so progress and failures show as they change.
+      return uploads.value[uploads.value.length - 1]!;
+    });
+    const paths = await Promise.all(batch.map(uploadOne));
+    const done = paths.filter((path): path is string => !!path);
+    if (done.length) {
+      options.paste(pasteText(done));
+      options.focus();
+    }
+    for (const [index, entry] of batch.entries()) if (paths[index]) dismiss(entry.id);
+  }
+  async function retry(entry: Upload) {
+    const path = await uploadOne(entry);
+    if (!path) return;
+    options.paste(pasteText([path]));
+    options.focus();
+    dismiss(entry.id);
+  }
+  /** A paste carrying files is theirs; plain text is left to the terminal untouched. */
+  function onPaste(event: ClipboardEvent) {
+    const files = filesFrom(event.clipboardData);
+    if (!files.length) return;
+    event.preventDefault();
+    event.stopPropagation();
+    void sendFiles(files);
+  }
+  const carriesFiles = (event: DragEvent) => [...(event.dataTransfer?.types ?? [])].includes("Files");
+  function onDragOver(event: DragEvent) {
+    if (!carriesFiles(event)) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+    dragging.value = true;
+  }
+  function onDragLeave(event: DragEvent) {
+    if (!(event.currentTarget as Element).contains(event.relatedTarget as Node | null)) dragging.value = false;
+  }
+  function onDrop(event: DragEvent) {
+    dragging.value = false;
+    const files = filesFrom(event.dataTransfer);
+    if (!files.length) return;
+    event.preventDefault();
+    event.stopPropagation();
+    void sendFiles(files);
+  }
+  /** Stop every upload still running; the pane they were for has gone. */
+  function dispose() {
+    for (const entry of uploads.value) {
+      entry.abort?.();
+      if (entry.preview) URL.revokeObjectURL(entry.preview);
+    }
+  }
+  return { uploads, dragging, sendFiles, retry, dismiss, onPaste, onDragOver, onDragLeave, onDrop, dispose };
 }
