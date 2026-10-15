@@ -33,7 +33,7 @@ const nativeConfig = computed(() => selectedProfile.value?.native_config);
 const validProfile = computed(() => isProfileSelectionValid(provider.value,profileId.value,props.profiles));
 const choices=computed(()=>nativeConfig.value?[]:[...Object.entries(selectedProfile.value?.model_aliases??{}).map(([id,name])=>({id,name:id+" → "+name})),...offeredModels(catalog.value?.models??[],selectedProfile.value?.models)]);
 const effectiveModel=computed(()=>{if(nativeConfig.value)return undefined;const selected=model.value||selectedProfile.value?.model;return selected?(selectedProfile.value?.model_aliases?.[selected]??selected):undefined});
-const effortOptions=computed(()=>provider.value==='terminal'?[]:modelEfforts(provider.value,effectiveModel.value,catalog.value,effort.value||selectedProfile.value?.effort));
+const effortOptions=computed(()=>provider.value==='terminal'?[]:modelEfforts(provider.value,effectiveModel.value,catalog.value,effort.value||selectedProfile.value?.effort,!!selectedProfile.value&&!selectedProfile.value.native_config));
 const ephemeral=ref(false);
 /**
  * Where the session works: this checkout, or a worktree of its own on a
@@ -104,7 +104,7 @@ const dirty = computed(() => title.value !== t('{provider} session', { provider:
         <p v-if="nativeCatalogNote(catalog?.source_url)" class="form-help">{{ t(nativeCatalogNote(catalog?.source_url)!) }}</p>
         <div v-if="modelError" class="inline-error" role="alert">{{ modelError }}</div>
         <p v-if="effectiveModel" class="form-help">{{ t('Effective model') }}: <code>{{ effectiveModel }}</code></p>
-        <label v-if="!nativeConfig && effortOptions.length">{{ t('Thinking depth') }}<select v-model="effort"><option value="">{{ t('Automatic · provider default') }}</option><option v-for="level in effortOptions" :key="level" :value="level">{{ effortLabel(level) }}</option></select></label>
+        <label v-if="!nativeConfig && effortOptions.length" :title="selectedProfile && !nativeConfig ? t('Actual effort support depends on the endpoint and model.') : undefined">{{ t('Thinking depth') }}<select v-model="effort"><option value="">{{ t('Automatic · provider default') }}</option><option v-for="level in effortOptions" :key="level" :value="level">{{ effortLabel(level) }}</option></select></label>
         <p v-if="!nativeConfig && !effortOptions.length" class="form-help">{{ t('Thinking depth is unavailable until this model advertises supported reasoning levels.') }}</p>
         <p class="form-help">{{ t('This override affects only the new session, not the profile or other sessions.') }}</p>
         <p v-if="!selectedProfile" class="form-help">{{ t('The client uses a session-specific configuration directory. Sign in through the native client; existing global credentials are not copied.') }}</p>
