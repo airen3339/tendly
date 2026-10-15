@@ -17,6 +17,24 @@ export interface Attachment {
 export const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
 export const MAX_ATTACHMENTS_PER_MESSAGE = 10;
 
+/**
+ * The name a pasted file is saved under. A screenshot arrives unnamed or as
+ * "image.png" every time, so it gets the time it was pasted instead; anything
+ * else keeps its own name.
+ */
+export function pastedFileName(name: string, type: string, now: Date): string {
+  if (name && name !== 'image.png') return name;
+  const extension = type.split('/')[1]?.replace(/[^a-z0-9]/gi, '') || 'bin';
+  const stamp = now.toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  return `pasted-${stamp}.${extension}`;
+}
+
+/** A pasted file under the name {@link pastedFileName} gives it; one that keeps its name is returned as it is. */
+export function pastedFile(file: File, now: Date): File {
+  const name = pastedFileName(file.name, file.type, now);
+  return name === file.name ? file : new File([file], name, { type: file.type });
+}
+
 export function attachmentError(file: { name: string; size: number }, existing: number): string | undefined {
   if (existing >= MAX_ATTACHMENTS_PER_MESSAGE) return 'Attach at most {count} files to one message.';
   if (file.size <= 0) return 'This file is empty, so nothing was attached.';

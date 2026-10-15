@@ -1,3 +1,6 @@
+import { computed, ref, type Ref } from "vue";
+import { draggedSidebarWidth, storedSidebarWidth } from "./app-shell";
+
 type PanelStorage = Pick<Storage, "getItem" | "setItem">;
 
 /**
@@ -49,4 +52,29 @@ export function writePanelVisibility(storage: PanelStorage | undefined, value: P
  */
 export function sidebarIsRail(width: number): boolean {
   return width >= SIDEBAR_RAIL_MIN_WIDTH;
+}
+
+export const SIDEBAR_WIDTH_KEY = "tendly.sidebar-width.v1";
+
+/**
+ * The workspace column can be dragged narrower or wider; how much room it
+ * needs depends on how many workspaces and sessions there are. Remembered in
+ * this browser, and a double-click on the edge puts it back. A width applies
+ * only while the column is a rail and expanded.
+ */
+export function useSidebarWidth(storage: PanelStorage | undefined, sidebarRail: Readonly<Ref<boolean>>, sidebarCollapsed: Readonly<Ref<boolean>>) {
+  const sidebarWidth = ref<number | undefined>((() => { try { return storedSidebarWidth(storage?.getItem(SIDEBAR_WIDTH_KEY)); } catch { return undefined; } })());
+  const bodyStyle = computed(() => sidebarWidth.value && sidebarRail.value && !sidebarCollapsed.value ? { "--rail-left": sidebarWidth.value + "px" } : undefined);
+  function resizeSidebar(event: PointerEvent) {
+    const handle = event.currentTarget as HTMLElement, left = handle.parentElement?.getBoundingClientRect().left ?? 0;
+    handle.setPointerCapture(event.pointerId);
+    const move = (next: PointerEvent) => { sidebarWidth.value = draggedSidebarWidth(next.clientX, left); };
+    const end = () => {
+      handle.removeEventListener("pointermove", move); handle.removeEventListener("pointerup", end); handle.removeEventListener("pointercancel", end);
+      try { if (sidebarWidth.value) storage?.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth.value)); } catch { /* The width lasts for this page when storage is unavailable. */ }
+    };
+    handle.addEventListener("pointermove", move); handle.addEventListener("pointerup", end); handle.addEventListener("pointercancel", end);
+  }
+  function resetSidebarWidth() { sidebarWidth.value = undefined; try { storage?.setItem(SIDEBAR_WIDTH_KEY, ""); } catch { /* Nothing stored. */ } }
+  return { sidebarWidth, bodyStyle, resizeSidebar, resetSidebarWidth };
 }

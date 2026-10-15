@@ -46,7 +46,5 @@ export function setSessionView(session: Pick<Session, "id" | "provider">, view: 
   return next;
 }
 
-export function clearSessionView(sessionId: string): void { if (preferences.delete(sessionId)) save(); }
-
 /** Test isolation and hot-reload cleanup; intentionally not exported to app code. */
 export function resetSessionViewsForTests(): void { preferences.clear(); }

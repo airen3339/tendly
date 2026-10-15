@@ -24,6 +24,18 @@ export interface AccountUsage {
   /** Set when a failed query kept the previous figures; stamps when they were read. */
   retained_checked_at?: string;
 }
+/**
+ * How long to wait before asking the official usage endpoint again. It
+ * answers roughly once per window and refuses the rest; asking again while
+ * refused does not help and appears to push the allowance further out. So an
+ * answer waits a minute, and each refusal in a row doubles the wait from five
+ * minutes up to thirty, or longer if the endpoint said so.
+ */
+export function usageBackoffSeconds(refusals: number, retryAfter?: number | null): number {
+  if (refusals <= 0) return 60;
+  return Math.max(retryAfter || 0, Math.min(300 * 2 ** (refusals - 1), 1800));
+}
+
 /** Human wait hint for a rate-limited usage query, in whole minutes or seconds. */
 export function usageRetryHint(seconds?: number): { unit: 'seconds' | 'minutes'; value: number } | undefined {
   if (seconds === undefined || !Number.isFinite(seconds) || seconds <= 0) return undefined;
@@ -66,17 +78,6 @@ export function accountLimitExpired(limit?: AccountLimit, now = Date.now()): boo
 export function accountLimitPercent(limit?: AccountLimit, now = Date.now()): number | undefined {
   if (!limit || !Number.isFinite(limit.used_percent) || limit.used_percent < 0 || limit.used_percent > 100) return undefined;
   return accountLimitExpired(limit, now) ? 0 : limit.used_percent;
-}
-/**
- * Return a label that makes the primary/secondary -> 5h/weekly mapping
- * explicit. Unknown durations intentionally remain the native slot name.
- */
-export function accountWindowLabel(slot: 'primary' | 'secondary', limit?: AccountLimit): {
-  slot: string;
-  kind?: AccountWindowKind;
-  minutes?: number;
-} {
-  return { slot, ...(limit?.window_kind ? { kind: limit.window_kind } : {}), ...(limit?.window_minutes !== undefined ? { minutes: limit.window_minutes } : {}) };
 }
 export function accountResetCreditState(account: Pick<AccountView, 'status' | 'capabilities' | 'limits'>):
   'unsupported' | 'signed_out' | 'not_reported' | 'available' | 'empty' {

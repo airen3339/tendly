@@ -17,9 +17,10 @@ import type { LayoutDocument, LayoutNode as Node, LeafPaneKind, PaneNode, SplitD
 import type { ProviderKind } from "@tendly/protocol";
 import LayoutNode from "./LayoutNode.vue";
 import Icon from "../features/Icon.vue";
-import { activatePane, applyPreset, closePane as removePane, containerId, createPane, dockPane, findNode, findNodes, flattenPanes, projectLayout, replacePane, resizeSplit, restoreCollapsed, selectionGroups, splitPane, updatePane, validateLayout, type DockPosition, type LayoutPreset } from "../layout/layout-engine";
+import { activatePane, applyPreset, centerDockTarget, closePane as removePane, containerId, createPane, dockPane, findNode, findNodes, flattenPanes, projectLayout, representativePane, replacePane, resizeSplit, restoreCollapsed, selectionGroups, splitPane, updatePane, validateLayout, type DockPosition, type LayoutPreset } from "../layout/layout-engine";
 import { useI18n } from "../i18n";
 import { DEFAULT_CLIENT } from "../features/clients";
+import { reusablePane } from "../features/pane-context";
 import { SWIPE_EDGE_PX, SWIPE_LONG_PRESS_MS, swipeAxis, swipeBlockedAt, swipeOffset, swipeOutcome, type SwipeTarget } from "../features/pane-swipe";
 const { t } = useI18n();
 
@@ -145,13 +146,7 @@ function splitSelected(direction: SplitDirection) {
 }
 function restoreView() { closeLayoutMenu(); maximized.value = null; }
 
-function centerTarget(id: string): string {
-  const canonical = findNode(working.value.root, id);
-  if (canonical?.type !== "split") return id;
-  const projectedGroup = findNodes(projected.value, (node) => node.type === "stack" && node.collapsedFrom === id)[0];
-  const activeId = projectedGroup?.type === "stack" ? projectedGroup.activePaneId : undefined;
-  return activeId ? containerId(working.value.root, activeId) : id;
-}
+const centerTarget = (id: string) => centerDockTarget(working.value.root, projected.value, id);
 function drop(targetId: string, pane: PaneNode, position: DockPosition) {
   maximized.value = null;
   const target = position === "center" ? centerTarget(targetId) : targetId;
@@ -173,7 +168,7 @@ function add(targetId: string, kind: LeafPaneKind) {
   let id: string;
   do { id = `pane-${kind}-${Date.now().toString(36)}-${++generatedId}`; } while (findNode(working.value.root, id));
   const target = findNodes(projected.value, node => node.type === "stack" && node.collapsedFrom === targetId)[0] ?? findNode(working.value.root, targetId);
-  const active = target?.type === "pane" ? target : target?.type === "stack" ? target.panes.find(pane => pane.id === target.activePaneId) ?? target.panes[0] : target ? flattenPanes(target)[0] : undefined;
+  const active = representativePane(target);
   const workspaceId = typeof active?.metadata?.workspace_id === "string" ? active.metadata.workspace_id : props.defaultWorkspaceId;
   drop(targetId, createPane(id, kind, titles[kind], workspaceId ? { workspace_id: workspaceId } : undefined), "center");
 }
@@ -191,7 +186,7 @@ function openPane(pane: PaneNode) {
     selectPane(pane);
     return;
   }
-  const reusable = pane.kind !== "git_diff" ? panes.value.find(candidate => candidate.kind === pane.kind && !candidate.metadata?.session_id && !candidate.metadata?.path && !candidate.metadata?.draft && (!candidate.metadata?.workspace_id || candidate.metadata.workspace_id === pane.metadata?.workspace_id)) : undefined;
+  const reusable = reusablePane(panes.value, pane);
   if (reusable) {
     commit(replacePane(working.value.root, reusable.id, pane));
     if (maximized.value === reusable.id) maximized.value = pane.id;

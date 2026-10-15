@@ -1,71 +1,49 @@
-# Tendly 架构草案
+# Tendly 架构
 
 ```text
-Browser (React)
+Browser (Vue 3)
    │ HTTPS + WebSocket
    ▼
-Rust API/Session Gateway
-   ├── Workspace Service ── Host workspace + process supervisor
-   ├── Agent Runtime ────── PTY ── official Claude Code / Codex CLI
-   ├── Filesystem Service ── file preview/edit
-   ├── Git Service ──────── status/diff/stage/commit/branch
-   └── Persistence ──────── SQLite (default) / PostgreSQL (scale-out)
+Rust API/Session Gateway (crates/server)
+   ├── Structured conversations ── Claude Code stream-json / Codex app-server JSON-RPC / Pi RPC
+   ├── Terminal sessions ────────── PTY (crates/agent-runtime) ── official CLIs or a shell
+   ├── Workspace IO ─────────────── file tree, preview/edit, attachments
+   ├── Git ──────────────────────── status/diff/stage/commit/branch/worktree
+   └── Persistence ──────────────── SQLite (crates/persistence)
 ```
 
 ## 关键边界
 
 - API 层只负责协议、鉴权和请求编排，不直接执行任意命令。
-- Agent Runtime 通过 `AgentProvider` trait 接入不同 CLI，统一输出为版本化事件。
-- Workspace Service 为每个 workspace 提供独立目录、环境变量、进程组和资源限制。默认直接使用宿主机真实开发环境；需要更强隔离时切换 runtime。
-- Filesystem/Git Service 所有路径必须 canonicalize，并限制在 workspace 根目录内。
-- 前端只依赖 `packages/protocol` 定义的 DTO 和事件，不耦合 Rust 内部模型。
-- SQLite 只存元数据、事件索引和可恢复状态；workspace 文件、预览产物和大日志放在宿主机目录，密钥放在 secret store。
+- 结构化会话通过 `chat_adapter::ClientAdapter` 接入：命令进（`init`、`message`、`steer`、`approval`、`interrupt`、`model`、`permission`、`shutdown`），事件出（`ready`、`message`、`tool`、`approval`、`turn`、`usage`、`exit` 等）。默认由 Node 桥（`packages/native-bridge/chat.mjs`）跑这套协议；`TENDLY_CODEX_ADAPTER` / `TENDLY_CLAUDE_ADAPTER` / `TENDLY_PI_ADAPTER=rust` 改为在 Rust 进程内直连客户端（`codex_chat`、`claude_chat`、`pi_chat`，共用 `native_chat`），两条路径产出相同事件。
+- 每个客户端的安装、配置目录、历史来源与环境变量清理由 `adapters::ClientAdapter`（`crates/server/src/adapters/mod.rs`）描述，Claude Code、Codex、Pi 各一个实现。
+- 终端会话和旧 PTY 会话走 `crates/agent-runtime`：独立进程组、有界回放缓冲，重连时按帧序号续传（见 `pty_routes.rs` 的 `resume_point`）。
+- 默认直接使用宿主机真实开发环境，不提供容器或 microVM 运行时。
+- 文件与 Git 操作的路径都 canonicalize 并限制在 workspace 根目录（或会话自己的 worktree）内，见 `workspace_io`。
+- 前端只依赖 `packages/protocol` 定义的 DTO 和布局模型，不耦合 Rust 内部模型。
+- SQLite 只存元数据、对话事件和可恢复状态；workspace 文件、附件和大日志放在宿主机目录，密钥放在 secret store（数据库只存 `secret_ref`）。
 
-## 建议的核心 trait
-
-```rust
-pub trait AgentProvider: Send + Sync {
-    fn kind(&self) -> ProviderKind;
-    async fn start(&self, request: StartAgentRequest) -> Result<AgentSession>;
-    async fn stop(&self, session_id: SessionId) -> Result<()>;
-}
-```
-
-第一版不追求微服务化。保持单个 Rust server + 宿主机 workspace，等出现多节点调度需求后再拆 control plane 和 worker。Tendly 是编排壳，不复制官方 CLI 的 Agent loop、权限系统或工具实现。
+Tendly 是编排壳，不复制官方 CLI 的 Agent loop、权限系统或工具实现。保持单个 Rust server + 宿主机 workspace。
 
 ## SQLite storage policy
 
-v0.1 使用单个 SQLite 数据库文件，开启 WAL、foreign keys 和 busy timeout。写入通过 persistence 层集中处理，避免多个 runtime 直接竞争写锁；读取可以使用短连接或只读连接。
+使用单个 SQLite 数据库文件，开启 WAL、foreign keys 和 busy timeout。写入通过 `crates/persistence` 的 `Store` 集中处理。迁移 SQL 在仓库根目录 `migrations/`。
 
-核心表：
+主要表：
 
 ```text
 workspaces
 endpoint_profiles
 sessions
-session_events
-layouts / layout_nodes
-audit_logs
-settings
+session_agent_tools / agent_children     会话的工具开关与子会话关系
+layouts / shared_canvas                  每个 workspace 的画布与共享画布
+conversation_meta / conversation_events / conversation_submissions
+preferences
 ```
 
-不把 API key 写进数据库明文；数据库只保存 `secret_ref`。文件内容、视频和大附件不进入 SQLite，只保存路径、hash、大小和 MIME 元数据。session event 需要保留可恢复的序号，并提供按 workspace/session 的保留策略。
+资源采样（`host_samples`、`session_samples`）在单独的指标库里，见 `crates/persistence/src/metrics.rs`。
 
-备份使用 SQLite Online Backup/一致性快照，不直接复制正在写入的数据库文件；默认备份数据库、布局、session 元数据和审计日志，不备份可重新生成的缓存。
-
-## Workspace runtime
-
-运行时通过统一接口抽象，默认实现 `HostRuntime`：
-
-```text
-HostRuntime (default)
-  ├── workspace root directory
-  ├── process group / PTY
-  ├── env and credential profile
-  └── optional systemd-run/bwrap limits
-```
-
-`ContainerRuntime` 和 `MicroVmRuntime` 是可选实现，不参与核心业务模型。宿主机模式下不要求构建或维护完整镜像，Agent 使用服务器已安装的工具链、SSH、Git 和项目依赖。
+不把 API key 写进数据库明文。文件内容和大附件不进入 SQLite，只保存路径等元数据。对话事件带可恢复的序号。
 
 ## Workspace layout model
 
@@ -96,13 +74,13 @@ Split(horizontal, ratio=1:2)
 布局树需要版本化持久化，并支持迁移；前端操作统一抽象为 `split`、`resize`、`move`、`replace`、`collapse`、`restore`、`maximize` 和 `close`。新增功能优先注册新的 pane kind，而不是修改核心布局模型。
 
 ```text
-PaneRegistry
-├── agent-chat
+PaneKind (packages/protocol/src/layout.ts)
+├── agent_chat
 ├── editor
 ├── terminal
-├── git-diff
-├── file-preview
-└── future plugin panes
+├── git_diff
+├── file_preview
+└── stack
 ```
 
 Git Changes 是工作区的一等入口，不应只作为某个编辑器 tab 的附属功能。Git service 需要返回文件级和 hunk 级 diff，并支持 stage、unstage、discard、commit 前检查；UI 可以把 Changes 固定为导航项，也可以把它编排成 pane。

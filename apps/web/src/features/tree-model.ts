@@ -64,3 +64,36 @@ export function flattenTree(directories: ReadonlyMap<string, TreeDirectory>, exp
   }
   return project("", 0);
 }
+
+/** What a key does on a row of the tree; the explorer carries it out. */
+export type TreeKeyAction =
+  | { kind: "open" }
+  | { kind: "focus"; path: string }
+  | { kind: "expand" }
+  | { kind: "collapse"; path: string };
+
+/**
+ * The file tree's keys, as a tree view's: up and down move by row, Home and
+ * End to the ends, right opens a folder and then steps into it, left closes
+ * an open folder and otherwise goes to the parent, Enter and Space open.
+ * Keys with a modifier, and any other key, are not the tree's.
+ */
+export function treeKeyAction(key: string, modifier: boolean, rows: readonly TreeRow[], row: TreeRow): TreeKeyAction | "ignore" | "none" {
+  if (modifier || !["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "Home", "End", "Enter", " "].includes(key)) return "ignore";
+  const index = rows.findIndex(item => item.entry.path === row.entry.path);
+  const focus = (target: TreeRow | undefined): TreeKeyAction | "none" => target ? { kind: "focus", path: target.entry.path } : "none";
+  if (key === "Enter" || key === " ") return { kind: "open" };
+  if (key === "ArrowDown") return focus(rows[index + 1]);
+  if (key === "ArrowUp") return focus(rows[index - 1]);
+  if (key === "Home") return focus(rows[0]);
+  if (key === "End") return focus(rows.at(-1));
+  if (key === "ArrowRight") {
+    if (row.entry.kind !== "directory") return "none";
+    if (!row.expanded) return { kind: "expand" };
+    const child = rows[index + 1];
+    return child?.parent === row.entry.path ? focus(child) : "none";
+  }
+  // ArrowLeft
+  if (row.entry.kind === "directory" && row.expanded) return { kind: "collapse", path: row.entry.path };
+  return row.parent ? { kind: "focus", path: row.parent } : "none";
+}

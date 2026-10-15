@@ -261,17 +261,6 @@ export function projectLayout(root: LayoutNode, width: number, height: number, o
   return project(root, Math.max(0, width), Math.max(0, height));
 }
 
-/** Legacy view helper. New code uses projectLayout and never persists this output. */
-export function collapseBelowMin(root: LayoutNode | LayoutDocument, width: number, height: number, minW = MIN_PANE_WIDTH, minH = MIN_PANE_HEIGHT): LayoutDocument {
-  const input = isDocument(root) ? restoreCollapsed(root) : { version: 1, root };
-  const view = projectLayout(input.root, width, height, { minWidth: minW, minHeight: minH });
-  const collapsed: CollapsedLayout[] = findNodes(view, (node) => node.type === "stack" && !!node.collapsedFrom).map((node) => {
-    const stack = node as StackNode;
-    return { splitId: stack.collapsedFrom!, replacementId: stack.id, node: cloneNode(findNode(input.root, stack.collapsedFrom!)!) as SplitNode };
-  });
-  return { version: input.version, root: view, ...(collapsed.length ? { collapsed } : {}) };
-}
-
 /** Read old persisted collapse snapshots once; new storage has no snapshots. */
 export function restoreCollapsed(document: LayoutDocument, splitId?: string): LayoutDocument {
   if (!document.collapsed?.length) return document;
@@ -341,7 +330,29 @@ export function validateLayout(value: unknown, detailed = false): boolean | Layo
   } else visit(value, "root", 0);
   return detailed ? { valid: !errors.length, errors } : !errors.length;
 }
-export function validateLayoutDetailed(value: unknown): LayoutValidationResult { return validateLayout(value, true); }
 export function isPaneNode(value: unknown): value is PaneNode {
   return !!value && typeof value === "object" && "type" in value && value.type === "pane" && validateLayout(value);
+}
+
+/**
+ * The pane that stands for a node: the pane itself, a stack's active tab (or
+ * its first), or the first pane under a split.
+ */
+export function representativePane(node: LayoutNode | undefined): PaneNode | undefined {
+  if (!node) return undefined;
+  if (node.type === "pane") return node;
+  if (node.type === "stack") return node.panes.find(pane => pane.id === node.activePaneId) ?? node.panes[0];
+  return flattenPanes(node)[0];
+}
+
+/**
+ * Where a pane dropped into the middle of `id` goes. A split that is shown
+ * collapsed into tabs (narrow screen) takes it beside the tab on show there,
+ * in that tab's own container; anything else takes it as it is.
+ */
+export function centerDockTarget(root: LayoutNode, projected: LayoutNode, id: string): string {
+  if (findNode(root, id)?.type !== "split") return id;
+  const group = findNodes(projected, node => node.type === "stack" && node.collapsedFrom === id)[0];
+  const activeId = group?.type === "stack" ? group.activePaneId : undefined;
+  return activeId ? containerId(root, activeId) : id;
 }

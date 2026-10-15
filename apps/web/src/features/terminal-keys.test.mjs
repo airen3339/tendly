@@ -73,7 +73,10 @@ test('a tap is distinguished from a scroll, a drag and a text selection', () => 
 });
 
 test('the terminal surface exposes the controls and keeps them out of the scroll area', () => {
-  const source = readFileSync(new URL('../components/TerminalPane.vue', import.meta.url), 'utf8');
+  const pane = readFileSync(new URL('../components/TerminalPane.vue', import.meta.url), 'utf8');
+  const source = readFileSync(new URL('../components/TerminalKeyBar.vue', import.meta.url), 'utf8');
+  // The pane shows the bar to a fingertip.
+  assert.match(pane, /<TerminalKeyBar\s+v-if="touchDevice"/);
   // Without these the feature does not exist, however correct the helpers are.
   assert.match(source, /terminal-keys/);
   assert.match(source, /class="terminal-keys"/);
@@ -99,8 +102,9 @@ test('tapping a row sends arrows only while that gesture is explicitly armed', (
   assert.doesNotMatch(tap, /buffer\.active\.type/);
   assert.match(source, /!tapSelect\.value/);
   assert.match(source, /selectionPresses\(/);
-  assert.ok(source.includes("t('Tap a row to select it')"), 'the mode is switchable from the bar');
-  assert.match(source, /:aria-pressed="tapSelect"/, 'and says whether it is on');
+  const bar = readFileSync(new URL('../components/TerminalKeyBar.vue', import.meta.url), 'utf8');
+  assert.ok(bar.includes("t('Tap a row to select it')"), 'the mode is switchable from the bar');
+  assert.match(bar, /:aria-pressed="tapSelect"/, 'and says whether it is on');
 });
 
 test('ctrl is a one-shot modifier on what the soft keyboard types', () => {
@@ -108,7 +112,8 @@ test('ctrl is a one-shot modifier on what the soft keyboard types', () => {
   // It rewrites the terminal's own input, so the soft keyboard supplies the
   // letter, and it releases after one key so it cannot stick on unnoticed.
   assert.match(source, /ctrlArmed\.value\) \{ ctrlArmed\.value = false; data = ctrlSequence\(data\)/);
-  assert.match(source, /:aria-pressed="ctrlArmed"/);
+  const bar = readFileSync(new URL('../components/TerminalKeyBar.vue', import.meta.url), 'utf8');
+  assert.match(bar, /:aria-pressed="ctrlArmed"/);
 });
 
 test('paste reads the clipboard where it may and falls back to a field where it may not', () => {
@@ -120,5 +125,9 @@ test('paste reads the clipboard where it may and falls back to a field where it 
   assert.match(source, /class="terminal-paste"/);
   // terminal.paste honours bracketed paste mode, so a multi-line paste is not
   // run line by line as if each newline were Enter.
-  assert.match(source, /terminal\?\.paste\(/);
+  const xterm = readFileSync(new URL('./terminal-view-xterm.ts', import.meta.url), 'utf8');
+  assert.match(xterm, /terminal\.paste\(/);
+  // wterm has no paste of its own: the view wraps it when the program asked for bracketed paste.
+  const wterm = readFileSync(new URL('./terminal-view-wterm.ts', import.meta.url), 'utf8');
+  assert.match(wterm, /bracketedPaste\(\) \? `\\x1b\[200~\$\{body\}\\x1b\[201~`/);
 });

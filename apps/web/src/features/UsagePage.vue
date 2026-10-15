@@ -2,13 +2,16 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import type { Session, Workspace } from '@tendly/protocol';
 import { ApiError, errorMessage, json, providerLabel, request } from './api';
+import { backendCapabilities } from './backend-capabilities';
+import EndpointBalances from './EndpointBalances.vue';
 import PageShell from './PageShell.vue';
 import ProviderIcon from './ProviderIcon.vue';
 import Icon from './Icon.vue';
 import { useI18n } from '../i18n';
-import { formatDuration } from './system-format';
-import { usageRetryHint, type AccountView } from './account-ui';
-import { cacheHitRate, cacheSavings, formatCost, formatHours, formatTokens, rangeStart, trend, type Allowance, type Price, type UsageBucket, type UsageProvider, type UsageReport } from './usage-model';
+import { formatDuration, levelFor } from './system-format';
+import { usageBackoffSeconds, usageRetryHint, type AccountView } from './account-ui';
+import { cacheHitRate, formatCost, formatHours, formatTokens, rangeStart, type Allowance, type Price, type UsageBucket, type UsageProvider, type UsageReport } from './usage-model';
+import { allowanceCards, changeLabel, dateLabel, dayParts, heatShade, SERIES, shade, stackedBar, usageInsights, usageTiles, windowLabel, type Metric, type SeriesKey } from './usage-chart';
 
 /**
  * Where the tokens went, laid out as a dashboard: the subscription windows
@@ -23,10 +26,12 @@ const RANGES = [{ id: 'today', label: 'Today', days: 1 }, { id: '24h', label: '2
 type RangeId = typeof RANGES[number]['id'];
 const range = ref<RangeId>('30d');
 const filter = reactive({ provider: '' as UsageProvider | '', model: '', project: '' });
+const endpointBalances = ref<InstanceType<typeof EndpointBalances>>();
 const report = ref<UsageReport>(), allowance = ref<Allowance[]>([]), loading = ref(false), error = ref(''), unsupported = ref(false);
 
 async function load() {
   loading.value = true; error.value = '';
+  void endpointBalances.value?.load();
   const now = Math.floor(Date.now() / 1000);
   const chosen = RANGES.find(entry => entry.id === range.value)!;
   const from = 'hours' in chosen ? now - chosen.hours * 3600 : rangeStart(chosen.days);
@@ -48,61 +53,24 @@ onMounted(load);
 watch([range, () => ({ ...filter })], load, { deep: true });
 
 /** One card per account, its windows side by side. */
-const accounts = computed(() => {
-  const byId = new Map<string, { id: string; name: string; provider: UsageProvider; plan: string | null; windows: Allowance[] }>();
-  for (const row of allowance.value) {
-    const entry = byId.get(row.account_id) ?? { id: row.account_id, name: row.account, provider: row.provider, plan: row.plan, windows: [] };
-    entry.windows.push(row); byId.set(row.account_id, entry);
-  }
-  return [...byId.values()].map(entry => ({ ...entry, windows: entry.windows.sort((a, b) => a.window_minutes - b.window_minutes) }));
-});
-const windowShort = (row: Allowance) => row.window_minutes >= 7 * 24 * 60 - 60 ? '7d' : row.window_minutes <= 5 * 60 + 30 ? '5h' : `${Math.round(row.window_minutes / 60)}h`;
-const level = (percent: number) => percent >= 90 ? 'danger' : percent >= 70 ? 'warn' : 'ok';
+const accounts = computed(() => allowanceCards(allowance.value));
+const windowShort = (row: Allowance) => windowLabel(row.window_minutes);
+const level = levelFor;
 const resetText = (row: Allowance) => row.resets_at === null ? t('Reset · starts again with your next message') : t('Resets in {time}', { time: formatDuration(Math.max(0, row.resets_at - Date.now() / 1000)) });
 /** Why there is no estimate of what is left: nothing used yet gives nothing to scale from. */
 const noEstimate = (row: Allowance) => row.used_percent <= 0 ? t('Nothing used yet, so nothing to estimate from') : row.used_tokens === 0 ? t('No usage logged on this host in this window') : '';
 const estimateHint = (row: Allowance) => row.estimated_remaining_tokens === null ? undefined : row.low_confidence ? t('Too little used yet for a firm estimate.') : t('The largest this window has been seen to hold, times the share not yet used: use on other devices is counted.');
 
 /** The ten figures: what it cost, what it was made of, and how much work it was. */
-const tiles = computed(() => {
-  const data = report.value; if (!data) return [];
-  const now = data.totals, before = data.previous;
-  const cache = (bucket: UsageBucket) => bucket.cache_read + bucket.cache_write_5m + bucket.cache_write_1h;
-  const messages = (bucket: UsageBucket) => bucket.calls + bucket.user_messages;
-  const pricedAt = data.prices_updated_at ? new Date(data.prices_updated_at) : undefined;
-  const listPrices = pricedAt && !Number.isNaN(pricedAt.getTime())
-    ? t('At API list prices, updated {date}', { date: pricedAt.toLocaleDateString() })
-    : t('At API list prices');
-  return [
-    { key: 'cost', label: 'Estimated cost', value: formatCost(now.cost), change: trend(now.cost, before.cost), tone: 'cost', hint: now.unpriced ? t('{tokens} tokens on unpriced models are not included', { tokens: formatTokens(now.unpriced) }) : listPrices },
-    { key: 'total', label: 'Total tokens', value: formatTokens(now.total), change: trend(now.total, before.total) },
-    { key: 'input', label: 'Input tokens', value: formatTokens(now.input), change: trend(now.input, before.input), hint: t('Input the cache did not serve') },
-    { key: 'output', label: 'Output tokens', value: formatTokens(now.output), change: trend(now.output, before.output) },
-    { key: 'cache', label: 'Cache tokens', value: formatTokens(cache(now)), change: trend(cache(now), cache(before)), tone: 'quiet', hint: t('{rate}% hit rate, about {cost} saved', { rate: Math.round(cacheHitRate(now)), cost: formatCost(cacheSavings(data.models)) }) },
-    { key: 'active', label: 'Active time', value: formatHours(now.active_minutes), change: trend(now.active_minutes, before.active_minutes), tone: 'time', hint: t('Five-minute stretches with any activity') },
-    { key: 'duration', label: 'Total duration', value: formatHours(data.duration_seconds / 60), change: trend(data.duration_seconds, data.previous_duration_seconds), hint: t('Each session from its first event to its last') },
-    { key: 'sessions', label: 'Sessions', value: data.conversation_count.toLocaleString(), change: undefined, hint: undefined },
-    { key: 'messages', label: 'Total messages', value: messages(now).toLocaleString(), change: trend(messages(now), messages(before)), hint: t('Model replies and your messages') },
-    { key: 'user', label: 'Your messages', value: now.user_messages.toLocaleString(), change: trend(now.user_messages, before.user_messages), hint: undefined },
-  ];
-});
-const changeText = (value?: number) => value === undefined ? '' : `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`;
+const tiles = computed(() => report.value ? usageTiles(report.value, t) : []);
+const changeText = changeLabel;
 
 /** Daily trend: stacked by kind, each kind switchable, in token, cost or time. */
-type Metric = 'tokens' | 'cost' | 'time';
 const METRICS = ['tokens', 'cost', 'time'] as const;
 const metricLabel = (metric: Metric) => metric === 'tokens' ? 'Token' : metric === 'cost' ? 'Cost' : 'Time';
 const dayMetric = ref<Metric>('tokens'), heatMetric = ref<Metric>('tokens');
-const SERIES = [
-  { key: 'output', label: 'Output', shade: 92 },
-  { key: 'input', label: 'Input', shade: 52 },
-  { key: 'cache', label: 'Cache', shade: 22 },
-] as const;
-type SeriesKey = typeof SERIES[number]['key'];
 // Cache reads are most of the tokens and would flatten everything else; they start hidden.
 const shown = reactive<Record<SeriesKey, boolean>>({ output: true, input: true, cache: false });
-const seriesValue = (bucket: UsageBucket, key: SeriesKey) => key === 'output' ? bucket.output : key === 'input' ? bucket.input : bucket.cache_read + bucket.cache_write_5m + bucket.cache_write_1h;
-const shade = (percent: number) => `color-mix(in srgb, var(--ink) ${percent}%, transparent)`;
 /** Drawn at the width it is shown at, so its labels stay a readable size. */
 const chart = reactive({ width: 640, height: 200 });
 const chartBox = ref<HTMLElement>();
@@ -156,42 +124,26 @@ async function refreshQuota(id: string) {
     quotaNotice.value = availability && QUOTA_NOTICES[availability] ? t(QUOTA_NOTICES[availability]!) : t('Allowance updated for {name}.', { name: view.name });
     if (availability === 'rate_limited') {
       quotaRefusals[id] = (quotaRefusals[id] ?? 0) + 1;
-      beginQuotaCooldown(id, Math.max(view.usage?.retry_after_seconds || 0, Math.min(300 * 2 ** (quotaRefusals[id] - 1), 1800)));
-    } else { quotaRefusals[id] = 0; beginQuotaCooldown(id, 60); }
+      beginQuotaCooldown(id, usageBackoffSeconds(quotaRefusals[id], view.usage?.retry_after_seconds));
+    } else { quotaRefusals[id] = 0; beginQuotaCooldown(id, usageBackoffSeconds(0)); }
     allowance.value = await request<Allowance[]>('/usage/allowance').catch(() => allowance.value);
   } catch (cause) { quotaNotice.value = errorMessage(cause); beginQuotaCooldown(id, 60); }
   finally { quotaBusy.value = ''; }
 }
 const days = computed(() => report.value?.days ?? []);
-interface Part { key: string; label: string; value: number; color: string }
-function stack(day: UsageBucket): Part[] {
-  if (dayMetric.value === 'cost') return [{ key: 'cost', label: 'Cost', value: day.cost, color: 'var(--ok)' }];
-  if (dayMetric.value === 'time') return [{ key: 'time', label: 'Active time', value: day.active_minutes, color: 'var(--info)' }];
-  return SERIES.filter(series => shown[series.key]).map(series => ({ key: series.key, label: series.label, value: seriesValue(day, series.key), color: shade(series.shade) }));
-}
+const stack = (day: UsageBucket) => dayParts(day, dayMetric.value, shown);
 const dayTotal = (day: UsageBucket) => stack(day).reduce((sum, part) => sum + part.value, 0);
 const dayMax = computed(() => Math.max(1e-9, ...days.value.map(dayTotal)));
 const formatMetric = (value: number, metric: Metric) => metric === 'cost' ? formatCost(value) : metric === 'time' ? formatHours(value) : formatTokens(value);
-function bars(index: number) {
-  const day = days.value[index]!;
-  const slot = chart.width / Math.max(1, days.value.length), width = Math.max(3, Math.min(22, slot - 4));
-  const x = index * slot + (slot - width) / 2;
-  let y = chart.height;
-  return stack(day).map(part => {
-    const height = part.value / dayMax.value * chart.height;
-    y -= height;
-    return { ...part, x, y, width, height: Math.max(0, height - (height > 3 ? 1.5 : 0)) };
-  }).filter(rect => rect.height > 0);
-}
+const bars = (index: number) => stackedBar(stack(days.value[index]!), index, days.value.length, dayMax.value, chart.width, chart.height);
 const hover = ref(-1);
 const hovered = computed(() => hover.value >= 0 ? days.value[hover.value] : undefined);
-const dateLabel = (date: string) => { const [, month, day] = date.split('-'); return `${Number(month)}/${Number(day)}`; };
 const labelEvery = computed(() => Math.ceil(days.value.length / 8));
 
 /** When: weekday by hour, one hue from faint to full, and a key from few to many. */
 const heat = computed(() => !report.value ? [] : heatMetric.value === 'cost' ? report.value.heatmap_cost : heatMetric.value === 'time' ? report.value.heatmap_active : report.value.heatmap);
 const heatMax = computed(() => Math.max(1e-9, ...heat.value.flat()));
-const heatColor = (value: number) => value > 0 ? shade(Math.round(14 + Math.sqrt(value / heatMax.value) * 82)) : shade(5);
+const heatColor = (value: number) => heatShade(value, heatMax.value);
 const weekdays = computed(() => Array.from({ length: 7 }, (_, index) => new Intl.DateTimeFormat(locale.value, { weekday: 'short' }).format(new Date(2026, 0, 5 + index))));
 
 const workspaceFor = (cwd: string) => props.workspaces.filter(workspace => cwd === workspace.root_path || cwd.startsWith(workspace.root_path.replace(/\/$/, '') + '/')).sort((a, b) => b.root_path.length - a.root_path.length)[0];
@@ -217,19 +169,7 @@ async function savePrice(model: string, remove = false) {
 }
 
 /** A few plain sentences on what stands out. */
-const insights = computed(() => {
-  const data = report.value; if (!data || !data.totals.total) return [];
-  const lines: string[] = [];
-  const top = data.models[0];
-  if (top) lines.push(t('{model} did {share}% of the work.', { model: top.model, share: Math.round(top.total / data.totals.total * 100) }));
-  const peak = [...data.days].sort((a, b) => b.total - a.total)[0];
-  if (peak?.total) lines.push(t('The busiest day was {date}, with {tokens} tokens.', { date: peak.date, tokens: formatTokens(peak.total) }));
-  let best = { day: 0, hour: 0, value: 0 };
-  data.heatmap_active.forEach((row, day) => row.forEach((value, hour) => { if (value > best.value) best = { day, hour, value }; }));
-  if (best.value) lines.push(t('You work hardest on {weekday} around {hour}:00.', { weekday: weekdays.value[best.day]!, hour: best.hour }));
-  if (data.totals.user_messages) lines.push(t('Each of your messages led to {calls} model calls on average.', { calls: (data.totals.calls / data.totals.user_messages).toFixed(1) }));
-  return lines;
-});
+const insights = computed(() => report.value ? usageInsights(report.value, t, weekdays.value) : []);
 </script>
 
 <template>
@@ -239,6 +179,7 @@ const insights = computed(() => {
       <p v-if="unsupported" class="inline-notice">{{ t('This backend does not report usage. Update Tendly on the host to see it.') }}</p>
       <p v-else-if="error" class="inline-error" role="alert">{{ error }}</p>
 
+      <EndpointBalances v-if="backendCapabilities.customBalances" ref="endpointBalances" />
       <section v-if="accounts.length" class="quota-row" :aria-label="t('Subscription allowance')">
         <article v-for="account in accounts" :key="account.id" class="quota-card">
           <header><ProviderIcon :provider="account.provider" :size="15" /><strong>{{ account.name }}</strong><span v-if="account.plan" class="plan">{{ account.plan }}</span><button v-if="canRefreshQuota(account.id)" type="button" class="icon-button quota-refresh" :class="{ busy: quotaBusy === account.id }" :disabled="!!quotaBusy || quotaWait(account.id) > 0" :aria-label="quotaRefreshTitle(account.id)" :title="quotaRefreshTitle(account.id)" @click="refreshQuota(account.id)"><Icon name="refresh" :size="13" /><small v-if="quotaWait(account.id) > 0">{{ quotaWait(account.id) }}</small></button></header>

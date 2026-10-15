@@ -8,8 +8,8 @@
 //! what it does ask comes from extensions, as `extension_ui_request` dialogs.
 use crate::chat_adapter::{Answers, ChatInit, Decision};
 use crate::native_chat::{
-    Core, MAX_TEXT, NativeAdapter, NativeClient, Protocol, clip, js_string, native_id,
-    safe_integer, stringify, valid_init,
+    Core, LaunchArgs, MAX_TEXT, NativeAdapter, NativeClient, Protocol, clip, js_string,
+    safe_integer, stringify, take_resume, valid_init,
 };
 use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
@@ -18,40 +18,22 @@ use std::collections::BTreeMap;
 pub fn pi_launch(init: &ChatInit) -> Result<Vec<String>, String> {
     let mut args = vec!["--mode".to_owned(), "rpc".to_owned()];
     let mut resume = init.resume_id.clone();
-    let mut i = 0;
-    while i < init.args.len() {
-        let arg = &init.args[i];
-        let (flag, inline) = match arg.find('=') {
-            Some(at) if at > 0 => (&arg[..at], Some(arg[at + 1..].to_owned())),
-            _ => (arg.as_str(), None),
-        };
-        let mut value = || -> Result<String, String> {
-            let result = match &inline {
-                Some(value) => Some(value.clone()),
-                None => {
-                    i += 1;
-                    init.args.get(i).cloned()
-                }
-            };
-            result
-                .filter(|v| !v.is_empty())
-                .ok_or_else(|| "Missing Pi launch option value.".to_owned())
-        };
+    let mut launch = LaunchArgs::new(&init.args, "Pi", false);
+    while let Some(arg) = launch.next_flag() {
+        let flag = arg.name;
+        let mut value = || launch.value(&arg);
         match flag {
             "--model" | "--provider" | "--thinking" | "--name" | "-n" => {
                 let v = value()?;
                 args.extend([flag.to_owned(), v]);
             }
             "--session" => {
-                let id = value()?;
-                if !native_id(&id) || resume.as_ref().is_some_and(|r| *r != id) {
+                if !take_resume(&mut resume, value()?) {
                     return Err("Invalid or conflicting Pi session ID.".into());
                 }
-                resume = Some(id);
             }
             _ => return Err("Unsupported Pi launch option in structured mode.".into()),
         }
-        i += 1;
     }
     if let Some(resume) = resume {
         args.extend(["--session".to_owned(), resume]);
@@ -446,6 +428,15 @@ impl Pi {
         }
     }
 
+    /// One event from Pi's stream:
+    ///
+    /// - `extension_ui_request` is a dialog an extension opens, shown as a question;
+    /// - `agent_start` marks the turn Tendly asked for as started (aborting it
+    ///   at once if it was interrupted meanwhile), or opens a turn Pi began by
+    ///   itself; `agent_settled` ends it as completed, interrupted or failed;
+    /// - `message_*` events stream the assistant's text and, at the end of a
+    ///   message, its usage and any error it stopped on;
+    /// - `tool_execution_*` events become tool calls with their progress and result.
     fn on_notification(&mut self, message: Value) {
         if !message.is_object() {
             return;
@@ -789,6 +780,61 @@ impl NativeClient for Pi {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn message_text_is_its_text_blocks_joined() {
+        assert_eq!(text_of(Some(&json!("plain"))), "plain");
+        assert_eq!(
+            text_of(Some(&json!([
+                {"type": "text", "text": "Hello, "},
+                {"type": "thinking", "text": "hidden"},
+                {"type": "text", "text": null},
+                {"type": "text", "text": "world"}
+            ]))),
+            "Hello, world"
+        );
+        assert_eq!(text_of(Some(&json!(3))), "");
+        assert_eq!(text_of(None), "");
+    }
+
+    #[test]
+    fn a_model_is_named_by_provider_and_id() {
+        assert_eq!(
+            model_name(Some(&json!({"provider": "anthropic", "id": "sonnet"}))).as_deref(),
+            Some("anthropic/sonnet")
+        );
+        assert_eq!(model_name(Some(&json!({"id": "sonnet"}))), None);
+        assert_eq!(model_name(None), None);
+    }
+
+    #[test]
+    fn pi_reads_flags_inline_or_separate_and_refuses_empty_values() {
+        assert_eq!(
+            pi_launch(&init(&["--model=m", "-n", "chat"])).unwrap(),
+            ["--mode", "rpc", "--model", "m", "-n", "chat"]
+        );
+        for args in [&["--model", ""][..], &["--model="][..], &["--thinking"][..]] {
+            assert_eq!(
+                pi_launch(&init(args)).err().as_deref(),
+                Some("Missing Pi launch option value."),
+                "{args:?}"
+            );
+        }
+        assert_eq!(
+            pi_launch(&init(&["=x"])).err().as_deref(),
+            Some("Unsupported Pi launch option in structured mode.")
+        );
+        assert_eq!(
+            pi_launch(&init(&["--session", "abc", "--session=abd"]))
+                .err()
+                .as_deref(),
+            Some("Invalid or conflicting Pi session ID.")
+        );
+        assert_eq!(
+            pi_launch(&init(&["--session=abc"])).unwrap(),
+            ["--mode", "rpc", "--session", "abc"]
+        );
+    }
 
     fn init(args: &[&str]) -> ChatInit {
         ChatInit {

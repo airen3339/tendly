@@ -1,13 +1,12 @@
 <script setup lang="ts">
-import { computed, h, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
-import type { EndpointProfile, ProviderKind, Session, Workspace } from '@tendly/protocol';
-import { ApiConnectionError, assetUrl, errorMessage, json, providerLabel, request, workspacePath } from './api';
+import { computed, h, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch, type Ref } from 'vue';
+import type { EndpointProfile, Session, Workspace } from '@tendly/protocol';
+import { assetUrl, errorMessage, json, providerLabel, request, sessionPath, workspacePath } from './api';
 import { backendCapabilities } from './backend-capabilities';
-import { AGENT_CLIENTS, agentClient } from './clients';
+import { agentClient } from './clients';
 import { sessionConnections } from './session-connection';
 import { createSessionStream, type SessionStreamState } from './session-stream';
 import { onPageReturn } from './page-return';
-import { parseConversationPage, prependChatEvents } from './chat-model';
 import { acknowledgeDraft, appendChatEvent, approvalPayloadAnswers, canClearContext, chatDrafts, createChatDraftStore, conversationView, isChatEvent, parseConversationSnapshot, pendingMessageRetry, pruneChatEvents, sessionConfigurationPayload, type ChatDraft, type ChatEvent, type ChatItem, type ConversationSnapshot, type NativeModel, type ToolItem, type ToolStats, type TurnUsage, SUBAGENT_TOOLS } from './chat-model';
 import ProviderIcon from './ProviderIcon.vue';
 import Icon from './Icon.vue';
@@ -18,30 +17,40 @@ import AgentToolsSwitch from './AgentToolsSwitch.vue';
 import { useMobile } from './mobile';
 import { describeModel, resolvedDefaultName } from './model-description';
 import ContextRing from './ContextRing.vue';
-import { effortLabel, modelEfforts } from './reasoning-effort';
-import { attachmentError, canSendMessage, composeMessage, formatBytes, MAX_ATTACHMENTS_PER_MESSAGE, type Attachment } from './attachment-state';
+import BalanceBadge from './BalanceBadge.vue';
+import { balanceFor, balances, refreshBalance, refreshBalanceIfStale } from './balance-store';
+import { measuredUsage, type KnownWindow } from './context-meter';
+import { effortFill as effortFillFor, effortLabel, effortStops as effortStopsFor, effortVivid as effortVividAt, modelEfforts, restingStop } from './reasoning-effort';
+import { attachmentError, canSendMessage, composeMessage, formatBytes, MAX_ATTACHMENTS_PER_MESSAGE, pastedFile, type Attachment } from './attachment-state';
+import { ACCESS_LABEL, approvalBody, approvalChoices, DECISION_LABEL, type ApprovalDecision } from './chat-approvals';
+import { PERMISSION_LABELS, PERMISSION_NOTES, permissionName as permissionNameFor } from './permission-modes';
 import { applyCommand, matchCommands, moveHighlight, slashQuery, unsupportedCommand } from './slash-commands';
 import { MarkdownContent } from './MarkdownContent';
-import { handoffArrivals, handoffTranscript } from './handoff';
+import { handoffArrivals, handoffChoices as handoffChoicesFor, handoffDraft, handoffTitle, profileNote, type HandoffChoice } from './handoff';
 import { messageQueue, queuedContent, type QueuedMessage } from './message-queue';
-import { attachedImagePaths, lastChatSeq } from './chat-model';
+import { lastChatSeq } from './chat-model';
+import { attachedImagePaths } from './markdown-model';
 import { conversationCache } from './conversation-cache';
 import { createFrameBatch } from './frame-batch';
 import { createStableRows } from './stable-items';
-import { occurrences, parseSearchResult, rowForHit, stepHit, type SearchHit as ConversationHit } from './conversation-search';
+import { useConversationSearch } from './conversation-search';
+import { useOlderHistory } from './older-history';
+import { useSubagentDock } from './subagent-dock';
 import type { Virtualizer } from '@tanstack/vue-virtual';
 import VirtualRows from './VirtualRows.vue';
 import { estimateRowHeight, rowHeights } from './row-heights';
 import { followsAfterScroll, PERSON_WINDOW_MS, UPWARD_KEYS } from './scroll-follow';
 import { filterModels, mergeModels, resolveModel, offeredModels } from './model-choices';
 import { openLightbox } from './image-lightbox';
-import { cachedPercent, compactCount, descendants, dockRoots, inDock, isLive, lastLine, runningSubagents, stalledFor, toolRuns, toolRunNames, toolRunStatus, toolsById, type ToolRun } from './tool-runs';
+import { compactCount, descendants, inDock, lastLine, toolRuns, toolRunNames, toolIndicator, toolRunStatus, type ToolRun } from './tool-runs';
+import { statusLabel as chatStatusLabel, statsLine as formatStats, turnUsageLine as formatTurnUsage, turnUsageTitle as formatTurnUsageTitle } from './chat-format';
 import { mentionQuery, applyMention } from './file-mentions';
 import { createFileSearch } from './file-search';
 import type { SearchHit } from './file-search';
 import { useI18n } from '../i18n';
 import { isMac } from './shortcuts';
-import { acknowledgeReceipt } from './chat-model';
+import { suggestionKey } from './chat-keyboard';
+import { pendingMessage, settleAccepted, settleFailed } from './message-delivery';
 import { useSessionMenuPosition } from './session-menu-position';
 import { canReopenInTerminal, terminalReopen } from './terminal-reopen';
 import { randomId } from './random-id';
@@ -62,6 +71,19 @@ const terminalReopenAvailable = computed(() => !isPreview.value && mode.value ==
 // Shown before it can be used too, disabled, so it is found before it is needed.
 const terminalReopenOffered = computed(() => !isPreview.value && mode.value === 'structured' && capabilities.sessionTerminalEscape === true && props.session.provider !== 'terminal');
 const mounted = ref(false), loading = ref(false), actionBusy = ref(false), error = ref(''), notice = ref('');
+/**
+ * Runs one of the pane's session actions with the pane marked busy. A failure
+ * is shown only while the pane still shows the session it was for, and only
+ * that session clears the busy mark, so switching sessions mid-request neither
+ * shows a stale error nor unlocks the new one early.
+ */
+async function runAction(work: (id: string) => Promise<void>) {
+  const id = props.session.id;
+  actionBusy.value = true; error.value = '';
+  try { await work(id); }
+  catch (cause) { if (props.session.id === id && mounted.value) error.value = errorMessage(cause); }
+  finally { if (props.session.id === id) actionBusy.value = false; }
+}
 const streamState = ref<SessionStreamState>(isPreview.value ? 'connected' : 'disconnected'), streamNotice = ref('');
 const viewport = ref<HTMLElement>(), followBottom = ref(true), endpointConfirm = ref(false), selectedProfile = ref(props.session.endpoint_profile_id ?? '');
 const confirmEnd = ref(false);
@@ -107,131 +129,17 @@ function measureRowsMargin() {
 // Rows measured while the view follows the newest output keep it at the bottom.
 function onRowsResize() { if (followBottom.value) void scrollToLatest(); }
 
-/** The cursor to the history before what the view holds, while there is any. */
-const older = ref<number | undefined>(), loadingOlder = ref(false), olderSentinel = ref<HTMLElement>();
-/** Reads the page before what the view holds, once at a time for everyone who asks. */
-let olderRead: Promise<void> | undefined;
-function loadOlder(): Promise<void> {
-  olderRead ??= readOlder().finally(() => { olderRead = undefined; });
-  return olderRead;
-}
-/** The page before what the view holds, keeping the row in view where it was. */
-async function readOlder() {
-  const id = props.session.id, own = generation, before = older.value, el = viewport.value;
-  if (before === undefined || isPreview.value || !el) return;
-  loadingOlder.value = true;
-  try {
-    const page = parseConversationPage(await request<unknown>('/sessions/' + encodeURIComponent(id) + '/conversation?before=' + before));
-    if (own !== generation || props.session.id !== id || !mounted.value) return;
-    // The first row in view, and how far it sits below the top, before and after.
-    const anchor = windowed()?.getVirtualItems().find(item => item.end > el.scrollTop);
-    const anchorKey = anchor ? String(anchor.key) : undefined, anchorOffset = anchor ? anchor.start - el.scrollTop : 0;
-    events.value = prependChatEvents(page.events, events.value);
-    older.value = page.older;
-    await nextTick();
-    const index = anchorKey === undefined ? -1 : rows.value.keys.indexOf(anchorKey);
-    if (index >= 0) { const start = windowed()?.getOffsetForIndex(index, 'start')?.[0]; if (start !== undefined) el.scrollTop = start - anchorOffset; }
-    measureRowsMargin();
-  } catch { if (own === generation) notice.value = 'Could not load earlier messages.'; }
-  finally { if (own === generation) loadingOlder.value = false; }
-  // A short page may leave the top still in reach.
-  if (own === generation && older.value !== undefined && el.scrollTop < 1200) queueMicrotask(() => void loadOlder());
-}
-let olderObserver: IntersectionObserver | undefined;
-watch(olderSentinel, sentinel => {
-  olderObserver?.disconnect(); olderObserver = undefined;
-  if (!sentinel || !viewport.value || typeof IntersectionObserver !== 'function') return;
-  // Reached within 1200px of the top, the page before is read: it is there by the time it is scrolled to.
-  olderObserver = new IntersectionObserver(entries => { if (entries.some(entry => entry.isIntersecting)) void loadOlder(); }, { root: viewport.value, rootMargin: '1200px 0px 0px 0px' });
-  olderObserver.observe(sentinel);
+const { older, loadingOlder, olderSentinel, holds, loadOlder } = useOlderHistory({
+  sessionId: () => props.session.id, preview: () => isPreview.value, mounted: () => mounted.value, generation: () => generation,
+  events, viewport, windowed, rowKeys: () => rows.value.keys, measured: measureRowsMargin, failed: message => { notice.value = message; },
 });
-onBeforeUnmount(() => olderObserver?.disconnect());
-
-/**
- * Search through the whole conversation (the server reads its full history):
- * each match is brought into view -- older pages read as far as it needs, the
- * calls it is folded inside opened -- and the words are highlighted where they
- * show, with the CSS highlight registry, so no row is changed to mark them.
- */
-const searchOpen = ref(false), searchQuery = ref(''), searchHits = ref<ConversationHit[]>([]), searchMore = ref(false), searchIndex = ref(-1), searchBusy = ref(false), searchNotice = ref(''), searchInput = ref<HTMLInputElement>();
-let searchTimer: ReturnType<typeof setTimeout> | undefined, searchGeneration = 0, searchRow = -1;
-const searchCount = computed(() => searchBusy.value ? '…' : !searchQuery.value.trim() ? '' : !searchHits.value.length ? t('No matches') : `${searchIndex.value + 1} / ${searchHits.value.length}${searchMore.value ? '+' : ''}`);
-function openSearch() { searchOpen.value = true; void nextTick(() => { searchInput.value?.focus(); searchInput.value?.select(); }); }
-function closeSearch() { clearTimeout(searchTimer); searchGeneration++; searchOpen.value = false; searchHits.value = []; searchIndex.value = -1; searchRow = -1; searchBusy.value = false; searchNotice.value = ''; paintHighlights(); }
-watch(searchQuery, query => { clearTimeout(searchTimer); searchTimer = setTimeout(() => void runSearch(query), 250); });
-watch(() => props.session.id, () => { if (searchOpen.value) closeSearch(); });
-async function runSearch(query: string) {
-  const own = ++searchGeneration, id = props.session.id;
-  searchNotice.value = ''; searchRow = -1;
-  if (!query.trim()) { searchHits.value = []; searchIndex.value = -1; searchBusy.value = false; paintHighlights(); return; }
-  searchBusy.value = true;
-  try {
-    const result = parseSearchResult(await request<unknown>('/sessions/' + encodeURIComponent(id) + '/conversation/search?q=' + encodeURIComponent(query.trim())));
-    if (own !== searchGeneration || props.session.id !== id) return;
-    searchHits.value = result.hits; searchMore.value = result.more; searchIndex.value = -1; searchBusy.value = false;
-    if (result.hits.length) await showHit(0); else paintHighlights();
-  } catch { if (own === searchGeneration) { searchBusy.value = false; searchNotice.value = 'Search failed.'; } }
-}
-async function stepSearch(direction: 1 | -1) { const next = stepHit(searchHits.value.length, searchIndex.value, direction); if (next >= 0) await showHit(next); }
-/** Whether the view holds the event `seq`: everything from the older cursor on is held. */
-const holds = (seq: number) => older.value === undefined || seq >= older.value;
-async function showHit(index: number) {
-  const hit = searchHits.value[index], own = searchGeneration;
-  if (!hit) return;
-  searchIndex.value = index; searchNotice.value = '';
-  for (let pages = 0; pages < 500 && !holds(hit.seq); pages++) { await loadOlder(); if (own !== searchGeneration) return; }
-  const target = rowForHit(rows.value.rows, hit);
-  if (!target) { searchRow = -1; searchNotice.value = 'This match is not shown in the conversation.'; paintHighlights(); return; }
-  followBottom.value = false; searchRow = target.index;
-  windowed()?.scrollToIndex(target.index, { align: 'center' });
-  await nextTick(); await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-  if (own !== searchGeneration) return;
-  const row = viewport.value?.querySelector(`.chat-row[data-index="${target.index}"]`);
-  if (row) {
-    // A run of calls, and each call the match is folded inside, open to show it.
-    if (row.firstElementChild instanceof HTMLDetailsElement) row.firstElementChild.open = true;
-    for (const id of target.path) { const fold = row.querySelector(`[data-tool-id="${CSS.escape(id)}"]`); if (fold instanceof HTMLDetailsElement) fold.open = true; }
-    windowed()?.scrollToIndex(target.index, { align: 'center' });
-  }
-  // Let the row settle where the virtualizer put it (it keeps steering to the
-  // row for a few frames), then bring the words themselves to the middle: a
-  // long reply is taller than the view. Through the virtualizer, so the row
-  // it was steering to does not pull the view back.
-  for (let frame = 0; frame < 4; frame++) await new Promise(resolve => requestAnimationFrame(resolve));
-  if (own !== searchGeneration) return;
-  const words = paintHighlights(), el = viewport.value;
-  if (words && el) { const at = words.getBoundingClientRect(), view = el.getBoundingClientRect(); if (at.height) windowed()?.scrollBy(at.top - view.top - (view.height - at.height) / 2); }
-}
-/** Marks the matches in the rows shown; the first in the current match's row stands out, and is returned. */
-function paintHighlights(): Range | undefined {
-  const registry = (globalThis.CSS as unknown as { highlights?: Map<string, unknown> } | undefined)?.highlights;
-  const HighlightType = (globalThis as unknown as { Highlight?: new (...ranges: Range[]) => unknown }).Highlight;
-  if (!registry || !HighlightType) return undefined;
-  registry.delete('chat-search'); registry.delete('chat-search-current');
-  const query = searchOpen.value ? searchQuery.value : '', el = viewport.value;
-  if (!query.trim() || !el) return undefined;
-  const all: Range[] = [], current: Range[] = [];
-  for (const row of el.querySelectorAll<HTMLElement>('.chat-row')) {
-    const inCurrent = Number(row.dataset.index) === searchRow;
-    const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
-    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-      for (const [start, end] of occurrences(node.textContent ?? '', query)) {
-        const range = new Range(); range.setStart(node, start); range.setEnd(node, end);
-        (inCurrent && !current.length ? current : all).push(range);
-      }
-    }
-  }
-  registry.set('chat-search', new HighlightType(...all));
-  if (current.length) registry.set('chat-search-current', new HighlightType(...current));
-  return current[0];
-}
-// Rows coming into view while searching are marked too.
-function onRowsRange() { if (searchOpen.value && searchQuery.value.trim()) void nextTick(paintHighlights); }
-onBeforeUnmount(() => { clearTimeout(searchTimer); if (searchOpen.value) { searchOpen.value = false; paintHighlights(); } });
-function searchKeydown(event: KeyboardEvent) {
-  if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeSearch(); return; }
-  if (event.key === 'Enter' && !event.isComposing) { event.preventDefault(); void stepSearch(event.shiftKey ? -1 : 1); }
-}
+const { searchOpen, searchQuery, searchHits, searchNotice, searchInput, searchCount, openSearch, closeSearch, stepSearch, onRowsRange, searchKeydown } = useConversationSearch({
+  sessionId: () => props.session.id, viewport, rows: () => rows.value.rows, windowed, holds, loadOlder, stopFollowing: () => { followBottom.value = false; }, t,
+});
+// A custom balance moves as turns are spent: ask again when one ends, and when
+// this session first shows an endpoint that has a query (both throttled).
+watch(() => !!balanceFor(props.session.endpoint_profile_id), present => { if (present && !isPreview.value) refreshBalanceIfStale(props.session.endpoint_profile_id); }, { immediate: true });
+watch(() => view.value.turn, (turn, before) => { if (before === 'running' && turn !== 'running' && !isPreview.value) refreshBalanceIfStale(props.session.endpoint_profile_id); });
 // What sits above the rows -- the trimmed notice, the older-history marker,
 // the welcome -- moves where they begin.
 watch([truncated, () => older.value !== undefined, () => rows.value.rows.length === 0], () => { void nextTick(measureRowsMargin); });
@@ -294,86 +202,14 @@ const mentionIndex = ref(0);
 watch(() => mentionHits.value.map(hit => hit.path).join('\u0000'), () => { mentionIndex.value = 0; });
 watch(() => draft.value.text, () => { mentionsDismissed.value = false; });
 onBeforeUnmount(() => mentionSearch.cancel());
-/**
- * Subagents.
- *
- * They run in the background, so most of their work lands after the turn that
- * started them has ended. While one runs it sits in a dock above the composer
- * rather than in the history: what it is doing now, what it has cost, and a
- * preview that opens to its log and its own calls. A finished one stays in the
- * dock, marked, until dismissed, and is in the history from then on. A card the
- * client has gone quiet on for a while says so, since a stuck subagent and a
- * slow one look the same otherwise.
- */
-const now = ref(Date.now());
-const subagents = computed(() => running.value ? runningSubagents(view.value.items) : []);
-// The clock only ticks while something could go quiet; an idle pane holds no timer.
-let clock: ReturnType<typeof setInterval> | undefined;
-watch(() => subagents.value.length > 0, active => {
-  clearInterval(clock); clock = undefined;
-  if (active) { now.value = Date.now(); clock = setInterval(() => { now.value = Date.now(); }, 30_000); }
-}, { immediate: true });
-onBeforeUnmount(() => clearInterval(clock));
-/** Rows in the order their subagents started; one joins when it is first seen running. */
-const dockIds = ref<string[]>([]), dockOpen = ref(true), expandedAgent = ref<string | null>(null), dock = ref<HTMLElement>();
-watch(() => props.session.id, () => { dockIds.value = []; expandedAgent.value = null; });
-watch(() => dockRoots(view.value.items).map(tool => tool.id), ids => {
-  const fresh = ids.filter(id => !dockIds.value.includes(id));
-  if (fresh.length) dockIds.value = [...dockIds.value, ...fresh];
-}, { immediate: true });
-const dockAgents = computed(() => {
-  if (!running.value) return [];
-  const tools = toolsById(view.value.items);
-  // One whose client exited is in the history, marked ended; it has no live row.
-  return dockIds.value.flatMap(id => { const tool = tools.get(id); return tool && !tool.ended ? [tool] : []; });
-});
-const dockRunning = computed(() => dockAgents.value.filter(isLive).length);
-/** What the dock's heading says: subagents and commands are counted apart. */
-const dockHeading = computed(() => {
-  const live = dockAgents.value.filter(isLive), agents = live.filter(tool => SUBAGENT_TOOLS.has(tool.name)).length, commands = live.length - agents;
-  if (!live.length) return t(dockAgents.value.every(tool => SUBAGENT_TOOLS.has(tool.name)) ? 'Subagents finished' : 'Background work finished');
-  if (!commands) return agents === 1 ? t('1 subagent running') : t('{count} subagents running', { count: agents });
-  if (!agents) return commands === 1 ? t('1 background command running') : t('{count} background commands running', { count: commands });
-  return t('{agents} subagents and {commands} commands running', { agents, commands });
-});
-function dismissAgent(id: string) { dockIds.value = dockIds.value.filter(entry => entry !== id); if (expandedAgent.value === id) expandedAgent.value = null; }
-function clearFinished() { for (const agent of dockAgents.value) if (agent.status !== 'running') dismissAgent(agent.id); }
-// The open log follows the newest line, unless it was scrolled back to read.
-let followLog = true;
-function logScrolled(event: Event) { const el = event.target as HTMLElement; followLog = el.scrollHeight - el.scrollTop - el.clientHeight < 24; }
-watch(expandedAgent, () => { followLog = true; });
-watch(() => dockAgents.value.find(agent => agent.id === expandedAgent.value)?.activity?.length, () => {
-  if (!followLog) return;
-  void nextTick(() => { const log = dock.value?.querySelector<HTMLElement>('.subagent-log'); if (log) log.scrollTop = log.scrollHeight; });
-}, { flush: 'post' });
-function duration(ms: number) {
-  const seconds = Math.round(ms / 1000);
-  return seconds < 60 ? t('{seconds}s', { seconds }) : t('{minutes}m {seconds}s', { minutes: Math.floor(seconds / 60), seconds: seconds % 60 });
-}
-function statsLine(stats: ToolStats) {
-  const parts: string[] = [];
-  if (stats.tools !== undefined) parts.push(t('{count} tool uses', { count: stats.tools }));
-  if (stats.tokens !== undefined) parts.push(t('{count} tokens', { count: compactCount(stats.tokens) }));
-  if (stats.ms !== undefined) parts.push(duration(stats.ms));
-  return parts.join(' · ');
-}
+const { now, dock, dockOpen, expandedAgent, dockAgents, dockRunning, dockHeading, dismissAgent, clearFinished, logScrolled, quietLine } = useSubagentDock({ sessionId: () => props.session.id, running, items: () => view.value.items, t });
+const statsLine = (stats: ToolStats) => formatStats(stats, t);
 /** Below this a result is too small to matter to the context, and a size on
  * every card would only be noise. */
 const NOTABLE_RESULT = 1000;
 const sizeWorthShowing = (tool: ToolItem) => (tool.result_tokens ?? 0) >= NOTABLE_RESULT;
-/** "↑ 23.4k · ↓ 1.2k · 缓存 99.8%": read, written, and how much of the read was cached. */
-function turnUsageLine(spent: TurnUsage) {
-  const parts = [`↑ ${compactCount(spent.input ?? 0)}`, `↓ ${compactCount(spent.output ?? 0)}`];
-  if (spent.input && spent.cached) parts.push(t('{percent}% cached', { percent: cachedPercent(spent.input, spent.cached) }));
-  return parts.join(' · ');
-}
-function turnUsageTitle(spent: TurnUsage) {
-  return t('This turn read {input} tokens ({cached} from the prompt cache) and wrote {output}', { input: (spent.input ?? 0).toLocaleString(), cached: (spent.cached ?? 0).toLocaleString(), output: (spent.output ?? 0).toLocaleString() });
-}
-function quietLine(tool: ToolItem) {
-  const quiet = running.value ? stalledFor(tool, now.value) : undefined;
-  return quiet === undefined ? '' : t('No progress for {minutes} min', { minutes: Math.floor(quiet / 60_000) });
-}
+const turnUsageLine = (spent: TurnUsage) => formatTurnUsage(spent, t);
+const turnUsageTitle = (spent: TurnUsage) => formatTurnUsageTitle(spent, t);
 function chooseMention(hit: SearchHit | undefined) {
   const query = mentionTarget.value; if (!query || !hit) return;
   const next = applyMention(draft.value.text, query, hit.path);
@@ -427,12 +263,8 @@ watch([() => view.value.ready, () => activeProfile.value?.id, () => props.sessio
 const endpointCatalog = computed(() => { const prefix = activeProfile.value?.native_config ? undefined : agentClient(props.session.provider)?.endpointModelPrefix; return prefix ? profileCatalog.value.map(entry => ({ ...entry, id: prefix + entry.id })) : profileCatalog.value; });
 const offeredCatalog = computed(() => { const prefix = activeProfile.value?.native_config ? '' : agentClient(props.session.provider)?.endpointModelPrefix ?? ''; return offeredModels(endpointCatalog.value, (matchingProfiles.value.find(profile => profile.id === props.session.endpoint_profile_id) ?? activeProfile.value)?.models?.map(id => prefix + id)); });
 const models = computed(() => mergeModels(view.value.models, activeProfile.value?.native_config ? [] : offeredCatalog.value, view.value.model ?? activeProfile.value?.model ?? undefined));
-/**
- * The window to measure the context against: the one the user set for this
- * model, else what the client reports, else the published one. A client
- * behind a gateway can report a window its model does not have.
- */
-const modelContext = ref<{ context_window: number | null; source: 'yours' | 'published' | null }>();
+/** The window the server knows for the model in use (context-meter.ts weighs it against the client's). */
+const modelContext = ref<KnownWindow>();
 /** The menu's list, narrowed by what is typed below it: with an endpoint's hundred models, typing finds one. */
 const visibleModels = computed(() => filterModels(models.value, customModel.value));
 // Before the client speaks, the model in use is the profile's, or the one the
@@ -443,15 +275,11 @@ watch(currentModel, async model => {
   modelContext.value = undefined;
   if (!model) return;
   try {
-    const info = await request<{ context_window: number | null; source: 'yours' | 'published' | null }>(`/models/context?model=${encodeURIComponent(model)}`);
+    const info = await request<KnownWindow>(`/models/context?model=${encodeURIComponent(model)}`);
     if (currentModel.value === model) modelContext.value = info;
   } catch { /* An older backend: the client's own figure stands. */ }
 }, { immediate: true });
-const ringUsage = computed(() => {
-  const usage = view.value.usage, known = modelContext.value;
-  const window = known?.source === 'yours' ? known.context_window ?? undefined : usage?.context_window ?? known?.context_window ?? undefined;
-  return usage ? { ...usage, context_window: window } : usage;
-});
+const ringUsage = computed(() => measuredUsage(view.value.usage, modelContext.value));
 const currentModelEntry = computed(() => models.value.find(entry => entry.id === currentModel.value));
 /**
  * A model typed by hand rather than picked from the list.
@@ -489,9 +317,7 @@ const effortChoices = computed(() => {
   if (entry && (entry.efforts?.length || !manualEffort.value)) return entry.efforts ?? [];
   return modelEfforts(provider, activeProfile.value?.model ?? undefined, undefined, selectedEffort.value || activeProfile.value?.effort || undefined, manualEffort.value);
 });
-/** Stop 0 leaves the depth to the endpoint; the rest are the advertised levels,
- * so dragging never invents a level the client did not offer. */
-const effortStops = computed(() => ['', ...effortChoices.value]);
+const effortStops = computed(() => effortStopsFor(effortChoices.value));
 const liveEffort = computed(() => view.value.effort ?? selectedEffort.value);
 /**
  * A drag is one gesture, and the request belongs at the end of it.
@@ -502,15 +328,14 @@ const liveEffort = computed(() => view.value.effort ?? selectedEffort.value);
  * now, and the level is sent when it is let go.
  */
 const heldEffort = ref<number>();
-const effortIndex = computed(() => heldEffort.value ?? Math.max(0, effortStops.value.indexOf(liveEffort.value)));
+const effortIndex = computed(() => heldEffort.value ?? restingStop(effortStops.value, liveEffort.value));
 /** What the slider is pointing at: where it is being held, or where it rests. */
 const effortStop = computed(() => heldEffort.value === undefined ? liveEffort.value : effortStops.value[heldEffort.value] ?? '');
 const effortName = computed(() => effortStop.value ? effortLabel(effortStop.value) : t('Thinking depth'));
 /** Inside the panel there is room to say what the chip cannot: that nothing has
  * been chosen and the client is deciding. */
 const effortSetting = computed(() => effortStop.value ? effortLabel(effortStop.value) : t('Client default'));
-/** Track fill, as a fraction, for the coloured part left of the thumb. */
-const effortFill = computed(() => effortStops.value.length < 2 ? 0 : effortIndex.value / (effortStops.value.length - 1));
+const effortFill = computed(() => effortFillFor(effortStops.value, effortIndex.value));
 function dragEffort(event: Event) { heldEffort.value = Number((event.target as HTMLInputElement).value); }
 function commitEffort(event: Event) {
   const stop = effortStops.value[Number((event.target as HTMLInputElement).value)];
@@ -523,38 +348,15 @@ function commitEffort(event: Event) {
 // Letting go without changing anything raises no `change` event, so the client
 // reporting its level is the other thing that ends a hold.
 watch(liveEffort, () => { heldEffort.value = undefined; });
-/** The top third of whatever this client offers, so the flourish marks the
- * genuinely expensive end rather than a level name hardcoded here. */
-const effortVivid = computed(() => !!effortStop.value && effortStops.value.length > 2 && effortIndex.value >= effortStops.value.length - 2);
+const effortVivid = computed(() => effortVividAt(effortStops.value, effortIndex.value, effortStop.value));
 const endpointMenu = ref<InstanceType<typeof ChipMenu>>();
 const modelMenu = ref<InstanceType<typeof ChipMenu>>();
-/** Applies immediately: both clients switch in place, so there is no context
- * boundary to confirm and no bridge restart to warn about. */
-/**
- * How tools get approved, for the running session.
- *
- * The list comes from the client — Codex has no plan or accept-edits — and the
- * current value is the one the client reports rather than the one last asked
- * for, so this never claims a mode the client is not in.
- */
-const PERMISSION_LABELS: Record<string, string> = { ask: 'Ask every time', plan: 'Plan first', accept_edits: 'Accept edits', danger: 'Never ask' };
-/**
- * What each mode actually does, next to its name.
- *
- * The names are short enough to be guessed at wrongly -- "accept edits" does
- * not say that everything else still asks -- and this is the one place where
- * there is room to say it. The unattended mode says what it costs rather than
- * what it saves, because that is the part worth reading twice.
- */
-const PERMISSION_NOTES: Record<string, string> = {
-  ask: 'Asks before it runs anything.',
-  plan: 'Works out an approach first and waits for you to accept it.',
-  accept_edits: 'File edits go through; everything else still asks.',
-  danger: 'Runs every tool without asking. Anyone who can reach this workspace can too.',
-};
+/** How tools get approved (permission-modes.ts). A change applies immediately:
+ * both clients switch in place, so there is no context boundary to confirm and
+ * no bridge restart to warn about. */
 const permissionChoices = computed(() => view.value.permissionModes ?? []);
 const livePermission = computed(() => view.value.permissionMode ?? '');
-const permissionName = computed(() => livePermission.value ? t(PERMISSION_LABELS[livePermission.value] ?? livePermission.value) : t('Approval'));
+const permissionName = computed(() => permissionNameFor(livePermission.value, t));
 const permissionDanger = computed(() => livePermission.value === 'danger');
 /**
  * On a phone the composer keeps one row: attach, a single settings button and
@@ -575,26 +377,20 @@ const permissionMenu = ref<InstanceType<typeof ChipMenu>>();
 async function pickPermission(mode: string) {
   permissionMenu.value?.close(true);
   if (!canConfigure.value || mode === livePermission.value) return;
-  const session = props.session.id;
-  actionBusy.value = true; error.value = '';
-  try {
-    const ack = await request<{ pending?: boolean }>('/sessions/' + encodeURIComponent(session) + '/conversation/permission', json('POST', { mode }));
+  await runAction(async session => {
+    const ack = await request<{ pending?: boolean }>(`${sessionPath(session)}/conversation/permission`, json('POST', { mode }));
     // Not running (stopped, or exited after a failed turn): the server keeps
     // the choice for the next start rather than refusing it.
     if (ack?.pending && props.session.id === session && mounted.value) notice.value = 'This permission mode applies when the session next starts.';
-  }
-  catch (cause) { if (props.session.id === session && mounted.value) error.value = errorMessage(cause); }
-  finally { if (props.session.id === session) actionBusy.value = false; }
+  });
 }
 async function pickModel(id: string) {
   modelMenu.value?.close(true);
   if (!canPickModel.value || id === currentModel.value) return;
-  const session = props.session.id;
-  actionBusy.value = true; error.value = '';
-  try {
+  await runAction(async session => {
     // Only send a depth when one was actually chosen; otherwise the client
     // keeps whatever it is already using.
-    await request('/sessions/' + encodeURIComponent(session) + '/conversation/model', json('POST', selectedEffort.value ? { model: id, effort: selectedEffort.value } : { model: id }));
+    await request(`${sessionPath(session)}/conversation/model`, json('POST', selectedEffort.value ? { model: id, effort: selectedEffort.value } : { model: id }));
     // The client answers on the event stream, not in this response: a refusal
     // arrives moments later as an error. Some endpoints reject the availability
     // probe a live switch makes, and for those the only way onto that model is
@@ -602,8 +398,7 @@ async function pickModel(id: string) {
     // begins a new context.
     await new Promise(resolve => setTimeout(resolve, 2500));
     if (props.session.id === session && mounted.value && view.value.model !== id) launchFallback.value = id;
-  } catch (cause) { if (props.session.id === session && mounted.value) error.value = errorMessage(cause); }
-  finally { if (props.session.id === session) actionBusy.value = false; }
+  });
 }
 /**
  * Timeline context menu.
@@ -631,37 +426,20 @@ async function copyFromTimeline(value: string) {
 async function clearContext() {
   closeTimelineMenu();
   if (!clearAvailable.value) return;
-  const id = props.session.id, messageId = randomId();
-  actionBusy.value = true; error.value = '';
-  try { await request('/sessions/' + encodeURIComponent(id) + '/conversation/message', json('POST', { id: messageId, content: '/clear' })); }
-  catch (cause) { if (props.session.id === id && mounted.value) error.value = errorMessage(cause); }
-  finally { if (props.session.id === id) actionBusy.value = false; }
+  const messageId = randomId();
+  await runAction(async id => { await request(`${sessionPath(id)}/conversation/message`, json('POST', { id: messageId, content: '/clear' })); });
 }
 /** A model the live switch could not reach, offered as a launch choice. */
 const launchFallback = ref('');
 const launchFallbackName = computed(() => models.value.find(entry => entry.id === launchFallback.value)?.name ?? launchFallback.value);
 async function applyModelAtLaunch() {
-  const id = props.session.id, model = launchFallback.value;
+  const model = launchFallback.value;
   if (!model || !canConfigure.value) return;
-  actionBusy.value = true; error.value = '';
-  try {
+  await runAction(async id => {
     const payload = sessionConfigurationPayload(props.session, props.profiles, selectedProfile.value || null, true, { mode: mode.value, ready: view.value.ready, busy: view.value.turn === 'running', awaitingApproval: view.value.awaitingApproval }, { model, effort: selectedEffort.value });
-    await request<Session>('/sessions/' + encodeURIComponent(id) + '/configuration', json('PATCH', payload));
+    await request<Session>(`${sessionPath(id)}/configuration`, json('PATCH', payload));
     if (props.session.id === id && mounted.value) { launchFallback.value = ''; notice.value = 'Endpoint changed. The next message starts a fresh native context; earlier messages stay visible here only.'; emit('changed'); await load(); }
-  } catch (cause) { if (props.session.id === id && mounted.value) error.value = errorMessage(cause); }
-  finally { if (props.session.id === id) actionBusy.value = false; }
-}
-/**
- * What choosing each configuration actually means.
- *
- * "Isolated" read as the careful, better choice, when what it does is start
- * the client with an empty home: no sign-in, none of the host's settings. The
- * menu is the only place that choice is made, so it is where that is said.
- */
-function profileNote(profile: EndpointProfile) {
-  if (profile.native_config) return t('Uses the sign-in and settings in {path}', { path: profile.native_config.config_dir });
-  if (profile.endpoint_url) return t('Custom endpoint · {url}', { url: profile.endpoint_url });
-  return t('Custom endpoint profile');
+  });
 }
 /**
  * Ways to begin, for a conversation that has none yet.
@@ -695,15 +473,7 @@ function useStarter(prompt: string) {
  * box (see handoff.ts). Nothing is sent until the user has read it and said
  * what to do next, and this session is left exactly as it is.
  */
-type HandoffChoice = { provider: ProviderKind; profileId: string | null; name: string; note: string; workspaceId?: string; branch?: string };
-const handoffChoices = computed<HandoffChoice[]>(() => {
-  // Offered with an empty conversation too: then it is simply the same work in another client.
-  if (props.session.provider === 'terminal') return [];
-  return AGENT_CLIENTS.filter(provider => provider !== props.session.provider).flatMap(provider => [
-    ...props.profiles.filter(profile => profile.provider === provider).map(profile => ({ provider, profileId: profile.id, name: profile.name, note: profileNote(profile) })),
-    { provider, profileId: null, name: t('Native · isolated configuration'), note: t('A fresh, empty client home: no host sign-in or settings, so it may ask you to log in.') },
-  ]);
-});
+const handoffChoices = computed(() => handoffChoicesFor(props.session.provider, props.profiles, t));
 const handoffTarget = ref<HandoffChoice>();
 function pickHandoff(choice: HandoffChoice) {
   endpointMenu.value?.close(true);
@@ -712,18 +482,14 @@ function pickHandoff(choice: HandoffChoice) {
 async function confirmHandoff() {
   const choice = handoffTarget.value, source = props.session;
   if (!choice || actionBusy.value) return;
-  actionBusy.value = true; error.value = '';
-  try {
+  await runAction(async () => {
     const messages = view.value.items.flatMap(item => item.type === 'message' ? [{ role: item.role, text: item.text }] : []);
-    const transcript = handoffTranscript(messages, { user: t('You'), assistant: providerLabel(source.provider), omitted: t('Earlier messages did not fit and were left out') });
-    const created = await request<Session>(`${workspacePath(choice.workspaceId ?? source.workspace_id)}/sessions`, json('POST', { title: choice.branch ? t('{title} · {provider}', { title: source.title, provider: choice.branch }) : t('{title} · {provider}', { title: source.title, provider: providerLabel(choice.provider) }), provider: choice.provider, endpoint_profile_id: choice.profileId, interaction_mode: 'structured' }));
-    // Nothing said yet means nothing to carry: the new session starts clean.
-    if (messages.length) chatDrafts.get(created.id).text = (choice.branch ? t('Here is a conversation I had in another checkout. This session works on branch {branch} in its own worktree; continue the work here, and do not redo what is already done.', { branch: choice.branch }) : t('Here is a conversation I had with {agent}. Pick up the work where it left off: read it first, and do not redo what is already done.', { agent: providerLabel(source.provider) }))
-      + '\n\n<conversation>\n' + transcript.text + '\n</conversation>\n\n' + t('Next:') + ' ';
+    const created = await request<Session>(`${workspacePath(choice.workspaceId ?? source.workspace_id)}/sessions`, json('POST', { title: handoffTitle(source.title, choice, t), provider: choice.provider, endpoint_profile_id: choice.profileId, interaction_mode: 'structured' }));
+    const text = handoffDraft(messages, source.provider, choice, t);
+    if (text) chatDrafts.get(created.id).text = text;
     handoffTarget.value = undefined; handoffArrivals.add(created.id);
     emit('changed'); emit('openSession', created);
-  } catch (cause) { if (props.session.id === source.id && mounted.value) error.value = errorMessage(cause); }
-  finally { if (props.session.id === source.id) actionBusy.value = false; }
+  });
 }
 /**
  * The branch this session works on, and moving it to another.
@@ -755,14 +521,12 @@ function pickBranch(name: string) {
   else void moveToBranch(name);
 }
 async function moveToBranch(branch: string) {
-  const id = props.session.id;
-  branchConfirm.value = ''; actionBusy.value = true; error.value = '';
-  try {
-    await request<Session>(`/sessions/${encodeURIComponent(id)}/checkout`, json('POST', { branch, create: !branchChoices.value.includes(branch) }));
+  branchConfirm.value = '';
+  await runAction(async id => {
+    await request<Session>(`${sessionPath(id)}/checkout`, json('POST', { branch, create: !branchChoices.value.includes(branch) }));
     branchTarget.value = '';
     if (props.session.id === id && mounted.value) { emit('changed'); void loadRepo(); }
-  } catch (cause) { if (props.session.id === id && mounted.value) error.value = errorMessage(cause); }
-  finally { if (props.session.id === id) actionBusy.value = false; }
+  });
 }
 function pickEndpoint(id: string) {
   if (!canConfigure.value) return;
@@ -781,7 +545,15 @@ const canConfigure = computed(() => !isPreview.value && capabilities.sessionConf
 const structuredSession = computed(() => mode.value === 'structured' || mode.value === undefined && props.session.interaction_mode === 'structured');
 const booting = computed(() => !isPreview.value && supported.value && structuredSession.value && !view.value.ready && !error.value
   && (!!(entry.value as { pending?: unknown }).pending || running.value || loading.value && ['starting', 'running', 'waiting'].includes(props.session.status)));
-const statusLabel = computed(() => isPreview.value ? 'Read-only UI preview' : booting.value ? 'Starting {provider}…' : loading.value ? 'Loading conversation…' : view.value.awaitingApproval ? 'Waiting for your approval' : view.value.turn === 'running' ? 'Agent is working' : streamState.value === 'error' || streamState.value === 'disconnected' ? 'View disconnected' : mode.value === 'structured' ? 'Ready for your next idea' : 'Native client session');
+const statusLabel = computed(() => chatStatusLabel({
+  preview: isPreview.value,
+  booting: booting.value,
+  loading: loading.value,
+  awaitingApproval: view.value.awaitingApproval,
+  working: view.value.turn === 'running',
+  disconnected: streamState.value === 'error' || streamState.value === 'disconnected',
+  structured: mode.value === 'structured',
+}));
 let generation = 0, readController: AbortController | undefined, stream: ReturnType<typeof createSessionStream> | undefined, stopBatch = () => {};
 
 // Whether the view keeps following the newest output (scroll-follow.ts): a
@@ -871,7 +643,7 @@ function attach(id: string, own: number) {
       batch.push(message);
     },
   });
-  const url = new URL('/api/sessions/' + encodeURIComponent(id) + '/chat/ws', window.location.href); url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  const url = new URL(`/api${sessionPath(id)}/chat/ws`, window.location.href); url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   stream.connect(() => { const after = lastChatSeq(events.value); if (after === undefined) url.searchParams.delete('after'); else url.searchParams.set('after', String(after)); return url.href; });
 }
 async function load(consumeOpenIntent = false) {
@@ -890,7 +662,7 @@ async function load(consumeOpenIntent = false) {
     // stopped-session remount has no permission to start a process.
     if (consumeOpenIntent) { await sessionConnections.ensure(props.session); if (own !== generation) return; emit('changed'); }
     if (cached) { attach(id, own); return; }
-    const snapshot = await request<unknown>('/sessions/' + encodeURIComponent(id) + '/conversation', { signal: readController.signal });
+    const snapshot = await request<unknown>(`${sessionPath(id)}/conversation`, { signal: readController.signal });
     if (!mounted.value || own !== generation || props.session.id !== id) return;
     updateSnapshot(snapshot);
     // A legacy PTY session is rendered in this shell but its terminal stream
@@ -976,7 +748,7 @@ async function steerText(text: string): Promise<boolean> {
   // Already composed: any attachments are named in it.
   if (!content || steering.value) return false;
   steering.value = true; error.value = '';
-  try { await request(`/sessions/${encodeURIComponent(id)}/conversation/steer`, json('POST', { id: randomId(), content })); return true; }
+  try { await request(`${sessionPath(id)}/conversation/steer`, json('POST', { id: randomId(), content })); return true; }
   catch (cause) { if (props.session.id === id) error.value = errorMessage(cause); return false; }
   finally { steering.value = false; }
 }
@@ -1016,8 +788,7 @@ watch(() => [canSendIgnoringText.value, queued.value.length] as const, ([ready, 
   if (!ready || !count || draft.value.pending) return;
   const next = messageQueue.shift(props.session.id); if (!next) return;
   const id = props.session.id, target = draft.value, messageId = randomId();
-  const keep = target.text;
-  target.pending = { id: messageId, content: queuedContent(next), text: keep, state: 'sending', profileId: props.session.endpoint_profile_id, configurationRevision: props.session.configuration_revision??0 }; target.notice = undefined; error.value = '';
+  target.pending = pendingMessage(messageId, queuedContent(next), target.text, props.session); target.notice = undefined; error.value = '';
   void deliver(id, target);
 });
 async function send(queue = false) {
@@ -1034,7 +805,7 @@ async function send(queue = false) {
   const typed = target.text;
   const content = composeMessage(typed, target.attachments ?? []);
   target.attachments = [];
-  target.pending = { id: messageId, content, text: typed, state: 'sending', profileId: props.session.endpoint_profile_id, configurationRevision: props.session.configuration_revision??0 }; target.notice = undefined; error.value = '';
+  target.pending = pendingMessage(messageId, content, typed, props.session); target.notice = undefined; error.value = '';
   await deliver(id, target);
 }
 async function pickAttachments(event: Event) {
@@ -1056,12 +827,7 @@ async function pasteFiles(event: ClipboardEvent) {
   // Preserve native insertion (including the caret/selection and undo) for mixed
   // text + image clipboards; suppress only a file-only paste.
   if (!event.clipboardData?.getData('text/plain')) event.preventDefault();
-  await uploadFiles(files.map(file => {
-    if (file.name && file.name !== 'image.png') return file;
-    const extension = file.type.split('/')[1]?.replace(/[^a-z0-9]/gi, '') || 'bin';
-    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    return new File([file], `pasted-${stamp}.${extension}`, { type: file.type });
-  }));
+  await uploadFiles(files.map(file => pastedFile(file, new Date())));
 }
 async function dropFiles(event: DragEvent) {
   const files = [...(event.dataTransfer?.files ?? [])];
@@ -1079,7 +845,7 @@ async function uploadFiles(files: File[]) {
       const reason = attachmentError(file, target.attachments?.length ?? 0);
       if (reason) { error.value = t(reason, { count: MAX_ATTACHMENTS_PER_MESSAGE }); break; }
       const saved = await request<Attachment>(
-        '/workspaces/' + encodeURIComponent(props.session.workspace_id) + '/attachments?name=' + encodeURIComponent(file.name),
+        `${workspacePath(props.session.workspace_id)}/attachments?name=${encodeURIComponent(file.name)}`,
         { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', 'X-Tendly-Client': 'web' }, body: file },
       );
       target.attachments = [...(target.attachments ?? []), saved];
@@ -1102,27 +868,17 @@ async function deliver(id: string, target: ChatDraft) {
   const { id: messageId, content } = pending;
   error.value = '';
   try {
-    const receipt=await request('/sessions/' + encodeURIComponent(id) + '/conversation/message', json('POST', { id: messageId, content, configuration_revision: pending.configurationRevision??0 }));
-    acknowledgeReceipt(target,receipt);
-    if (target.text === content) target.text = '';
-    // A durable receipt can acknowledge an older, already-trimmed message.
-    // Missing receipts still need the canonical event; never replay automatically.
-    if (target.pending?.id === messageId) { target.pending.state = 'unknown'; target.notice = 'Message accepted. Refresh the conversation if its event has not appeared.'; }
+    const receipt = await request(`${sessionPath(id)}/conversation/message`, json('POST', { id: messageId, content, configuration_revision: pending.configurationRevision ?? 0 }));
+    settleAccepted(target, messageId, content, receipt);
     if (props.session.id === id && mounted.value) { emit('changed'); void load(); }
   } catch (cause) {
-    if (target.pending?.id === messageId) {
-      if (cause instanceof ApiConnectionError || !(cause instanceof Error) || !('status' in cause) || Number(cause.status) >= 500 || Number(cause.status) < 400) { target.pending.state = 'unknown'; target.notice = 'Delivery is uncertain. Your draft is kept; refresh the conversation before deciding what to do. It will not be sent again automatically.'; }
-      else {target.pending = undefined;if(!target.text)target.text=content;}
-    }
+    settleFailed(target, messageId, content, cause);
     if (props.session.id === id && mounted.value) error.value = errorMessage(cause);
   }
 }
 async function explicitOpen() {
   if (isPreview.value || actionBusy.value || loading.value || !supported.value || mode.value === 'pty' && running.value) return;
-  const id = props.session.id; actionBusy.value = true; error.value = '';
-  try { await request('/sessions/' + encodeURIComponent(id) + '/conversation/open', json('POST', {})); if (props.session.id === id && mounted.value) { emit('changed'); await load(); } }
-  catch (cause) { if (props.session.id === id && mounted.value) error.value = errorMessage(cause); }
-  finally { if (props.session.id === id) actionBusy.value = false; }
+  await runAction(async id => { await request(`${sessionPath(id)}/conversation/open`, json('POST', {})); if (props.session.id === id && mounted.value) { emit('changed'); await load(); } });
 }
 /**
  * Open this conversation in a real terminal, for the interactive commands the
@@ -1131,30 +887,22 @@ async function explicitOpen() {
  */
 async function openInTerminal() {
   if (isPreview.value || actionBusy.value || !terminalReopenAvailable.value) return;
-  const id = props.session.id; actionBusy.value = true; error.value = '';
-  try {
+  await runAction(async id => {
     const opened = await terminalReopen(props.session);
     if (props.session.id === id && mounted.value) { emit('changed'); emit('openSession', opened); }
-  }
-  catch (cause) { if (props.session.id === id && mounted.value) error.value = errorMessage(cause); }
-  finally { if (props.session.id === id) actionBusy.value = false; }
+  });
 }
 async function interrupt() {
   if (isPreview.value || actionBusy.value || view.value.turn !== 'running') return;
-  const id = props.session.id; actionBusy.value = true; error.value = '';
-  try { await request('/sessions/' + encodeURIComponent(id) + '/conversation/interrupt', json('POST', {})); if (props.session.id === id && mounted.value) { emit('changed'); await load(); } }
-  catch (cause) { if (props.session.id === id && mounted.value) error.value = errorMessage(cause); }
-  finally { if (props.session.id === id) actionBusy.value = false; }
+  await runAction(async id => { await request(`${sessionPath(id)}/conversation/interrupt`, json('POST', {})); if (props.session.id === id && mounted.value) { emit('changed'); await load(); } });
 }
 async function endSession() {
   if (isPreview.value || actionBusy.value || !confirmEnd.value) return;
-  const id = props.session.id; actionBusy.value = true; error.value = '';
-  try {
-    await request('/sessions/' + encodeURIComponent(id) + '/stop', json('POST'));
+  await runAction(async id => {
+    await request(`${sessionPath(id)}/stop`, json('POST'));
     sessionConnections.ended(id);
     if (props.session.id === id && mounted.value) { confirmEnd.value = false; emit('changed'); await load(); }
-  } catch (cause) { if (props.session.id === id && mounted.value) error.value = errorMessage(cause); }
-  finally { if (props.session.id === id) actionBusy.value = false; }
+  });
 }
 function closeSessionMenu(restoreFocus = false) {
   const menu = sessionMenu.value;
@@ -1194,23 +942,6 @@ const dockedApproval = computed(() => pendingApprovals.value[dockedIndex.value])
 const foldedApprovals = reactive(new Set<string>());
 function toggleApprovalFold(id: string) { if (!foldedApprovals.delete(id)) foldedApprovals.add(id); }
 const acceptKey = isMac ? '⌘↵' : 'Ctrl+↵';
-type ApprovalDecision = 'accept' | 'accept_session' | 'decline' | 'cancel';
-const approvalChoices = (item: Extract<ChatItem, { type: 'approval' }>) => item.choices.filter(choice => ['accept', 'accept_session', 'decline', 'cancel'].includes(choice)) as ApprovalDecision[];
-const DECISION_LABEL: Record<ApprovalDecision, string> = { accept: 'Allow once', accept_session: 'Allow for this session', decline: 'Decline', cancel: 'Cancel turn' };
-const ACCESS_LABEL: Record<string, string> = { read: 'Read', write: 'Write', execute: 'Run a command', network: 'Network access' };
-/**
- * A native request's text is usually the client's own JSON. Its reason reads
- * as a sentence; the rest is detail, folded away rather than shown raw.
- */
-function approvalBody(text: string): { reason?: string; detail?: string } | undefined {
-  try {
-    const parsed: unknown = JSON.parse(text);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
-    const { reason, ...rest } = parsed as Record<string, unknown>;
-    const detail = Object.fromEntries(Object.entries(rest).filter(([, value]) => value !== undefined && value !== null));
-    return { reason: typeof reason === 'string' && reason.trim() ? reason : undefined, detail: Object.keys(detail).length ? JSON.stringify(detail, null, 2) : undefined };
-  } catch { return undefined; }
-}
 function clearAnswers(id?: string) { for (const key of id ? [id] : new Set([...Object.keys(approvalAnswers), ...Object.keys(approvalOther)])) { delete approvalAnswers[key]; delete approvalOther[key]; } }
 function answer(id: string, question: string, event: Event) { const value = (event.target as HTMLInputElement).value; (approvalAnswers[id] ??= Object.create(null))[question] = value && value !== OTHER_ANSWER ? [value] : []; if (value !== OTHER_ANSWER && approvalOther[id]) delete approvalOther[id][question]; }
 function toggleAnswer(id: string, question: string, value: string, event: Event) { const current = (approvalAnswers[id] ??= Object.create(null))[question] ?? []; approvalAnswers[id][question] = (event.target as HTMLInputElement).checked ? [...new Set([...current, value])] : current.filter(item => item !== value); }
@@ -1220,19 +951,17 @@ async function approve(item: Extract<ChatItem, { type: 'approval' }>, decision: 
   if (isPreview.value || approvalBusy.value || item.resolved || !approvalChoices(item).includes(decision) || decision === 'accept' && incompleteAnswers(item)) return;
   const id = props.session.id; approvalBusy.value = item.id; error.value = '';
   const answers = decision === 'accept' ? approvalPayloadAnswers(item.questions, approvalAnswers[item.id], approvalOther[item.id]) : {};
-  try { await request('/sessions/' + encodeURIComponent(id) + '/conversation/approval', json('POST', { request_id: item.id, decision, ...(Object.keys(answers).length ? { answers } : {}) })); if (props.session.id === id && mounted.value) { clearAnswers(item.id); await load(); } }
+  try { await request(`${sessionPath(id)}/conversation/approval`, json('POST', { request_id: item.id, decision, ...(Object.keys(answers).length ? { answers } : {}) })); if (props.session.id === id && mounted.value) { clearAnswers(item.id); await load(); } }
   catch (cause) { if (props.session.id === id && mounted.value) error.value = errorMessage(cause); }
   finally { if (props.session.id === id) approvalBusy.value = ''; }
 }
 async function configure() {
   if (!canConfigure.value || !endpointConfirm.value) return;
-  const id = props.session.id; actionBusy.value = true; error.value = '';
-  try {
+  await runAction(async id => {
     const payload = sessionConfigurationPayload(props.session, props.profiles, selectedProfile.value || null, true, { mode: mode.value, ready: view.value.ready, busy: view.value.turn === 'running', awaitingApproval: view.value.awaitingApproval }, { effort: selectedEffort.value });
-    await request<Session>('/sessions/' + encodeURIComponent(id) + '/configuration', json('PATCH', payload));
+    await request<Session>(`${sessionPath(id)}/configuration`, json('PATCH', payload));
     if (props.session.id === id && mounted.value) { endpointConfirm.value = false; selectedEffort.value = ''; notice.value = 'Endpoint changed. The next message starts a fresh native context; earlier messages stay visible here only.'; emit('changed'); await load(); }
-  } catch (cause) { if (props.session.id === id && mounted.value) error.value = errorMessage(cause); }
-  finally { if (props.session.id === id) actionBusy.value = false; }
+  });
 }
 function chooseEndpoint() { endpointConfirm.value = selectedProfile.value !== (props.session.endpoint_profile_id ?? '') || !!selectedEffort.value; }
 /** Thinking depth applies in place, exactly like the model. Routing it through
@@ -1240,12 +969,9 @@ function chooseEndpoint() { endpointConfirm.value = selectedProfile.value !== (p
  * a model or depth on that path at all, because those belong to its own client. */
 async function applyEffort(level: string) {
   if (!canPickModel.value) return;
-  const session = props.session.id;
-  actionBusy.value = true; error.value = '';
-  try {
-    await request('/sessions/' + encodeURIComponent(session) + '/conversation/model', json('POST', { effort: level }));
-  } catch (cause) { if (props.session.id === session && mounted.value) error.value = errorMessage(cause); }
-  finally { if (props.session.id === session) actionBusy.value = false; }
+  await runAction(async session => {
+    await request(`${sessionPath(session)}/conversation/model`, json('POST', { effort: level }));
+  });
 }
 function syncCaret(event: Event) {
   const input = event.target as HTMLTextAreaElement;
@@ -1261,38 +987,22 @@ function chooseCommand(command: string) {
     input.focus(); input.setSelectionRange(next.caret, next.caret); caret.value = next.caret;
   });
 }
+/** A key for the open suggestion list; whether the list took it. */
+function listKeydown(event: KeyboardEvent, index: Ref<number>, count: number, choose: () => void, dismiss: () => void) {
+  const action = suggestionKey(event);
+  if (!action) return false;
+  event.preventDefault();
+  if (action === 'next' || action === 'previous') { index.value = moveHighlight(index.value, count, action === 'next' ? 1 : -1); return true; }
+  event.stopPropagation();
+  if (action === 'choose') choose(); else dismiss();
+  return true;
+}
 function keydown(event: KeyboardEvent) {
   if (composing.value || event.isComposing || event.keyCode === 229) return;
-  // While the suggestion list is open it owns the arrows, Tab and Enter, so a
-  // highlighted command is completed instead of being sent as literal text.
-  if (commandsOpen.value) {
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-      event.preventDefault();
-      commandIndex.value = moveHighlight(commandIndex.value, commandMatches.value.length, event.key === 'ArrowDown' ? 1 : -1);
-      return;
-    }
-    if (event.key === 'Tab' || (event.key === 'Enter' && !event.shiftKey && !event.repeat)) {
-      event.preventDefault(); event.stopPropagation();
-      chooseCommand(commandMatches.value[commandIndex.value] ?? commandMatches.value[0]);
-      return;
-    }
-    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); commandsDismissed.value = true; return; }
-  }
-  // Mentions take the same keys, and only when no command list is open — the
-  // two cannot be under one caret, so they never contend for the arrows.
-  if (mentionsOpen.value) {
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-      event.preventDefault();
-      mentionIndex.value = moveHighlight(mentionIndex.value, mentionHits.value.length, event.key === 'ArrowDown' ? 1 : -1);
-      return;
-    }
-    if (event.key === 'Tab' || (event.key === 'Enter' && !event.shiftKey && !event.repeat)) {
-      event.preventDefault(); event.stopPropagation();
-      chooseMention(mentionHits.value[mentionIndex.value] ?? mentionHits.value[0]);
-      return;
-    }
-    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); mentionsDismissed.value = true; return; }
-  }
+  // Only one list is ever open: a command and a mention cannot both be under
+  // the caret, so they never contend for the keys (chat-keyboard.ts).
+  if (commandsOpen.value && listKeydown(event, commandIndex, commandMatches.value.length, () => chooseCommand(commandMatches.value[commandIndex.value] ?? commandMatches.value[0]), () => { commandsDismissed.value = true; })) return;
+  if (mentionsOpen.value && listKeydown(event, mentionIndex, mentionHits.value.length, () => chooseMention(mentionHits.value[mentionIndex.value] ?? mentionHits.value[0]), () => { mentionsDismissed.value = true; })) return;
   if (event.key !== 'Enter') return;
   // Shift+Enter keeps the native newline behavior; plain Enter and Ctrl/⌘
   // Enter submit. Repeated keydown is suppressed to avoid duplicate turns.
@@ -1323,7 +1033,7 @@ function keydown(event: KeyboardEvent) {
       <div v-if="older!==undefined" ref="olderSentinel" class="chat-history-older" role="status">{{ loadingOlder ? t('Loading earlier messages…') : '' }}</div>
       <VirtualRows ref="rowsList" v-slot="{ row: item }" :rows="rows.rows" :keys="rows.keys" :scroll-element="viewport" :scroll-margin="rowsMargin" :estimate="rowHeight" :measured="rememberRowHeight" :memo="[running, now, locale]" @resize="onRowsResize" @range="onRowsRange">
         <article v-if="item.type==='message'" :class="['chat-message',item.role]"><div class="chat-message-label"><ProviderIcon v-if="item.role==='assistant'" :provider="session.provider" :size="15" /><span>{{ item.role==='user'?t('You'):providerLabel(session.provider) }}</span><em v-if="item.steered" class="chat-steered" :title="t('Written while the agent worked, and read inside that turn')">{{ t('Steer') }}</em></div><div v-if="item.role==='user'&&attachedImagePaths(item.text).length" class="chat-attached-images"><img v-for="path in attachedImagePaths(item.text)" :key="path" :src="workspaceImage(path)" :alt="path" :title="path" loading="lazy" @click="openLightbox(workspaceImage(path), path)" /></div><MarkdownContent :text="item.text" :image-url="workspaceImage" :host-image-url="hostImage" :open-file="openReference" /><div class="chat-message-foot"><div class="chat-message-actions"><CopyButton :text="item.text" label="Copy message" compact /></div><span v-if="item.role==='assistant'&&item.usage" class="chat-turn-usage" :title="turnUsageTitle(item.usage)">{{ turnUsageLine(item.usage) }}</span></div></article>
-        <component :is="item.type==='tool_run'&&item.tools.length>1?'details':'div'" v-else-if="item.type==='tool_run'" :class="item.tools.length>1?['chat-tool-run',toolRunStatus(item)]:'chat-tool-solo'"><summary v-if="item.tools.length>1"><span :class="['tool-indicator',toolRunStatus(item)]">{{ toolRunStatus(item)==='completed'?'✓':toolRunStatus(item)==='failed'?'!':'↻' }}</span><strong>{{ t('{count} tool calls',{count:item.tools.length}) }}</strong><small>{{ toolRunStatus(item)==='running' ? runningLine(item) : toolRunNames(item) }}</small><Icon class="chat-tool-chevron" name="chevron" :size="14" /></summary><details v-for="tool in item.tools" :key="tool.id" class="chat-tool" :data-tool-id="tool.id"><summary><span :class="['tool-indicator',tool.status]">{{ tool.status==='completed'?'✓':tool.status==='failed'?'!':tool.ended?'–':'↻' }}</span><strong>{{ tool.name }}<template v-if="tool.label"> · {{ tool.label }}</template></strong><small>{{ tool.activity && tool.status==='running' ? lastLine(tool.activity) : t(tool.status==='running'?(running&&!tool.ended?'Working…':'Session ended'):tool.status==='failed'?'Failed':'Completed') }}</small><span v-if="tool.stats" class="chat-tool-stats">{{ statsLine(tool.stats) }}</span><span v-else-if="sizeWorthShowing(tool)" class="chat-tool-stats" :title="t('Its result added about {count} tokens to the context', { count: tool.result_tokens! })">≈ {{ t('{count} tokens', { count: compactCount(tool.result_tokens!) }) }}</span><em v-if="quietLine(tool)" class="chat-tool-stalled">{{ quietLine(tool) }}</em><Icon class="chat-tool-chevron" name="chevron" :size="14" /></summary><pre v-if="tool.activity" class="tool-activity">{{ tool.activity }}</pre><div v-if="tool.children?.length" class="chat-tool-children"><details v-for="entry in descendants(tool)" :key="entry.tool.id" class="chat-tool-nested" :style="{'--depth':entry.depth}" :data-tool-id="entry.tool.id"><summary><span :class="['tool-indicator',entry.tool.status]">{{ entry.tool.status==='completed'?'✓':entry.tool.status==='failed'?'!':entry.tool.ended?'–':'↻' }}</span><strong>{{ entry.tool.name }}<template v-if="entry.tool.label"> · {{ entry.tool.label }}</template></strong><small>{{ entry.tool.activity && entry.tool.status==='running' ? lastLine(entry.tool.activity) : t(entry.tool.status==='running'?(running&&!entry.tool.ended?'Working…':'Session ended'):entry.tool.status==='failed'?'Failed':'Completed') }}</small><span v-if="entry.tool.stats" class="chat-tool-stats">{{ statsLine(entry.tool.stats) }}</span><span v-else-if="sizeWorthShowing(entry.tool)" class="chat-tool-stats" :title="t('Its result added about {count} tokens to the context', { count: entry.tool.result_tokens! })">≈ {{ t('{count} tokens', { count: compactCount(entry.tool.result_tokens!) }) }}</span><em v-if="quietLine(entry.tool)" class="chat-tool-stalled">{{ quietLine(entry.tool) }}</em></summary><pre v-if="entry.tool.activity" class="tool-activity">{{ entry.tool.activity }}</pre><pre v-if="entry.tool.text">{{ entry.tool.text }}</pre></details></div><pre v-if="tool.text">{{ tool.text }}</pre><p v-else-if="!tool.activity&&!tool.children?.length">{{ t('The client did not provide tool output.') }}</p></details></component>
+        <component :is="item.type==='tool_run'&&item.tools.length>1?'details':'div'" v-else-if="item.type==='tool_run'" :class="item.tools.length>1?['chat-tool-run',toolRunStatus(item)]:'chat-tool-solo'"><summary v-if="item.tools.length>1"><span :class="['tool-indicator',toolRunStatus(item)]">{{ toolIndicator({ status: toolRunStatus(item) }) }}</span><strong>{{ t('{count} tool calls',{count:item.tools.length}) }}</strong><small>{{ toolRunStatus(item)==='running' ? runningLine(item) : toolRunNames(item) }}</small><Icon class="chat-tool-chevron" name="chevron" :size="14" /></summary><details v-for="tool in item.tools" :key="tool.id" class="chat-tool" :data-tool-id="tool.id"><summary><span :class="['tool-indicator',tool.status]">{{ toolIndicator(tool) }}</span><strong>{{ tool.name }}<template v-if="tool.label"> · {{ tool.label }}</template></strong><small>{{ tool.activity && tool.status==='running' ? lastLine(tool.activity) : t(tool.status==='running'?(running&&!tool.ended?'Working…':'Session ended'):tool.status==='failed'?'Failed':'Completed') }}</small><span v-if="tool.stats" class="chat-tool-stats">{{ statsLine(tool.stats) }}</span><span v-else-if="sizeWorthShowing(tool)" class="chat-tool-stats" :title="t('Its result added about {count} tokens to the context', { count: tool.result_tokens! })">≈ {{ t('{count} tokens', { count: compactCount(tool.result_tokens!) }) }}</span><em v-if="quietLine(tool)" class="chat-tool-stalled">{{ quietLine(tool) }}</em><Icon class="chat-tool-chevron" name="chevron" :size="14" /></summary><pre v-if="tool.activity" class="tool-activity">{{ tool.activity }}</pre><div v-if="tool.children?.length" class="chat-tool-children"><details v-for="entry in descendants(tool)" :key="entry.tool.id" class="chat-tool-nested" :style="{'--depth':entry.depth}" :data-tool-id="entry.tool.id"><summary><span :class="['tool-indicator',entry.tool.status]">{{ toolIndicator(entry.tool) }}</span><strong>{{ entry.tool.name }}<template v-if="entry.tool.label"> · {{ entry.tool.label }}</template></strong><small>{{ entry.tool.activity && entry.tool.status==='running' ? lastLine(entry.tool.activity) : t(entry.tool.status==='running'?(running&&!entry.tool.ended?'Working…':'Session ended'):entry.tool.status==='failed'?'Failed':'Completed') }}</small><span v-if="entry.tool.stats" class="chat-tool-stats">{{ statsLine(entry.tool.stats) }}</span><span v-else-if="sizeWorthShowing(entry.tool)" class="chat-tool-stats" :title="t('Its result added about {count} tokens to the context', { count: entry.tool.result_tokens! })">≈ {{ t('{count} tokens', { count: compactCount(entry.tool.result_tokens!) }) }}</span><em v-if="quietLine(entry.tool)" class="chat-tool-stalled">{{ quietLine(entry.tool) }}</em></summary><pre v-if="entry.tool.activity" class="tool-activity">{{ entry.tool.activity }}</pre><pre v-if="entry.tool.text">{{ entry.tool.text }}</pre></details></div><pre v-if="tool.text">{{ tool.text }}</pre><p v-else-if="!tool.activity&&!tool.children?.length">{{ t('The client did not provide tool output.') }}</p></details></component>
         <p v-else-if="item.type==='approval'" :class="['chat-approval-record',{pending:!item.resolved}]"><Icon :name="item.resolved?'check':'shield'" :size="13"/><span>{{ item.title }}</span><small>{{ t(item.resolved?'Resolved':'Waiting for you below') }}</small></p>
         <div v-else-if="item.type==='configuration'" class="chat-boundary"><span>{{ t('New native context') }} · {{ item.profile_name }}</span><p>{{ t(item.text) }}</p></div>
         <p v-else-if="item.type==='error'" class="chat-alert" role="alert">{{ item.text }}</p>
@@ -1332,7 +1042,7 @@ function keydown(event: KeyboardEvent) {
       <p v-if="draft.pending" class="chat-delivery" role="status">{{ t(draft.notice??(draft.pending.state==='sending'?'Sending your message…':'Waiting for delivery confirmation.')) }}<button v-if="draft.pending.state==='unknown'" class="chat-link" @click="load()">{{ t('Refresh conversation') }}</button><button v-if="draft.pending.state==='unknown'&&!isPreview" class="chat-link" :disabled="loading||actionBusy||streamState!=='connected'" @click="retryDelivery">{{ t('Retry the same message request') }}</button></p>
       <div v-if="supported&&!loading&&mode!=='structured'" class="chat-native-note"><p>{{ t(running?'This session is running in the native client. End it there before enabling chat; it will not be taken over automatically.':'Enable chat explicitly to continue this native session in a conversation view.') }}</p><button class="chat-primary" :disabled="isPreview||actionBusy||running" @click="explicitOpen">{{ t('Enable conversation view') }}</button><button v-if="legacyAvailable" class="chat-link" @click="emit('legacy')">{{ t('Open native client view') }}</button></div>
     </div>
-    <section v-if="dockAgents.length" ref="dock" :class="['subagent-dock',{collapsed:!dockOpen}]" :aria-label="t('Subagents')"><header><button type="button" class="subagent-dock-head" :aria-expanded="dockOpen" @click="dockOpen=!dockOpen"><span :class="['subagent-dock-dot',{idle:!dockRunning}]" /><strong>{{ dockHeading }}</strong><small v-if="!dockOpen&&dockAgents[0]!.activity">{{ lastLine(dockAgents[0]!.activity!) }}</small><Icon class="subagent-dock-chevron" name="chevron" :size="14" /></button><button v-if="dockAgents.some(agent=>agent.status!=='running')" type="button" class="subagent-dock-clear" @click="clearFinished">{{ t('Clear finished') }}</button></header><ul v-if="dockOpen"><li v-for="agent in dockAgents" :key="agent.id" :class="['subagent-item',agent.status,{open:expandedAgent===agent.id}]"><div class="subagent-row"><button type="button" class="subagent-toggle" :aria-expanded="expandedAgent===agent.id" @click="expandedAgent=expandedAgent===agent.id?null:agent.id"><span :class="['tool-indicator',agent.status]">{{ agent.status==='completed'?'✓':agent.status==='failed'?'!':agent.ended?'–':'↻' }}</span><strong><Icon v-if="!SUBAGENT_TOOLS.has(agent.name)" class="subagent-kind" name="terminal" :size="12" />{{ agent.label || agent.name }}</strong><small>{{ agent.activity ? lastLine(agent.activity) : t(agent.status==='running'?'Working…':agent.status==='failed'?'Failed':'Completed') }}</small><span v-if="agent.stats" class="chat-tool-stats">{{ statsLine(agent.stats) }}</span><em v-if="quietLine(agent)" class="chat-tool-stalled">{{ quietLine(agent) }}</em><Icon class="subagent-chevron" name="chevron" :size="14" /></button><button v-if="agent.status!=='running'" type="button" class="subagent-dismiss" :aria-label="t('Dismiss')" :title="t('Dismiss')" @click="dismissAgent(agent.id)">×</button></div><div v-if="expandedAgent===agent.id" class="subagent-preview"><pre v-if="agent.activity" class="tool-activity subagent-log" @scroll="logScrolled">{{ agent.activity }}</pre><div v-if="agent.children?.length" class="chat-tool-children"><details v-for="entry in descendants(agent)" :key="entry.tool.id" class="chat-tool-nested" :style="{'--depth':entry.depth}"><summary><span :class="['tool-indicator',entry.tool.status]">{{ entry.tool.status==='completed'?'✓':entry.tool.status==='failed'?'!':entry.tool.ended?'–':'↻' }}</span><strong>{{ entry.tool.name }}<template v-if="entry.tool.label"> · {{ entry.tool.label }}</template></strong><small>{{ entry.tool.activity && entry.tool.status==='running' ? lastLine(entry.tool.activity) : t(entry.tool.status==='running'?(entry.tool.ended?'Session ended':'Working…'):entry.tool.status==='failed'?'Failed':'Completed') }}</small><span v-if="entry.tool.stats" class="chat-tool-stats">{{ statsLine(entry.tool.stats) }}</span></summary><pre v-if="entry.tool.activity" class="tool-activity">{{ entry.tool.activity }}</pre><pre v-if="entry.tool.text">{{ entry.tool.text }}</pre></details></div><template v-if="!agent.activity&&!agent.children?.length"><pre v-if="agent.text" class="subagent-log">{{ agent.text }}</pre><p v-else class="subagent-empty">{{ t('Nothing reported yet.') }}</p></template></div></li></ul></section>
+    <section v-if="dockAgents.length" ref="dock" :class="['subagent-dock',{collapsed:!dockOpen}]" :aria-label="t('Subagents')"><header><button type="button" class="subagent-dock-head" :aria-expanded="dockOpen" @click="dockOpen=!dockOpen"><span :class="['subagent-dock-dot',{idle:!dockRunning}]" /><strong>{{ dockHeading }}</strong><small v-if="!dockOpen&&dockAgents[0]!.activity">{{ lastLine(dockAgents[0]!.activity!) }}</small><Icon class="subagent-dock-chevron" name="chevron" :size="14" /></button><button v-if="dockAgents.some(agent=>agent.status!=='running')" type="button" class="subagent-dock-clear" @click="clearFinished">{{ t('Clear finished') }}</button></header><ul v-if="dockOpen"><li v-for="agent in dockAgents" :key="agent.id" :class="['subagent-item',agent.status,{open:expandedAgent===agent.id}]"><div class="subagent-row"><button type="button" class="subagent-toggle" :aria-expanded="expandedAgent===agent.id" @click="expandedAgent=expandedAgent===agent.id?null:agent.id"><span :class="['tool-indicator',agent.status]">{{ toolIndicator(agent) }}</span><strong><Icon v-if="!SUBAGENT_TOOLS.has(agent.name)" class="subagent-kind" name="terminal" :size="12" />{{ agent.label || agent.name }}</strong><small>{{ agent.activity ? lastLine(agent.activity) : t(agent.status==='running'?'Working…':agent.status==='failed'?'Failed':'Completed') }}</small><span v-if="agent.stats" class="chat-tool-stats">{{ statsLine(agent.stats) }}</span><em v-if="quietLine(agent)" class="chat-tool-stalled">{{ quietLine(agent) }}</em><Icon class="subagent-chevron" name="chevron" :size="14" /></button><button v-if="agent.status!=='running'" type="button" class="subagent-dismiss" :aria-label="t('Dismiss')" :title="t('Dismiss')" @click="dismissAgent(agent.id)">×</button></div><div v-if="expandedAgent===agent.id" class="subagent-preview"><pre v-if="agent.activity" class="tool-activity subagent-log" @scroll="logScrolled">{{ agent.activity }}</pre><div v-if="agent.children?.length" class="chat-tool-children"><details v-for="entry in descendants(agent)" :key="entry.tool.id" class="chat-tool-nested" :style="{'--depth':entry.depth}"><summary><span :class="['tool-indicator',entry.tool.status]">{{ toolIndicator(entry.tool) }}</span><strong>{{ entry.tool.name }}<template v-if="entry.tool.label"> · {{ entry.tool.label }}</template></strong><small>{{ entry.tool.activity && entry.tool.status==='running' ? lastLine(entry.tool.activity) : t(entry.tool.status==='running'?(entry.tool.ended?'Session ended':'Working…'):entry.tool.status==='failed'?'Failed':'Completed') }}</small><span v-if="entry.tool.stats" class="chat-tool-stats">{{ statsLine(entry.tool.stats) }}</span></summary><pre v-if="entry.tool.activity" class="tool-activity">{{ entry.tool.activity }}</pre><pre v-if="entry.tool.text">{{ entry.tool.text }}</pre></details></div><template v-if="!agent.activity&&!agent.children?.length"><pre v-if="agent.text" class="subagent-log">{{ agent.text }}</pre><p v-else class="subagent-empty">{{ t('Nothing reported yet.') }}</p></template></div></li></ul></section>
     <button v-if="!followBottom" class="chat-latest" @click="scrollToLatest(true)">↓ {{ t('Latest message') }}</button>
     <BottomSheet v-if="mobile && optionsOpen" :title="t('Session settings')" @opened="chipsInSheet=true" @close="optionsClosed"><div v-if="error" class="chat-alert chat-options-alert" role="alert">{{ error }}</div><div v-else-if="notice" class="chat-notice chat-options-alert" role="status">{{ t(notice) }}</div><div :id="optionsTarget" class="chat-options-body" /></BottomSheet>
     <section v-if="dockedApproval" class="chat-approval-dock" :aria-label="t('Waiting for you')">
@@ -1352,7 +1062,7 @@ function keydown(event: KeyboardEvent) {
       <div v-if="queued.length" class="chat-queue" role="list" :aria-label="t('Queued messages')"><div v-for="(item,index) in queued" :key="item.id" class="chat-queued" role="listitem"><span class="chat-queued-mark">{{ index===0 ? t('Next') : index+1 }}</span><p :title="item.text">{{ item.text.trim() || item.attachments?.map(file=>file.name).join(', ') }}<small v-if="item.text.trim()&&item.attachments?.length" class="chat-queued-files"> · {{ t('{count} attached', { count: item.attachments.length }) }}</small></p><button v-if="view.turn==='running'" type="button" :title="t('Hand this to the running turn; the agent reads it at its next step')" :disabled="steering" @click="steerQueued(item.id)">{{ t('Steer') }}</button><button type="button" :title="t('Interrupt the agent and send this now')" @click="sendQueuedNow(item.id)">{{ t('Send now') }}</button><button type="button" :title="t('Move back into the message box')" @click="editQueued(item.id)">{{ t('Edit') }}</button><button type="button" class="chat-queued-remove" :aria-label="t('Remove from queue')" @click="messageQueue.remove(session.id,item.id)">×</button></div><small>{{ t('Sent in order when the agent finishes.') }}</small></div>
       <textarea ref="composerInput" v-model="draft.text" :aria-label="t('Message your agent')" :placeholder="booting?t('{provider} is starting — you can already type…',{provider:providerLabel(session.provider)}):view.turn==='running'?t(mobile?'Steer the agent…':'Agent is working — Enter steers it, ⌥/Alt+Enter queues for after'):mobile?t('Message {provider}…',{provider:providerLabel(session.provider)}):t('Ask your agent to build, explore, or fix something…')" rows="2" :disabled="!supported||!structuredSession||!!draft.pending" @focus="wake" @paste="pasteFiles" @dragover.prevent @drop="dropFiles" @compositionstart="composing=true" @compositionend="composing=false" @keydown="keydown" @keyup="syncCaret" @click="syncCaret" @input="syncCaret" />
       <ul v-if="attachments.length" class="chat-attachments" :aria-label="t('Attached files')"><li v-for="file in attachments" :key="file.path"><Icon name="file" :size="13"/><span class="chat-attachment-name" :title="file.path">{{ file.name }}</span><small>{{ formatBytes(file.bytes) }}</small><button type="button" :aria-label="t('Remove {name}',{name:file.name})" @click="removeAttachment(file.path)"><Icon name="close" :size="12"/></button></li></ul>
-      <div class="chat-composer-controls"><input ref="fileInput" class="sr-only" type="file" multiple :disabled="isPreview||uploading" @change="pickAttachments"/><button type="button" class="chat-attach" :aria-label="t(uploading?'Uploading…':'Attach files')" :title="t('Attach files to this workspace')" :disabled="isPreview||uploading||!supported" @click="fileInput?.click()"><Icon name="plus" :size="18"/></button><button v-if="mobile" type="button" :class="['chat-options', { danger: permissionDanger }]" :aria-label="t('Session settings')" @click="optionsOpen=true"><Icon name="settings" :size="17"/><span>{{ optionsSummary }}</span><Icon v-if="permissionDanger" class="chat-options-danger" name="shield" :size="14" :title="t('Tools run without asking')" /><Icon name="chevron" :size="12" class="chat-options-caret"/></button><Teleport :to="chipsInSheet ? '#'+optionsTarget : 'body'" :disabled="!chipsInSheet"><div :class="['chat-chip-strip', { 'chip-rows': chipsInSheet }]"><ChipMenu v-if="repoState" ref="branchMenu" class="chat-branch" :caption="t('Branch')" :label="sessionBranch || t('Detached HEAD')" :active="!!session.checkout_path" :disabled="actionBusy||turnBusy" :title="session.checkout_path ? t('Works in worktree {path}', { path: session.checkout_path }) : t('Works in the workspace directory')"><template #mark><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M5 3v7M5 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm0-7a2 2 0 1 0 0-.01M11 5a2 2 0 1 0 0-.01M11 7c0 2-2 3-6 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></template><div class="chat-branch-body"><header>{{ t('Branch for this session') }}</header><p>{{ t('Moves only this session, into that branch\'s own worktree. Other sessions keep their branches.') }}</p><nav><button v-for="name in branchChoices" :key="name" type="button" :class="{selected:name===sessionBranch}" @click="pickBranch(name)"><span>{{ name }}</span><small v-if="name===sessionBranch">{{ t('Current') }}</small><small v-else-if="name===repoState.current">{{ t('Workspace directory') }}</small></button></nav><form @submit.prevent="pickBranch(branchTarget)"><input v-model="branchTarget" :placeholder="t('New branch name')" maxlength="200" spellcheck="false" autocomplete="off" /><button type="submit" :disabled="!branchTarget.trim()">{{ t('Create') }}</button></form></div></ChipMenu><ChipMenu ref="endpointMenu" class="chat-endpoint" :caption="t('Endpoint profile')" :label="endpointName" :disabled="!canOpenEndpoint" :title="t('Endpoint profile')"><template #mark><ProviderIcon :provider="session.provider" :size="14"/></template><nav :aria-label="t('Endpoint profile')"><p v-if="!canConfigure" class="chat-menu-note">{{ t('Wait for the current turn and approvals before changing endpoints.') }}</p><button type="button" :class="{selected:selectedProfile===''}" :disabled="!canConfigure" @click="pickEndpoint('')"><strong>{{ t('Native · isolated configuration') }}</strong><small>{{ t('A fresh, empty client home: no host sign-in or settings, so it may ask you to log in.') }}</small></button><button v-for="profile in matchingProfiles" :key="profile.id" type="button" :class="{selected:selectedProfile===profile.id}" :disabled="!canConfigure" @click="pickEndpoint(profile.id)"><strong>{{ profile.name }}</strong><small>{{ profileNote(profile) }}</small></button><button v-if="session.endpoint_profile_id&&!matchingProfiles.some(p=>p.id===session.endpoint_profile_id)" type="button" class="selected" disabled>{{ endpointName }}</button><template v-if="handoffChoices.length"><p class="chat-menu-section">{{ t('Switch to another client') }}<small>{{ t('Opens a new session with this conversation in its message box; this one stays as it is.') }}</small></p><button v-for="choice in handoffChoices" :key="choice.provider+':'+(choice.profileId??'')" type="button" class="chat-handoff-choice" @click="pickHandoff(choice)"><strong><ProviderIcon :provider="choice.provider" :size="12"/>{{ providerLabel(choice.provider) }} · {{ choice.name }}</strong><small>{{ choice.note }}</small></button></template><button type="button" class="chat-endpoint-manage" @click="endpointMenu?.close(true); emit('profiles')"><Icon name="account" :size="13" />{{ t('Manage endpoint profiles') }}</button></nav></ChipMenu><span v-if="booting" class="chat-boot-chip" role="status"><ProviderIcon class="chat-working-mark" :provider="session.provider" :size="12"/>{{ t('Starting…') }}</span><ChipMenu v-if="canTuneModel&&(models.length||currentModel)" ref="modelMenu" class="chat-model" :caption="t('Model')" :label="modelName" :active="!modelDefault" :disabled="!canPickModel" :title="canPickModel?t('Model'):t('Model: {model}',{model:modelName})"><template #mark><Icon name="spark" :size="12"/></template><nav :aria-label="t('Model')"><button v-for="entry in visibleModels" :key="entry.id" type="button" :class="{selected:entry.id===currentModel}" @click="pickModel(entry.id)"><strong>{{ entry.name }}</strong><code v-if="entry.id.toLocaleLowerCase()!==entry.name.toLocaleLowerCase()" class="chat-model-id">{{ entry.id }}</code><small v-if="entry.description">{{ describeModel(entry.description, t) }}</small></button><button v-if="customPicked&&!models.some(entry=>entry.id===customPicked)" type="button" :class="{selected:customPicked===currentModel}" @click="pickModel(customPicked)"><strong>{{ customPicked }}</strong><small>{{ t('Entered by hand') }}</small></button></nav><div class="chat-model-custom"><input v-model="customModel" type="text" autocomplete="off" spellcheck="false" maxlength="128" :placeholder="t('Find a model, or enter an ID')" :aria-label="t('Other model ID')" @keydown.enter.prevent.stop="pickCustomModel"/><button type="button" :disabled="!customModel.trim()" @click="pickCustomModel">{{ t('Use') }}</button></div><p class="chat-model-hint">{{ t(profileCatalog.length ? 'From the {provider} client on the host and from this endpoint. Type to find a model, or enter an ID.' : 'This list comes from the {provider} client on the host. Upgrade it there to see newer models, or enter an ID.',{provider:providerLabel(session.provider)}) }}</p></ChipMenu><ChipMenu v-if="effortChoices.length" class="chat-effort" :caption="t('Thinking depth')" :class="{vivid:effortVivid}" :label="effortName" :active="!!liveEffort" :disabled="!canConfigure" :title="canConfigure?t('Thinking depth'):t('Wait for the current turn and approvals to finish before changing this.')"><template #mark><Icon :name="effortVivid?'spark':'gauge'" :size="12"/></template><div class="chat-effort-body"><p v-if="manualEffort" class="chat-effort-note">{{ t('Actual effort support depends on the endpoint and model.') }}</p><header><strong>{{ t('Thinking depth') }}</strong><em>{{ effortSetting }}</em></header><div class="chat-effort-slider" :style="{'--effort-fill':effortFill}"><span class="chat-effort-track"><i v-for="(stop,index) in effortStops" :key="stop||'default'" :style="{left:effortStops.length<2?'50%':index/(effortStops.length-1)*100+'%'}"/></span><span class="chat-effort-fill"/><span class="chat-effort-thumb"/><input type="range" min="0" :max="effortStops.length-1" step="1" :value="effortIndex" :disabled="!canPickModel" :aria-label="t('Thinking depth')" :aria-valuetext="effortName" @input="dragEffort" @change="commitEffort"/></div><footer><span>{{ t('Faster') }}</span><span>{{ t('Smarter') }}</span></footer></div></ChipMenu><ChipMenu v-if="permissionChoices.length" ref="permissionMenu" class="chat-permission" :caption="t('How tools are approved')" :class="{danger:permissionDanger}" :label="permissionName" :tone="permissionDanger?'danger':undefined" :disabled="!canConfigure" :title="canConfigure?t('How tools are approved'):t('Wait for the current turn and approvals to finish before changing this.')"><template #mark><Icon name="shield" :size="12"/></template><div class="chat-permission-body"><header>{{ t('How tools are approved') }}</header><nav :aria-label="t('How tools are approved')"><button v-for="mode in permissionChoices" :key="mode" type="button" :class="{selected:mode===livePermission,danger:mode==='danger'}" @click="pickPermission(mode)"><span><strong>{{ t(PERMISSION_LABELS[mode] ?? mode) }}</strong><Icon v-if="mode===livePermission" name="check" :size="13"/></span><small v-if="PERMISSION_NOTES[mode]">{{ t(PERMISSION_NOTES[mode]) }}</small></button></nav></div></ChipMenu></div></Teleport><template v-if="view.turn==='running'&&canQueue"><button type="button" class="chat-send chat-steer-send" :aria-label="t('Steer the running turn')" :title="t('Steer the running turn (Enter)')" :disabled="steering" @click="steerDraft">↪</button><ChipMenu ref="steerMenu" class="chat-steer-more" :label="''" :title="t('Other ways to send')"><nav :aria-label="t('Other ways to send')"><button type="button" @click="steerMenu?.close(true);steerDraft()"><strong>{{ t('Steer') }}</strong><small>{{ t('The agent reads it at its next step, without stopping. Enter') }}</small></button><button type="button" @click="steerMenu?.close(true);queueDraft()"><strong>{{ t('After this turn') }}</strong><small>{{ t('Sent as its own turn when this one ends. ⌥/Alt+Enter') }}</small></button><button type="button" class="danger" @click="interruptWithDraft"><strong>{{ t('Interrupt and send') }}</strong><small>{{ t('Stops the current turn; its unfinished work stops too.') }}</small></button></nav></ChipMenu></template><button v-if="view.turn==='running'" type="button" class="chat-send chat-stop" :aria-label="t('Cancel turn')" :disabled="isPreview||actionBusy" @click="interrupt">■</button><button v-else class="chat-send" type="submit" :aria-label="t('Send message')" :disabled="!canSend">↑</button></div>
+      <div class="chat-composer-controls"><input ref="fileInput" class="sr-only" type="file" multiple :disabled="isPreview||uploading" @change="pickAttachments"/><button type="button" class="chat-attach" :aria-label="t(uploading?'Uploading…':'Attach files')" :title="t('Attach files to this workspace')" :disabled="isPreview||uploading||!supported" @click="fileInput?.click()"><Icon name="plus" :size="18"/></button><button v-if="mobile" type="button" :class="['chat-options', { danger: permissionDanger }]" :aria-label="t('Session settings')" @click="optionsOpen=true"><Icon name="settings" :size="17"/><span>{{ optionsSummary }}</span><Icon v-if="permissionDanger" class="chat-options-danger" name="shield" :size="14" :title="t('Tools run without asking')" /><Icon name="chevron" :size="12" class="chat-options-caret"/></button><Teleport :to="chipsInSheet ? '#'+optionsTarget : 'body'" :disabled="!chipsInSheet"><div :class="['chat-chip-strip', { 'chip-rows': chipsInSheet }]"><ChipMenu v-if="repoState" ref="branchMenu" class="chat-branch" :caption="t('Branch')" :label="sessionBranch || t('Detached HEAD')" :active="!!session.checkout_path" :disabled="actionBusy||turnBusy" :title="session.checkout_path ? t('Works in worktree {path}', { path: session.checkout_path }) : t('Works in the workspace directory')"><template #mark><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M5 3v7M5 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm0-7a2 2 0 1 0 0-.01M11 5a2 2 0 1 0 0-.01M11 7c0 2-2 3-6 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></template><div class="chat-branch-body"><header>{{ t('Branch for this session') }}</header><p>{{ t('Moves only this session, into that branch\'s own worktree. Other sessions keep their branches.') }}</p><nav><button v-for="name in branchChoices" :key="name" type="button" :class="{selected:name===sessionBranch}" @click="pickBranch(name)"><span>{{ name }}</span><small v-if="name===sessionBranch">{{ t('Current') }}</small><small v-else-if="name===repoState.current">{{ t('Workspace directory') }}</small></button></nav><form @submit.prevent="pickBranch(branchTarget)"><input v-model="branchTarget" :placeholder="t('New branch name')" maxlength="200" spellcheck="false" autocomplete="off" /><button type="submit" :disabled="!branchTarget.trim()">{{ t('Create') }}</button></form></div></ChipMenu><ChipMenu ref="endpointMenu" class="chat-endpoint" :caption="t('Endpoint profile')" :label="endpointName" :disabled="!canOpenEndpoint" :title="t('Endpoint profile')"><template #mark><ProviderIcon :provider="session.provider" :size="14"/></template><template #badge><BalanceBadge v-if="!isPreview" :profile-id="session.endpoint_profile_id" compact/></template><nav :aria-label="t('Endpoint profile')"><p v-if="!canConfigure" class="chat-menu-note">{{ t('Wait for the current turn and approvals before changing endpoints.') }}</p><button type="button" :class="{selected:selectedProfile===''}" :disabled="!canConfigure" @click="pickEndpoint('')"><strong>{{ t('Native · isolated configuration') }}</strong><small>{{ t('A fresh, empty client home: no host sign-in or settings, so it may ask you to log in.') }}</small></button><button v-for="profile in matchingProfiles" :key="profile.id" type="button" :class="{selected:selectedProfile===profile.id}" :disabled="!canConfigure" @click="pickEndpoint(profile.id)"><strong><span>{{ profile.name }}</span><BalanceBadge :profile-id="profile.id"/></strong><small>{{ profileNote(profile, t) }}</small></button><button v-if="session.endpoint_profile_id&&!matchingProfiles.some(p=>p.id===session.endpoint_profile_id)" type="button" class="selected" disabled>{{ endpointName }}</button><template v-if="handoffChoices.length"><p class="chat-menu-section">{{ t('Switch to another client') }}<small>{{ t('Opens a new session with this conversation in its message box; this one stays as it is.') }}</small></p><button v-for="choice in handoffChoices" :key="choice.provider+':'+(choice.profileId??'')" type="button" class="chat-handoff-choice" @click="pickHandoff(choice)"><strong><ProviderIcon :provider="choice.provider" :size="12"/>{{ providerLabel(choice.provider) }} · {{ choice.name }}</strong><small>{{ choice.note }}</small></button></template><button v-if="!isPreview&&balanceFor(session.endpoint_profile_id)" type="button" class="chat-endpoint-manage" :disabled="balances.busy.includes(session.endpoint_profile_id!)" @click="refreshBalance(session.endpoint_profile_id!)"><Icon name="refresh" :size="13" />{{ t(balances.busy.includes(session.endpoint_profile_id!)?'Querying balance…':'Query this endpoint\'s balance again') }}</button><button type="button" class="chat-endpoint-manage" @click="endpointMenu?.close(true); emit('profiles')"><Icon name="account" :size="13" />{{ t('Manage endpoint profiles') }}</button></nav></ChipMenu><span v-if="booting" class="chat-boot-chip" role="status"><ProviderIcon class="chat-working-mark" :provider="session.provider" :size="12"/>{{ t('Starting…') }}</span><ChipMenu v-if="canTuneModel&&(models.length||currentModel)" ref="modelMenu" class="chat-model" :caption="t('Model')" :label="modelName" :active="!modelDefault" :disabled="!canPickModel" :title="canPickModel?t('Model'):t('Model: {model}',{model:modelName})"><template #mark><Icon name="spark" :size="12"/></template><nav :aria-label="t('Model')"><button v-for="entry in visibleModels" :key="entry.id" type="button" :class="{selected:entry.id===currentModel}" @click="pickModel(entry.id)"><strong>{{ entry.name }}</strong><code v-if="entry.id.toLocaleLowerCase()!==entry.name.toLocaleLowerCase()" class="chat-model-id">{{ entry.id }}</code><small v-if="entry.description">{{ describeModel(entry.description, t) }}</small></button><button v-if="customPicked&&!models.some(entry=>entry.id===customPicked)" type="button" :class="{selected:customPicked===currentModel}" @click="pickModel(customPicked)"><strong>{{ customPicked }}</strong><small>{{ t('Entered by hand') }}</small></button></nav><div class="chat-model-custom"><input v-model="customModel" type="text" autocomplete="off" spellcheck="false" maxlength="128" :placeholder="t('Find a model, or enter an ID')" :aria-label="t('Other model ID')" @keydown.enter.prevent.stop="pickCustomModel"/><button type="button" :disabled="!customModel.trim()" @click="pickCustomModel">{{ t('Use') }}</button></div><p class="chat-model-hint">{{ t(profileCatalog.length ? 'From the {provider} client on the host and from this endpoint. Type to find a model, or enter an ID.' : 'This list comes from the {provider} client on the host. Upgrade it there to see newer models, or enter an ID.',{provider:providerLabel(session.provider)}) }}</p></ChipMenu><ChipMenu v-if="effortChoices.length" class="chat-effort" :caption="t('Thinking depth')" :class="{vivid:effortVivid}" :label="effortName" :active="!!liveEffort" :disabled="!canConfigure" :title="canConfigure?t('Thinking depth'):t('Wait for the current turn and approvals to finish before changing this.')"><template #mark><Icon :name="effortVivid?'spark':'gauge'" :size="12"/></template><div class="chat-effort-body"><p v-if="manualEffort" class="chat-effort-note">{{ t('Actual effort support depends on the endpoint and model.') }}</p><header><strong>{{ t('Thinking depth') }}</strong><em>{{ effortSetting }}</em></header><div class="chat-effort-slider" :style="{'--effort-fill':effortFill}"><span class="chat-effort-track"><i v-for="(stop,index) in effortStops" :key="stop||'default'" :style="{left:effortStops.length<2?'50%':index/(effortStops.length-1)*100+'%'}"/></span><span class="chat-effort-fill"/><span class="chat-effort-thumb"/><input type="range" min="0" :max="effortStops.length-1" step="1" :value="effortIndex" :disabled="!canPickModel" :aria-label="t('Thinking depth')" :aria-valuetext="effortName" @input="dragEffort" @change="commitEffort"/></div><footer><span>{{ t('Faster') }}</span><span>{{ t('Smarter') }}</span></footer></div></ChipMenu><ChipMenu v-if="permissionChoices.length" ref="permissionMenu" class="chat-permission" :caption="t('How tools are approved')" :class="{danger:permissionDanger}" :label="permissionName" :tone="permissionDanger?'danger':undefined" :disabled="!canConfigure" :title="canConfigure?t('How tools are approved'):t('Wait for the current turn and approvals to finish before changing this.')"><template #mark><Icon name="shield" :size="12"/></template><div class="chat-permission-body"><header>{{ t('How tools are approved') }}</header><nav :aria-label="t('How tools are approved')"><button v-for="mode in permissionChoices" :key="mode" type="button" :class="{selected:mode===livePermission,danger:mode==='danger'}" @click="pickPermission(mode)"><span><strong>{{ t(PERMISSION_LABELS[mode] ?? mode) }}</strong><Icon v-if="mode===livePermission" name="check" :size="13"/></span><small v-if="PERMISSION_NOTES[mode]">{{ t(PERMISSION_NOTES[mode]) }}</small></button></nav></div></ChipMenu></div></Teleport><template v-if="view.turn==='running'&&canQueue"><button type="button" class="chat-send chat-steer-send" :aria-label="t('Steer the running turn')" :title="t('Steer the running turn (Enter)')" :disabled="steering" @click="steerDraft">↪</button><ChipMenu ref="steerMenu" class="chat-steer-more" :label="''" :title="t('Other ways to send')"><nav :aria-label="t('Other ways to send')"><button type="button" @click="steerMenu?.close(true);steerDraft()"><strong>{{ t('Steer') }}</strong><small>{{ t('The agent reads it at its next step, without stopping. Enter') }}</small></button><button type="button" @click="steerMenu?.close(true);queueDraft()"><strong>{{ t('After this turn') }}</strong><small>{{ t('Sent as its own turn when this one ends. ⌥/Alt+Enter') }}</small></button><button type="button" class="danger" @click="interruptWithDraft"><strong>{{ t('Interrupt and send') }}</strong><small>{{ t('Stops the current turn; its unfinished work stops too.') }}</small></button></nav></ChipMenu></template><button v-if="view.turn==='running'" type="button" class="chat-send chat-stop" :aria-label="t('Cancel turn')" :disabled="isPreview||actionBusy" @click="interrupt">■</button><button v-else class="chat-send" type="submit" :aria-label="t('Send message')" :disabled="!canSend">↑</button></div>
       <footer><span :title="t('Ctrl / ⌘ Enter also sends. Esc closes menus first; in the message box it cancels the active reply, not the session.')">{{ t(view.turn==='running' ? 'Enter steers · ⌥/Alt+Enter after this turn · Shift+Enter for a new line' : 'Enter to send · Shift+Enter for a new line · Esc to dismiss or cancel') }}</span><span class="chat-usage"><ContextRing :usage="ringUsage"/><span v-if="view.usage.context_window===undefined&&view.usage.context_tokens!==undefined">{{ t('{count} context tokens',{count:view.usage.context_tokens}) }}</span><span v-else-if="view.usage.context_window===undefined&&view.usage.input_tokens!==undefined">{{ t('{count} input tokens',{count:view.usage.input_tokens}) }}</span></span></footer>
     </form>
   </section>
@@ -1365,7 +1075,7 @@ function keydown(event: KeyboardEvent) {
 .chat-working{display:flex;align-items:center;gap:8px;color:var(--ink-soft);font-size:var(--text-sm);margin:12px auto;max-width:48rem;animation:chat-working-in var(--duration-normal) var(--ease-out)}@keyframes chat-working-in{from{opacity:0;transform:translateY(4px)}}.chat-working-mark{animation:chat-spin 2.6s cubic-bezier(.45,.05,.35,1) infinite;transform-origin:50% 50%;will-change:transform}.chat-working-label{background:linear-gradient(90deg,var(--muted) 0%,var(--ink) 45%,var(--muted) 100%) 0 0/200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:chat-text-shimmer 2.2s linear infinite}@keyframes chat-text-shimmer{to{background-position:-200% 0}}@keyframes chat-spin{0%{transform:rotate(0) scale(1);opacity:.75}24%{transform:rotate(155deg) scale(1.09);opacity:1}46%{transform:rotate(183deg) scale(1);opacity:.8}74%{transform:rotate(348deg) scale(1.06);opacity:1}100%{transform:rotate(360deg) scale(1);opacity:.75}}@keyframes chat-breathe{0%,100%{opacity:.6}50%{opacity:1}}.chat-pane.is-phone .chat-latest{align-self:flex-end;right:12px;min-height:36px;padding:6px 12px;font-size:var(--text-xs)}
 .chat-latest{position:absolute;bottom:180px;align-self:center;border:1px solid var(--line);background:var(--surface);color:var(--teal);box-shadow:var(--shadow-md);border-radius:30px;min-height:44px;padding:8px 14px;font-size:var(--text-sm)}.chat-composer{flex-shrink:0;width:calc(100% - 32px);max-width:48rem;margin:0 auto 12px;padding:12px 13px 7px;background:var(--glass-surface);backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);border:1px solid var(--line);border-radius:var(--radius-xl);box-shadow:var(--shadow-lg),inset 0 1px 0 var(--card-highlight);padding-bottom:max(7px,env(safe-area-inset-bottom));transition:border-color var(--duration-fast) var(--ease-out),box-shadow var(--duration-fast) var(--ease-out)}.chat-composer>textarea{display:block;width:100%;resize:vertical;min-height:66px;max-height:200px;border:0;background:none;box-shadow:none;outline:0;font-family:inherit;font-size:var(--text-base);line-height:1.7;color:var(--ink);padding:3px 3px 10px}.chat-composer>textarea::placeholder{color:var(--muted)}.chat-composer-controls{display:flex;align-items:center;gap:8px;min-width:0}/* The chips themselves are ChipMenu; what stays here is only what goes
    inside their panels. */
-.chat-endpoint{max-width:min(46%,216px)}
+.chat-endpoint{max-width:min(72%,320px)}.chat-endpoint>summary>.balance-badge{flex-shrink:0}.chat-endpoint:has(.balance-badge) :deep(.chip-menu-label){min-width:3em}
 .chat-model{max-width:min(34%,170px)}
 /* Wide enough for the line it holds, not for the chip it hangs from: these
    panels shrink-to-fit inside a chip barely a hundred pixels across, which is
@@ -1624,7 +1334,7 @@ function keydown(event: KeyboardEvent) {
 .chat-starter-icon[data-tone="check"]{background:var(--info-soft);--icon-color:#3b74b8}
 @keyframes chat-starter-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 .chat-endpoint nav button{white-space:normal}
-.chat-endpoint nav button strong{display:block;font-size:var(--text-sm);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chat-endpoint nav button strong{display:flex;align-items:baseline;gap:12px;font-size:var(--text-sm);font-weight:600;white-space:nowrap}.chat-endpoint nav button strong>span{min-width:0;overflow:hidden;text-overflow:ellipsis}.chat-endpoint nav button strong>.balance-badge{margin-left:auto}
 .chat-endpoint nav button small{display:block;margin-top:2px;font-size:var(--text-xs);line-height:1.5;color:var(--muted);font-weight:400;overflow-wrap:anywhere}
 @container(max-width:480px){.chat-starters{grid-template-columns:1fr}}
 @media(prefers-reduced-motion:reduce){.chat-welcome-mark,.chat-starters button{animation:none}}
@@ -1718,7 +1428,7 @@ function keydown(event: KeyboardEvent) {
 .chat-chip-strip::-webkit-scrollbar{display:none}
 .chat-chip-strip>*{flex:none}
 @container(max-width:480px){
-  .chat-chip-strip>*{max-width:150px!important}
+  .chat-chip-strip>*{max-width:150px!important}.chat-chip-strip>.chat-endpoint:has(.balance-badge){max-width:230px!important}
   .chat-composer footer{display:none}
   .chat-composer-controls>.chat-send{margin-left:0}
 }

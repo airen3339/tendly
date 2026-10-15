@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { occurrences, parseSearchResult, rowForHit, stepHit } from './conversation-search.ts';
+import { occurrences, parseSearchResult, rowForHit, searchCount, stepHit } from './conversation-search.ts';
 
 test('a search answer is read strictly', () => {
   assert.deepEqual(parseSearchResult({ hits: [{ seq: 3, kind: 'tool', id: 't', snippet: 'x' }], more: false }), { hits: [{ seq: 3, kind: 'tool', id: 't', snippet: 'x' }], more: false });
@@ -30,4 +30,15 @@ test('occurrences are found without regard to case, each once', () => {
   assert.deepEqual(occurrences('aaaa', 'aa'), [[0, 2], [2, 4]]);
   assert.deepEqual(occurrences('重试间隔', '试间'), [[1, 3]]);
   assert.deepEqual(occurrences('anything', '  '), []);
+});
+
+test('the search box says which match of how many, and when there are none', () => {
+  const t = text => `«${text}»`;
+  const state = { busy: false, query: 'retry', hits: 12, index: 2, more: false };
+  assert.equal(searchCount(state, t), '3 / 12');
+  assert.equal(searchCount({ ...state, more: true }, t), '3 / 12+', 'the server stopped counting');
+  assert.equal(searchCount({ ...state, index: -1 }, t), '0 / 12');
+  assert.equal(searchCount({ ...state, hits: 0 }, t), '«No matches»');
+  assert.equal(searchCount({ ...state, query: '  ' }, t), '', 'nothing asked, nothing said');
+  assert.equal(searchCount({ ...state, busy: true }, t), '…');
 });

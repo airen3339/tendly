@@ -40,3 +40,17 @@ export function ownStoredSecret(reference: string | null | undefined, stored: Se
   if (!name || !isStored(stored, name)) return undefined;
   return otherReferences.some(other => referencedSecret(other) === name) ? undefined : name;
 }
+
+/**
+ * Where a profile's key stands. `stored`: Tendly keeps the key the profile
+ * references. `adoptable`: the server sets that variable but Tendly has no
+ * copy, so it can be kept here. `shadowed`: Tendly keeps it, but the server
+ * also sets a variable of that name, which wins while it does.
+ */
+export function secretStatus(reference: string | null | undefined, entries: readonly SecretName[]): { stored?: string; adoptable?: string; shadowed: boolean } {
+  const name = referencedSecret(reference);
+  if (!name) return { shadowed: false };
+  const fromEnvironment = entries.some(entry => entry.name === name && entry.source === "environment");
+  if (isStored(entries, name)) return { stored: name, shadowed: fromEnvironment };
+  return fromEnvironment ? { adoptable: name, shadowed: false } : { shadowed: false };
+}

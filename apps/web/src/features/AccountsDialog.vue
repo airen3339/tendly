@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { AgentProviderKind, EndpointProfile, NativeHistorySource } from '@tendly/protocol';
-import { accountLimitPercent, quotaLevel, quotaShortTitle, accountLoginUrl, accountResetDate, accountSignInActions, accountStatusLabel, accountResetCreditState, canResetAccountQuota, quotaResetAttempts, quotaResetOutcomeNotice, usageRetryHint, QUOTA_RESET_STORAGE_WARNING, type AccountLimit, type AccountView } from './account-ui';
+import { accountLimitPercent, quotaLevel, quotaShortTitle, accountLoginUrl, accountResetDate, accountSignInActions, accountStatusLabel, accountResetCreditState, canResetAccountQuota, quotaResetAttempts, quotaResetOutcomeNotice, usageBackoffSeconds, usageRetryHint, QUOTA_RESET_STORAGE_WARNING, type AccountLimit, type AccountView } from './account-ui';
 import { backendCapabilities } from './backend-capabilities';
 import { ApiError, errorMessage, json, providerLabel, request } from './api';
 import ModalDialog from './ModalDialog.vue';
@@ -201,8 +201,8 @@ async function checkUsage() {
     // doubles the wait instead of retrying on a fixed interval.
     if (view.usage?.availability === 'rate_limited') {
       usageRefusals.value += 1;
-      beginUsageCooldown(Math.max(view.usage.retry_after_seconds || 0, Math.min(300 * 2 ** (usageRefusals.value - 1), 1800)));
-    } else { usageRefusals.value = 0; beginUsageCooldown(60); }
+      beginUsageCooldown(usageBackoffSeconds(usageRefusals.value, view.usage.retry_after_seconds));
+    } else { usageRefusals.value = 0; beginUsageCooldown(usageBackoffSeconds(0)); }
   } catch (cause) { if (!disposed) { error.value = errorMessage(cause); beginUsageCooldown(60); } }
   finally { if (!disposed) busy.value = ''; }
 }

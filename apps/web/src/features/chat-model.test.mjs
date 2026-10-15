@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import { acknowledgeReceipt } from './chat-model.ts';
 import assert from 'node:assert/strict';
-import { acknowledgeDraft, appendChatEvent, approvalPayloadAnswers, canClearContext, conversationView, createChatDraftStore, isChatEvent, markdownBlocks, markdownInline, parseConversationSnapshot, pendingMessageRetry, pruneChatEvents, safeWebUrl, sessionConfigurationPayload } from './chat-model.ts';
+import { acknowledgeDraft, appendChatEvent, approvalPayloadAnswers, canClearContext, conversationView, createChatDraftStore, isChatEvent, parseConversationSnapshot, pendingMessageRetry, pruneChatEvents, sessionConfigurationPayload } from './chat-model.ts';
+import { markdownBlocks, markdownInline, safeWebUrl } from './markdown-model.ts';
 
 const session = { id: 'session', provider: 'codex', status: 'stopped' };
 const profiles = [{ id: 'codex-work', provider: 'codex' }, { id: 'claude-work', provider: 'claude_code' }];
@@ -393,7 +394,7 @@ test('an unattended mode survives pruning, and an invented one never reaches the
 });
 
 test('images resolve inside the workspace only, relative to the file that names them', async () => {
-  const { markdownInline, workspaceImagePath, attachedImagePaths } = await import('./chat-model.ts');
+  const { markdownInline, workspaceImagePath, attachedImagePaths } = await import('./markdown-model.ts');
   assert.deepEqual(markdownInline('see ![shot](img/a.png) now')[1], { type: 'image', alt: 'shot', src: 'img/a.png' });
   assert.equal(markdownInline('![up](../shared/b.png)')[0].type, 'image');
   assert.equal(workspaceImagePath('img/a.png', 'docs'), 'docs/img/a.png');
@@ -408,7 +409,7 @@ test('images resolve inside the workspace only, relative to the file that names 
 });
 
 test('GFM tables become table blocks, with alignment, code pipes and ragged rows handled', async () => {
-  const { markdownBlocks } = await import('./chat-model.ts');
+  const { markdownBlocks } = await import('./markdown-model.ts');
   const blocks = markdownBlocks('Intro line\n| | Claude | Codex |\n|---|:---:|---:|\n| Start | `a | b` | `app-server` |\n| Short |\n\nAfter');
   assert.deepEqual(blocks.map(b => b.type), ['paragraph', 'table', 'paragraph']);
   const table = blocks[1];
@@ -420,7 +421,7 @@ test('GFM tables become table blocks, with alignment, code pipes and ragged rows
 });
 
 test('file references are found where agents write them, and ordinary words are not', async () => {
-  const { fileReference, markdownInline } = await import('./chat-model.ts');
+  const { fileReference, markdownInline } = await import('./markdown-model.ts');
   assert.deepEqual(fileReference('crates/server/src/main.rs:42'), { path: 'crates/server/src/main.rs', line: 42 });
   assert.deepEqual(fileReference('chat-claude.mjs:17'), { path: 'chat-claude.mjs', line: 17 });
   assert.deepEqual(fileReference('src/App.vue#L12'), { path: 'src/App.vue', line: 12 });
@@ -599,7 +600,7 @@ test('history let go from the front says where reading older history resumes', (
 });
 
 test('rules, underlined headings and multi-line quotes read as a document does', async () => {
-  const { markdownBlocks } = await import('./chat-model.ts');
+  const { markdownBlocks } = await import('./markdown-model.ts');
   assert.deepEqual(markdownBlocks('Title\n=====\n\nPart\n---\n\n***\n\n> one\n> two'), [
     { type: 'heading', level: 1, text: 'Title' },
     { type: 'heading', level: 2, text: 'Part' },
@@ -610,7 +611,7 @@ test('rules, underlined headings and multi-line quotes read as a document does',
 });
 
 test('HTML blocks are read as such only when asked, and a message keeps them as text', async () => {
-  const { markdownBlocks } = await import('./chat-model.ts');
+  const { markdownBlocks } = await import('./markdown-model.ts');
   const text = '<p align="center">\n  <img src="a.png">\n</p>\n\n<!-- a\nnote -->\nAfter';
   assert.deepEqual(markdownBlocks(text, { html: true }), [
     { type: 'html', text: '<p align="center">\n  <img src="a.png">\n</p>' },

@@ -42,6 +42,14 @@ const panel = ref<HTMLElement>();
 const position = ref({ left: 0, bottom: 0 });
 defineExpose({ close });
 
+/** A label cut short slides sideways under the pointer to show the rest, then back. */
+const labelBox = ref<HTMLElement>(), labelScroll = ref(0);
+function revealLabel() {
+  const box = labelBox.value;
+  labelScroll.value = box ? box.scrollWidth - box.clientWidth : 0;
+  if (labelScroll.value < 2) labelScroll.value = 0;
+}
+
 /**
  * The panel is fixed to the window, above its chip. A row of chips can then
  * scroll sideways at any width without clipping the panel it opens, which an
@@ -99,10 +107,11 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', onOutside); 
 
 <template>
   <details ref="root" class="chip-menu" :class="{ 'is-active': active, 'is-disabled': disabled, 'is-danger': tone === 'danger' }" :data-locked="disabled ? 'true' : 'false'" @keydown.esc.stop.prevent="close(true)" @toggle="place">
-    <summary :title="title ?? label" :aria-disabled="disabled ? 'true' : undefined" @click="guard">
+    <summary :title="title ?? label" :aria-disabled="disabled ? 'true' : undefined" @click="guard" @mouseenter="revealLabel" @mouseleave="labelScroll = 0">
       <slot name="mark" />
       <span v-if="caption" class="chip-menu-caption">{{ caption }}</span>
-      <span class="chip-menu-label" :data-repeats="label === caption ? 'true' : undefined">{{ label }}</span>
+      <span ref="labelBox" :class="['chip-menu-label', { scrolling: labelScroll > 0 }]" :style="labelScroll ? { '--chip-scroll': -labelScroll + 'px', '--chip-scroll-time': Math.max(1.6, labelScroll / 30) + 's' } : undefined" :data-repeats="label === caption ? 'true' : undefined"><span>{{ label }}</span></span>
+      <slot name="badge" />
       <Icon class="chip-menu-caret" name="chevron" :size="12" />
     </summary>
     <div v-if="!mobile" ref="panel" class="chip-menu-panel" :style="{ '--chip-left': position.left + 'px', '--chip-bottom': position.bottom + 'px' }"><slot :close="close" /></div>
@@ -129,6 +138,10 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', onOutside); 
 .chip-menu>summary>svg{flex:0 0 auto;opacity:.8}
 .chip-menu.is-active>summary>svg,.chip-menu.is-danger>summary>svg{opacity:1}
 .chip-menu-label{overflow:hidden;text-overflow:ellipsis}
+.chip-menu-label.scrolling{text-overflow:clip;-webkit-mask-image:linear-gradient(90deg,transparent,currentColor 6px,currentColor calc(100% - 6px),transparent);mask-image:linear-gradient(90deg,transparent,currentColor 6px,currentColor calc(100% - 6px),transparent)}
+.chip-menu-label.scrolling>span{display:inline-block;animation:chip-label-scroll var(--chip-scroll-time) ease-in-out .3s infinite alternate}
+@keyframes chip-label-scroll{0%,12%{transform:none}88%,100%{transform:translateX(var(--chip-scroll))}}
+@media(prefers-reduced-motion:reduce){.chip-menu-label.scrolling>span{animation:none}}
 .chip-menu-caption{display:none}
 /* Inside a settings sheet (see .chip-rows) each chip is a full-width row:
    what it is on the left, what it is set to on the right. */

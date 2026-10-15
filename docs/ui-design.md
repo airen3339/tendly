@@ -112,14 +112,12 @@ Workspace canvas 是 Tendly 的核心交互，不采用固定 IDE 三栏作为�
 
 ```text
 apps/web/src/
-├── app/              # 路由、主题、快捷键、全局状态
-├── components/       # Shell、Sidebar、Workbench、Inspector、Statusbar
-├── features/
-│   ├── agents/       # 会话、provider、事件时间线
-│   ├── workspace/    # 文件树、搜索、预览
-│   ├── editor/       # Monaco tabs、diff
-│   └── git/          # status、stage、commit、branch
-└── styles/tokens.css # 颜色、间距、圆角、阴影、动效 token
+├── App.vue           # 应用外壳：侧栏、顶栏、画布、全局快捷键
+├── components/       # 画布与布局节点（Canvas、LayoutNode）、终端窗格及其子组件
+├── features/         # 扁平目录：各窗格与对话框的 .vue，以及配同名 *.test.mjs 的纯逻辑 .ts
+├── layout/           # 布局引擎（layout-engine.ts），不依赖 Vue
+├── i18n/             # 中英文词典与 useI18n
+└── styles.css        # 颜色、间距、圆角、阴影、动效 token
 ```
 
 组件先围绕工作流组织，而不是按“所有按钮放一起”组织；这样后续加入插件和更多 Agent provider 时，信息架构不会被打散。Vue 组件使用 `<script setup lang="ts">`，布局树和 pane registry 保持为独立 TypeScript 模块，避免框架耦合。

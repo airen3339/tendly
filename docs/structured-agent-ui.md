@@ -4,9 +4,9 @@
 
 ## 当前结构
 
-Web 对话窗格显示消息正文、可折叠工具卡片、原生审批和问题表单、输入框、用量及轮次状态。窄屏使用同一套响应式组件，不另造一个移动端 Agent。普通 Terminal 和既有 PTY 会话继续使用 xterm.js。
+Web 对话窗格显示消息正文、可折叠工具卡片、原生审批和问题表单、输入框、用量及轮次状态。窄屏使用同一套响应式组件，不另造一个移动端 Agent。普通 Terminal 和既有 PTY 会话使用终端窗格：默认由 wterm（DOM 渲染、Ghostty WASM 内核）绘制，`?terminal=xterm` 切回 xterm.js，见 [session-actions-and-terminal-endpoints.md](session-actions-and-terminal-endpoints.md#终端渲染)。
 
-浏览器通过鉴权后的 Rust HTTP/WebSocket 接口读写。Rust 负责会话生命周期、独立进程组、命令队列和持久化；Node 桥只转换官方客户端的 JSONL/RPC 消息。推理、工具执行和权限规则仍由官方客户端负责，不实现新的 Agent loop，不向外暴露无鉴权的原生 app-server。
+浏览器通过鉴权后的 Rust HTTP/WebSocket 接口读写。Rust 负责会话生命周期、独立进程组、命令队列和持久化；默认由 Node 桥转换官方客户端的 JSONL/RPC 消息，也可配置为由 Rust 进程直连（见 [configuration.md](configuration.md#running-agent-clients-in-the-server-itself)）。推理、工具执行和权限规则仍由官方客户端负责，不实现新的 Agent loop，不向外暴露无鉴权的原生 app-server。
 
 ## 原生接口
 

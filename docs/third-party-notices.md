@@ -70,3 +70,14 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+
+# Terminal libraries
+
+These are npm dependencies of the web client, bundled into its build; each package ships its own license text.
+
+| Package | Upstream | License | Use |
+|---|---|---|---|
+| `@wterm/dom`, `@wterm/ghostty` 0.5.4 | https://github.com/vercel-labs/wterm | Apache-2.0 | Default terminal renderer and its VT core. `@wterm/dom` carries a local patch (`patches/@wterm__dom@0.5.4.patch`) that reuses one DOM Range in the renderer. |
+| Ghostty (`libghostty`, compiled to WebAssembly inside `@wterm/ghostty`) | https://github.com/ghostty-org/ghostty | MIT | Terminal emulation core used by wterm. |
+| `@xterm/xterm` 6.0.0, `@xterm/addon-fit`, `@xterm/addon-webgl` | https://github.com/xtermjs/xterm.js | MIT | Fallback terminal renderer (`?terminal=xterm`). |

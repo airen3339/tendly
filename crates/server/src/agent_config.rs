@@ -187,6 +187,10 @@ fn managed(state: &AppState, profile: &EndpointProfile) -> bool {
         || crate::accounts::owns_profile(state, profile.id)
 }
 
+/// The `endpoint` tool: create, update, test and delete endpoint profiles, and
+/// list or import the host's own configurations. A create, update, delete or
+/// import is confirmed by the person in the browser first, and any key is
+/// typed there; the tool never handles one itself.
 pub async fn endpoint(
     state: &AppState,
     caller: Caller,

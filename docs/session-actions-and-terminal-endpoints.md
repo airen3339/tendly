@@ -48,3 +48,14 @@ flowchart TD
 数据库迁移 19 为旧终端接续固定其当时可解析的配置版本。原生历史导入保持唯一，终端视图可以有多个；再次导入仍定位原记录。主动选择新端点或工作目录会开启新的原生上下文，同时清除旧接续绑定。
 
 验证覆盖三种客户端的配置快照、凭据引用、模型、思考深度、权限和接续参数，源会话后续切换配置、重复接续、worktree 继承、导入历史、失败不留会话记录和旧库迁移。`tendly resume` 的测试覆盖本机限定、不留记录、接续参数、运行中拒绝与 `--force`、无对话时拒绝。
+
+## 终端渲染
+
+终端窗格有两套绘制引擎，共用同一个会话流、按键栏、粘贴和上传（`apps/web/src/features/terminal-view.ts` 定义两者共同的接口）：
+
+- **wterm（默认）**：`@wterm/dom` 把行排成页面文本，由浏览器按像素原生滚动；VT 解析用 `@wterm/ghostty` 的 Ghostty WASM 内核。回滚区按字节计（约 8 MB，几千行宽行）。仓库带一个本地补丁 `patches/@wterm__dom@0.5.4.patch`：渲染器复用同一个 DOM Range，避免长时间输出后行更新越来越慢（已向上游提交）。
+- **xterm.js（回退）**：画在 canvas（可用时走 WebGL）上，按整行滚动，回滚区 5000 行；触摸拖动与惯性滚动（`terminal-scroll.ts`）只在这条路径上使用。
+
+在地址里加 `?terminal=xterm` 切到 xterm.js，`?terminal=wterm` 切回；选择记在本浏览器里（`terminal-engine.ts`）。
+
+**查找**（仅 wterm）：⌘F（macOS）或 Ctrl+Shift+F 打开查找栏，Enter / Shift+Enter 跳到下一个 / 上一个，Esc 关闭。搜的是整个回滚历史，跨软换行匹配。xterm.js 回退没有查找。

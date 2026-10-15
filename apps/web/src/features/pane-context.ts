@@ -130,3 +130,29 @@ export function scopeLegacyLayout(document: LayoutDocument, ownerId: string, ses
   if (!validateLayout(result)) throw new Error("Invalid migrated layout");
   return result;
 }
+
+/** The names built-in panes are shown under when they carry no title of their own. */
+const PANE_NAMES: Record<string, string> = { agent_chat: "Agent session", git_diff: "Git Changes", editor: "File editor", file_preview: "File preview", terminal: "Terminal" };
+
+/**
+ * What a pane is called on screen. A session's or a file's title is its own
+ * and shown as it is; built-in names, stored in English so a layout reads the
+ * same in any language, are translated.
+ */
+export function paneDisplayTitle(pane: PaneNode, translate: (text: string) => string): string {
+  if (pane.title && (pane.metadata?.session_id || pane.metadata?.path)) return pane.title;
+  return translate(pane.title || PANE_NAMES[pane.kind] || pane.kind);
+}
+
+/**
+ * An open pane `incoming` can take the place of: one of the same kind that
+ * shows nothing yet -- no session, no file, no unsent draft -- and belongs to
+ * no other workspace. Git changes are never replaced: each workspace keeps its
+ * own.
+ */
+export function reusablePane(open: readonly PaneNode[], incoming: PaneNode): PaneNode | undefined {
+  if (incoming.kind === "git_diff") return undefined;
+  return open.find(candidate => candidate.kind === incoming.kind
+    && !candidate.metadata?.session_id && !candidate.metadata?.path && !candidate.metadata?.draft
+    && (!candidate.metadata?.workspace_id || candidate.metadata.workspace_id === incoming.metadata?.workspace_id));
+}

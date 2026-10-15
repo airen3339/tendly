@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  activatePane, applyPreset, cloneNode, closePane, collapseBelowMin, containerId,
+  activatePane, applyPreset, cloneNode, closePane, containerId,
   createDefaultLayoutDocument, createPane, dockPane, findNode, findNodes,
   flattenPanes, isPaneNode, normalizeRatio, projectLayout, replacePane, resizeSplit,
   restoreCollapsed, selectionGroups, snapRatio, splitPane, updatePane, validateLayout,
@@ -240,9 +240,9 @@ test('center docking into projected group does not flatten its canonical split',
 });
 
 test('legacy collapsed snapshot restoration honors closes, edits and new tabs', () => {
-  const original = { version: 1, root: split('s', pane('a'), pane('b')) };
-  const collapsed = collapseBelowMin(original, 320, 600);
-  assert.equal(collapsed.root.type, 'stack');
+  // What an older version stored for a split too narrow to show: the tabs it
+  // became, and the split to put back.
+  const collapsed = { version: 1, root: stack('s:tabs', [pane('a'), pane('b')]), collapsed: [{ splitId: 's', replacementId: 's:tabs', node: split('s', pane('a'), pane('b')) }] };
   collapsed.root.panes = [{ ...pane('b'), title: 'updated' }, pane('c')];
   collapsed.root.activePaneId = 'c';
   const recovered = restoreCollapsed(collapsed);
@@ -275,4 +275,53 @@ test('repeated move / preset / close / project operations maintain invariant IDs
     assert.equal(validateLayout(root), true);
   }
   assert.equal(flattenPanes(root).length, 18);
+});
+
+test('a detailed validation names where each problem is', () => {
+  assert.deepEqual(validateLayout({ version: 1, root: split('s', pane('a'), pane('b')) }, true), { valid: true, errors: [] });
+  const broken = {
+    version: 0,
+    root: split('s', { type: 'pane', id: 'a', kind: 'browser' }, stack('t', [pane('a'), { type: 'split', id: 'x' }], 'gone'), 'diagonal', 1),
+    collapsed: 'nope',
+  };
+  const { valid, errors } = validateLayout(broken, true);
+  assert.equal(valid, false);
+  for (const expected of [
+    'version must be a positive integer',
+    'root.direction is invalid',
+    'root.ratio must be finite and between 0 and 1',
+    'root.first.kind is invalid',
+    'duplicate node id: a',
+    'root.second.panes[1] must be a pane',
+    'root.second.activePaneId is missing from tabs',
+    'collapsed must be an array',
+  ]) assert.ok(errors.includes(expected), `${expected} in ${JSON.stringify(errors)}`);
+});
+
+test('validation stops at its safety limit instead of walking a runaway tree', () => {
+  let node = pane('leaf');
+  for (let i = 0; i < 200; i++) node = split(`s${i}`, node, pane(`p${i}`));
+  const result = validateLayout(node, true);
+  assert.equal(result.valid, false);
+  assert.deepEqual(result.errors.filter(e => e === 'layout exceeds safety limit'), ['layout exceeds safety limit'], 'reported once');
+});
+
+test('a node is represented by its active tab, or its first pane', async () => {
+  const { representativePane } = await import('./layout-engine.ts');
+  assert.equal(representativePane(pane('a')).id, 'a');
+  assert.equal(representativePane(stack('t', [pane('a'), pane('b')], 'b')).id, 'b');
+  assert.equal(representativePane(stack('t', [pane('a'), pane('b')], 'gone')).id, 'a', 'a missing active tab falls back to the first');
+  assert.equal(representativePane(split('s', stack('t', [pane('c')]), pane('d'))).id, 'c');
+  assert.equal(representativePane(undefined), undefined);
+});
+
+test('dropping into the middle of a collapsed split lands beside the tab on show', async () => {
+  const { centerDockTarget, projectLayout } = await import('./layout-engine.ts');
+  const root = split('s', stack('left', [pane('a')]), stack('right', [pane('b')]));
+  // Wide enough: the split is a split, and is the target as it is.
+  assert.equal(centerDockTarget(root, root, 's'), 's');
+  // Too narrow: it shows as one stack of tabs, and the drop joins the container of the tab on show.
+  const narrow = projectLayout(root, 300, 600, { selectedPaneId: 'b' });
+  assert.equal(centerDockTarget(root, narrow, 's'), 'right');
+  assert.equal(centerDockTarget(root, narrow, 'a'), 'a', 'a pane is its own target');
 });

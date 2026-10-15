@@ -1,4 +1,4 @@
-import type { EndpointProfile, NativeHistorySource, ProviderKind } from "@tendly/protocol";
+import type { EndpointProfile, ProviderKind } from "@tendly/protocol";
 import { parseEnvironmentRows, type EnvironmentRow } from "./environment-model";
 
 export function profileEnvironmentDraftChanged(rows: EnvironmentRow[], initial: EnvironmentRow[]): boolean {
@@ -42,18 +42,6 @@ export function ownsNativeConfig(native?: { source_id: string } | null): boolean
 export function sharesHostConfig(native?: { source_id: string } | null): boolean {
   return !!native && !ownsNativeConfig(native);
 }
-/** Native auth can distinguish unset directory env from an explicit value for the same directory. */
-export function isSameNativeSource(profile: EndpointProfile, source: NativeHistorySource | undefined): boolean {
-  return !!source && profile.provider === source.provider && profile.native_config?.source_id === source.id && profile.native_config.config_dir === source.path && (profile.native_config.config_env ?? null) === (source.config_env ?? null);
-}
-
-/** Discovery reports directory availability, never whether an account is signed in. */
-export function nativeProfileImportPayload(source: NativeHistorySource | undefined, name: string, confirmed: boolean) {
-  if (!source?.available || !confirmed) return undefined;
-  const label = name.trim();
-  return { source_id: source.id, ...(label ? { name: label } : {}), confirmed_shared_config: true as const };
-}
-
 /** Renaming a shared reference must not send even null endpoint/configuration overrides. */
 export function nativeProfileRenamePayload(name: string): { name: string } {
   return { name: name.trim() };

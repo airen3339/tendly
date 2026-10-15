@@ -6,8 +6,8 @@
 //! `message`, `tool`, `approval`, `approval_resolved`, `turn`, `usage`,
 //! `error`, `exit`; see `conversations::normalize_event`). [`ClientAdapter`]
 //! is that protocol as an interface. [`BridgeAdapter`] runs it over the Node
-//! chat bridge exactly as before; [`crate::codex_chat::CodexAdapter`] runs it
-//! in this process for Codex, against `codex app-server` directly.
+//! chat bridge; [`crate::native_chat::NativeAdapter`] runs it in this process,
+//! against the client directly, for the clients [`in_process`] selects.
 use serde_json::{Map, Value, json};
 use std::{future::Future, time::Duration};
 use tendly_runtime::process::OwnedGroup;

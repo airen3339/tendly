@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import type { ComponentPublicInstance } from "vue";
 import type { FileEntry } from "@tendly/protocol";
 import { errorMessage, formatBytes, request, workspacePath } from "./api";
-import { flattenTree, isTreeChild, sortTreeEntries, treeAncestors, treeParent } from "./tree-model";
+import { flattenTree, isTreeChild, sortTreeEntries, treeAncestors, treeKeyAction, treeParent } from "./tree-model";
 import type { TreeDirectory, TreeRow } from "./tree-model";
 import { readTreeViewState, saveTreeViewState } from "./tree-state";
 import { createFileSearch, highlight } from "./file-search";
@@ -13,6 +13,7 @@ import type { SearchResults } from "./file-search";
 import Icon from "./Icon.vue";
 import ContextMenu from "./ContextMenu.vue";
 import { filePane } from "./pane-context";
+import { copyText as writeClipboard } from "./clipboard";
 import { useI18n } from "../i18n";
 
 const { t } = useI18n();
@@ -70,11 +71,12 @@ function pressMove(event: PointerEvent) {
 }
 function pressEnd() { clearTimeout(pressTimer); pressTimer = undefined; pressOrigin = undefined; }
 function closeRowMenu() { rowMenu.value = null; confirmDelete.value = false; }
-/** Clipboard access can be refused (insecure origin, denied permission), so a
- * failure says so rather than silently doing nothing. */
+/** The shared copy falls back to the browser's own copy command where the
+ * Clipboard API is refused (a plain-http page, a denied permission); if that
+ * fails too, the failure says so rather than silently doing nothing. */
 async function copyText(value: string, label: string) {
   try {
-    await navigator.clipboard.writeText(value);
+    await writeClipboard(value);
     copied.value = label;
     setTimeout(() => { if (copied.value === label) copied.value = ""; }, 1400);
   } catch { error.value = t("Could not copy to the clipboard in this browser."); closeRowMenu(); }
@@ -189,7 +191,7 @@ onBeforeUnmount(() => fileSearch.cancel());
 const searchingWorkspace = computed(() => !!workspaceResults.value?.available && !!query.value.trim());
 const searchHits = computed(() => workspaceResults.value?.files ?? []);
 function hitParts(hit: { path: string; name: string; indices: number[] }) { return highlight(hit.path, hit.name, hit.indices); }
-function hitDirectory(path: string) { const cut = path.lastIndexOf("/"); return cut === -1 ? "" : path.slice(0, cut); }
+const hitDirectory = treeParent;
 function openHit(hit: { path: string; name: string; kind: "file" | "directory" }) {
   if (hit.kind === "directory") { void reveal(hit.path); query.value = ""; return; }
   selected.value = hit.path;
@@ -273,23 +275,16 @@ function open(file: FileEntry) {
 }
 
 async function navigate(event: KeyboardEvent, row: TreeRow) {
-  if (event.altKey || event.ctrlKey || event.metaKey) return;
-  if (!["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "Home", "End", "Enter", " "].includes(event.key)) return;
+  const action = treeKeyAction(event.key, event.altKey || event.ctrlKey || event.metaKey, rows.value, row);
+  if (action === "ignore") return;
   event.preventDefault(); event.stopPropagation();
-  const index = rows.value.findIndex(item => item.entry.path === row.entry.path);
-  if (event.key === "Enter" || event.key === " ") { open(row.entry); return; }
-  if (event.key === "ArrowDown") { const next = rows.value[index + 1]; if (next) await focusRow(next.entry.path); }
-  else if (event.key === "ArrowUp") { const previous = rows.value[index - 1]; if (previous) await focusRow(previous.entry.path); }
-  else if (event.key === "Home" || event.key === "End") {
-    const next = event.key === "Home" ? rows.value[0] : rows.value.at(-1);
-    if (next) await focusRow(next.entry.path);
-  } else if (event.key === "ArrowRight" && row.entry.kind === "directory") {
-    if (!row.expanded) await toggle(row.entry);
-    else { const child = rows.value[index + 1]; if (child?.parent === row.entry.path) await focusRow(child.entry.path); }
-  } else if (event.key === "ArrowLeft") {
+  if (action === "none") return;
+  if (action.kind === "open") open(row.entry);
+  else if (action.kind === "focus") await focusRow(action.path);
+  else if (action.kind === "expand") await toggle(row.entry);
+  else {
     // Filter results temporarily reveal ancestors; clear the filter before explicitly collapsing.
-    if (row.entry.kind === "directory" && row.expanded) { clearFilterKeepingPath(row.entry.path); expanded.value.delete(row.entry.path); }
-    else if (row.parent) await focusRow(row.parent);
+    clearFilterKeepingPath(action.path); expanded.value.delete(action.path);
   }
 }
 

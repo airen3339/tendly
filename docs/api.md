@@ -1,6 +1,6 @@
 # Tendly MVP API
 
-Default origin: `http://127.0.0.1:8787`. Node-run Vite proxies the same `/api` surface, including WebSocket upgrades. The development toolchain is Node 24+ and pnpm 10.30.3; see the README for install/run commands.
+Default origin: `http://127.0.0.1:28789`. Node-run Vite proxies the same `/api` surface, including WebSocket upgrades. The development toolchain is Node 24+ and pnpm 10.30.3; see the README for install/run commands.
 
 All mutations require `X-Tendly-Client: web`. Unknown Host and untrusted Origin are rejected. When `TENDLY_TOKEN` is configured, private routes additionally require a bearer token or the HttpOnly login cookie.
 
@@ -62,9 +62,9 @@ The WebSocket only **attaches**; it never starts/restarts a process. Binary fram
 {"type":"resize","cols":120,"rows":40}
 ```
 
-Server text controls: `exit` with exit code, `gap` when output was lost, or `error` with message. Reconnect resets the view and replays a bounded 1 MiB buffer. Session records/config directories persist across server restarts, not the live PTY. Input is capped at 64 KiB; sizes at 1000×500 cells.
+Server text controls: `exit` with exit code, `gap` when output was lost, or `error` with message. A reconnect that names the process and last frame it drew resumes from the next frame while the bounded 1 MiB replay still holds it; otherwise the view is reset and redrawn from that replay. Session records/config directories persist across server restarts, not the live PTY. Input is capped at 64 KiB; sizes at 1000×500 cells.
 
-The UI distinguishes backend process state from stream state and limits the WebSocket handshake to 8 seconds. A timeout/error exposes an explicit reconnect action; it does not automatically retry, start/stop a process, or replay user input. Replaying terminal **output** on an explicit attach is separate from replaying input. In the observed macOS case, Node-run Vite fixed a Bun-run Vite proxy handshake timeout; the frontend runtime change did not require stopping the existing backend or sessions.
+The UI distinguishes backend process state from stream state and limits the WebSocket handshake to 8 seconds. A dropped or silent view is re-attached on its own with backoff (0.3 s up to 10 s, eight tries in a row), and a quiet one is probed with a ping every 15 s while the page is in front (`features/session-stream.ts`); after the last try it shows an explicit reconnect action. Only the view is retried: it never starts/stops a process or replays user input. Replaying terminal **output** on an explicit attach is separate from replaying input. In the observed macOS case, Node-run Vite fixed a Bun-run Vite proxy handshake timeout; the frontend runtime change did not require stopping the existing backend or sessions.
 
 The unscoped `/api/pty/ws` and arbitrary state PATCH endpoints have been removed.
 
