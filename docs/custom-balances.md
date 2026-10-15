@@ -1,6 +1,6 @@
 # Custom endpoint balances
 
-In **Settings → Endpoint profiles**, save or select a profile and open **Custom balance query**. Choose:
+In **Settings → Endpoint profiles**, save or select a profile and open **Custom balance query**. Official accounts need none: their endpoint chip and menu entry show the remaining share of the account's tightest window (5-hour or weekly) from the figures Tendly already has, and the editor is not offered for them. Choose:
 
 - **Fiat balance**: a three-letter currency code, such as `USD`, `CNY` or `EUR`. Values stay in the original currency; Tendly does not convert currencies or add different currencies together. A negative amount can represent debt.
 - **Remaining percentage**: a number from `0` to `100`, always representing what is left.

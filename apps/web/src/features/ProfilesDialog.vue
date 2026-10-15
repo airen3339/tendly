@@ -395,7 +395,7 @@ onBeforeUnmount(()=>{discoveryRevision++;});
           <div class="dialog-actions"><button v-if="editing && !editingManaged" type="button" class="text-button danger-text" :disabled="busy" @click="deleteId=editing">{{ t(editingNative?'Remove profile reference':'Delete profile') }}</button><button v-if="editing && !editingNative" type="button" class="text-button" :disabled="busy" @click="duplicate(editingProfile!)">{{ t('Duplicate as new profile') }}</button><span class="flex-spacer" /><button type="button" class="secondary-button" :disabled="busy" @click="cancelForm">{{ t('Cancel') }}</button><button class="primary-button" :disabled="busy||!canSave">{{ busy?t('Saving…'):t('Save profile') }}</button></div>
         </form>
         <div v-else class="pane-empty"><p>{{ t('Select a profile to edit, or create one for a different account or endpoint.') }}</p></div>
-        <EndpointBalanceEditor v-if="backendCapabilities.customBalances && formVisible && editing" :key="editing" ref="balanceEditor" :profile-id="editing" :disabled="busy" />
+        <EndpointBalanceEditor v-if="backendCapabilities.customBalances && formVisible && editing && !editingNative" :key="editing" ref="balanceEditor" :profile-id="editing" :disabled="busy" />
       </div>
     </div>
     <ContextMenu v-if="menu" :x="menu.x" :y="menu.y" :label="t('Actions for {profile}', { profile: menu.profile.name })" @close="menu = undefined">

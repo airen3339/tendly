@@ -2,6 +2,7 @@ import { reactive } from 'vue';
 import { ApiError, errorMessage, json, request } from './api';
 import { backendCapabilities } from './backend-capabilities';
 import { shouldAutoRefresh, type BalanceView, type EndpointBalance } from './balance-model';
+import type { AccountView } from './account-ui';
 
 /**
  * One copy of the configured endpoint balances for the whole page, so the
@@ -44,6 +45,31 @@ export async function refreshBalance(profileId: string): Promise<void> {
 export function refreshBalanceIfStale(profileId?: string | null): void {
   const row = balanceFor(profileId);
   if (row && shouldAutoRefresh(row, lastAttempt.get(row.id), Date.now())) void refreshBalance(row.id);
+  if (accountFor(profileId) && Date.now() - accountsReadAt > 60_000) void loadAccountQuotas();
+}
+
+/**
+ * Official accounts by the endpoint profile each one signs in through, so an
+ * endpoint chip can show the account's allowance the way it shows a custom
+ * balance. Reading the list asks Tendly for what it last heard, never the
+ * provider, so it is cheap to read again after a turn.
+ */
+export const accountQuotas = reactive({ byProfile: {} as Record<string, AccountView> });
+let accountsReadAt = 0, accountsLoading: Promise<void> | undefined;
+
+export function accountFor(profileId?: string | null): AccountView | undefined {
+  return profileId ? accountQuotas.byProfile[profileId] : undefined;
+}
+
+export function loadAccountQuotas(): Promise<void> {
+  if (!backendCapabilities.accounts) return Promise.resolve();
+  accountsReadAt = Date.now();
+  accountsLoading ??= request<AccountView[]>('/accounts')
+    .then(items => { accountQuotas.byProfile = Object.fromEntries(items.map(account => [account.profile_id, account])); })
+    // The chips simply show no allowance; the accounts dialog reports the failure.
+    .catch(() => {})
+    .finally(() => { accountsLoading = undefined; });
+  return accountsLoading;
 }
 
 /** The editor saved or queried a configuration: take its view, or drop the row when the query was disabled. */

@@ -92,11 +92,6 @@ export function authFromFields(fields: AuthFields): BalanceAuth {
     default: return { kind: 'header', name: fields.headerName.trim(), value: fields.headerValue };
   }
 }
-/** What the request will carry, with the key masked: "Authorization: Bearer ••••" or "?api_key=••••". */
-export function authPreview(auth: BalanceAuth): string {
-  if (auth.kind === 'header') return `${auth.name}: ${auth.value.replace('{key}', '••••')}`;
-  return auth.kind === 'query' ? `?${auth.name}=••••` : '';
-}
 export const BALANCE_EXAMPLE = 'const data = await ctx.request();\nreturn { value: data.balance };';
 
 /** Starting points offered beside the script editor; each matches an example in docs/custom-balances.md. */

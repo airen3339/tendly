@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { accountLimitPercent, accountLoginUrl, accountResetDate, accountSignInActions, accountStatusLabel, accountResetCreditState, canResetAccountQuota, createQuotaResetStore, quotaResetOutcomeNotice, QUOTA_RESET_STORAGE_KEY, QUOTA_RESET_STORAGE_WARNING } from './account-ui.ts';
+import { accountLimitPercent, accountQuota, accountLoginUrl, accountResetDate, accountSignInActions, accountStatusLabel, accountResetCreditState, canResetAccountQuota, createQuotaResetStore, quotaResetOutcomeNotice, QUOTA_RESET_STORAGE_KEY, QUOTA_RESET_STORAGE_WARNING } from './account-ui.ts';
 
 const fixture = (changes = {}) => ({ id: 'account-one', name: 'Fixture account', provider: 'codex', profile_id: 'profile-one', storage_path: '/fixture/account', status: 'signed_in', limits: { reset_credits: 2 }, capabilities: { login: true, quota: true, reset_quota: true, refresh_token: true, logout: true }, ...changes });
 
@@ -144,4 +144,20 @@ test('a quota window past its reset reads as unused, not as the full figure it l
   const live = { ...spent, resets_at: (now + 60_000) / 1000 };
   assert.equal(accountLimitPercent(live, now), 100);
   assert.equal(accountLimitPercent({ used_percent: 40 }, now), 40, 'no reset time: taken as reported');
+});
+
+test('an endpoint shows the official window with the least left', () => {
+  const now = Date.parse('2026-10-15T08:00:00Z');
+  const later = '2026-10-15T12:00:00Z';
+  const account = { status: 'signed_in', limits: { primary: { used_percent: 30, window_kind: 'five_hour', resets_at: later }, secondary: { used_percent: 72.25, window_kind: 'weekly', resets_at: later } } };
+  assert.deepEqual(accountQuota(account, now), { remaining: 27.8, slot: 'secondary', limit: account.limits.secondary });
+  assert.equal(accountQuota({ ...account, limits: { primary: account.limits.primary } }, now).remaining, 70);
+});
+
+test('a window that has reset counts as unused, and nothing shows without a real figure', () => {
+  const now = Date.parse('2026-10-15T08:00:00Z');
+  assert.equal(accountQuota({ status: 'signed_in', limits: { primary: { used_percent: 95, resets_at: '2026-10-15T07:00:00Z' } } }, now).remaining, 100);
+  assert.equal(accountQuota({ status: 'signed_out', limits: { primary: { used_percent: 10 } } }, now), undefined);
+  assert.equal(accountQuota({ status: 'signed_in' }, now), undefined);
+  assert.equal(accountQuota({ status: 'signed_in', limits: { primary: { used_percent: Number.NaN } } }, now), undefined);
 });

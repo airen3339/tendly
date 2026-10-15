@@ -219,3 +219,23 @@ export function quotaShortTitle(slot: 'primary' | 'secondary', limit?: AccountLi
   const full = quotaWindowTitle(slot, limit);
   return { key: ({ '5-hour window': '5h', 'Weekly window': 'Week', '{count}-day window': '{count}d', '{count}-hour window': '{count}h', 'Primary window': 'Main', 'Secondary window': 'Other' } as Record<string, string>)[full.key] ?? full.key, values: full.values };
 }
+
+/** An official account's allowance as one figure: the window with the least left, since that is the one that stops work first. */
+export interface AccountQuota { remaining: number; slot: 'primary' | 'secondary'; limit: AccountLimit }
+
+/**
+ * What an endpoint chip shows for an official account: the remaining share of
+ * its tightest window. Nothing for an account that is not signed in or has
+ * reported no window, rather than a figure that looks like an empty allowance.
+ */
+export function accountQuota(account: Pick<AccountView, 'status' | 'limits'>, now = Date.now()): AccountQuota | undefined {
+  if (account.status !== 'signed_in') return undefined;
+  let tightest: AccountQuota | undefined;
+  for (const slot of ['primary', 'secondary'] as const) {
+    const limit = account.limits?.[slot], used = accountLimitPercent(limit, now);
+    if (!limit || used === undefined) continue;
+    const remaining = Math.round((100 - used) * 10) / 10;
+    if (!tightest || remaining < tightest.remaining) tightest = { remaining, slot, limit };
+  }
+  return tightest;
+}

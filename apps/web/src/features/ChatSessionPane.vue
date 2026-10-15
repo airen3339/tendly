@@ -18,7 +18,7 @@ import { useMobile } from './mobile';
 import { describeModel, resolvedDefaultName } from './model-description';
 import ContextRing from './ContextRing.vue';
 import BalanceBadge from './BalanceBadge.vue';
-import { balanceFor, balances, refreshBalance, refreshBalanceIfStale } from './balance-store';
+import { accountFor, balanceFor, balances, refreshBalance, refreshBalanceIfStale } from './balance-store';
 import { measuredUsage, type KnownWindow } from './context-meter';
 import { effortFill as effortFillFor, effortLabel, effortStops as effortStopsFor, effortVivid as effortVividAt, modelEfforts, restingStop } from './reasoning-effort';
 import { attachmentError, canSendMessage, composeMessage, formatBytes, MAX_ATTACHMENTS_PER_MESSAGE, pastedFile, type Attachment } from './attachment-state';
@@ -136,9 +136,10 @@ const { older, loadingOlder, olderSentinel, holds, loadOlder } = useOlderHistory
 const { searchOpen, searchQuery, searchHits, searchNotice, searchInput, searchCount, openSearch, closeSearch, stepSearch, onRowsRange, searchKeydown } = useConversationSearch({
   sessionId: () => props.session.id, viewport, rows: () => rows.value.rows, windowed, holds, loadOlder, stopFollowing: () => { followBottom.value = false; }, t,
 });
-// A custom balance moves as turns are spent: ask again when one ends, and when
-// this session first shows an endpoint that has a query (both throttled).
-watch(() => !!balanceFor(props.session.endpoint_profile_id), present => { if (present && !isPreview.value) refreshBalanceIfStale(props.session.endpoint_profile_id); }, { immediate: true });
+// A custom balance or an official allowance moves as turns are spent: read it
+// again when one ends, and when this session first shows such an endpoint
+// (both throttled).
+watch(() => !!balanceFor(props.session.endpoint_profile_id) || !!accountFor(props.session.endpoint_profile_id), present => { if (present && !isPreview.value) refreshBalanceIfStale(props.session.endpoint_profile_id); }, { immediate: true });
 watch(() => view.value.turn, (turn, before) => { if (before === 'running' && turn !== 'running' && !isPreview.value) refreshBalanceIfStale(props.session.endpoint_profile_id); });
 // What sits above the rows -- the trimmed notice, the older-history marker,
 // the welcome -- moves where they begin.

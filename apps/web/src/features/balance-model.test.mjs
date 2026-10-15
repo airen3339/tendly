@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { authFields, authFromFields, authPreview, balanceLabel, balanceIsStale, balanceLevel, balanceShort, roundDecimal, shouldAutoRefresh } from './balance-model.ts';
+import { authFields, authFromFields, balanceLabel, balanceIsStale, balanceLevel, balanceShort, roundDecimal, shouldAutoRefresh } from './balance-model.ts';
 test('money retains decimal precision and original currency without conversion',()=>{
   assert.equal(balanceLabel({value:'123456789012345678.12',unit:{kind:'money',currency:'CNY'},checked_at:''}),'CNY 123456789012345678.12');
   assert.equal(balanceLabel({value:'0',unit:{kind:'percentage'},checked_at:''}),'0%');
@@ -65,9 +65,4 @@ test('authentication presets round-trip, and custom headers and query names keep
   const fields=authFields({kind:'none'});
   assert.deepEqual(authFromFields({...fields,preset:'query'}),{kind:'query',name:'api_key'},'a sensible default name');
   assert.deepEqual(authFromFields({...fields,preset:'header',headerName:' X-Key ',headerValue:'{key}'}),{kind:'header',name:'X-Key',value:'{key}'});
-});
-test('the preview shows where the key goes without showing a key',()=>{
-  assert.equal(authPreview({kind:'header',name:'Authorization',value:'Bearer {key}'}),'Authorization: Bearer ••••');
-  assert.equal(authPreview({kind:'query',name:'api_key'}),'?api_key=••••');
-  assert.equal(authPreview({kind:'none'}),'');
 });
