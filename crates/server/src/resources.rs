@@ -126,6 +126,10 @@ fn session_usage(system: &System, roots: Vec<(String, u32)>) -> Vec<SessionUsage
         .collect()
 }
 
+/// What the host and the given sessions are using now. `roots` pairs each
+/// session id with its root process; a session's figures are that process and
+/// its descendants. The machine-wide reading is shared by callers
+/// within the same second, since refreshing it is the expensive part.
 pub fn sample(roots: Vec<(String, u32)>) -> HostUsage {
     let mut guard = sampler().lock().expect("resource sampler");
     // The machine is reused within a second, but the sessions are always the

@@ -137,6 +137,11 @@ fn session_of(pane: &Value) -> Option<SessionId> {
         .and_then(|id| id.parse().ok())
 }
 
+/// The `canvas` tool: `list` the open tabs with the session each shows, or
+/// `close` some of them on the stored layout. Closing goes through the same
+/// validation and revision check as a window's own save; when a window saved
+/// in between, the close is applied again to that newer layout instead of
+/// overwriting it.
 pub async fn canvas(
     state: &AppState,
     caller: Caller,

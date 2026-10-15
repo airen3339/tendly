@@ -19,6 +19,10 @@ pub fn validate_effort(value: Option<&str>) -> Result<(), ApiError> {
     Ok(())
 }
 
+/// Whether a profile can be saved: a bounded name, a client that takes
+/// profiles, and settings that do not contradict each other. A profile that
+/// uses an existing native configuration may not also redirect its endpoint,
+/// credential or permissions, since those belong to that configuration.
 pub fn validate_profile(p: &EndpointProfile) -> Result<(), ApiError> {
     crate::environment::validate(&p.environment)?;
     if p.name.trim().is_empty() || p.name.len() > 120 {

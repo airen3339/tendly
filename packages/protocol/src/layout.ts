@@ -1,6 +1,6 @@
 /**
- * The serialisable layout protocol shared by the web client and (eventually)
- * the server-side workspace registry.  Layout nodes deliberately contain no
+ * The serialisable layout protocol shared by the web client and the server,
+ * which validates and stores each canvas.  Layout nodes deliberately contain no
  * Vue or DOM state so a document can be persisted and restored as JSON.
  */
 
