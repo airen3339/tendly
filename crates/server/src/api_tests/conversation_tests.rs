@@ -462,7 +462,7 @@ async fn actual_node_bridge_contract_runs_both_synthetic_native_protocols_end_to
         let cli = fixture.path.join("repo/fake-chat-cli.mjs");
         fs::write(
             &cli,
-            include_str!("../../../packages/native-bridge/fixtures/chat-cli.mjs"),
+            include_str!("../../../../packages/native-bridge/fixtures/chat-cli.mjs"),
         )
         .unwrap();
         #[cfg(unix)]
