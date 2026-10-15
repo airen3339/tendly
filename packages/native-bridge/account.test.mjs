@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { executeAccount, isolatedEnvironment } from './account.mjs';
 import { RpcError } from './account-common.mjs';
-import { claudeStatusPath, normalizeClaudeLimits, retryAfterSeconds, UsageQueryError, usageFailure } from './account-claude.mjs';
+import { claudeStatusPath, normalizeClaudeProfile, normalizeClaudeLimits, retryAfterSeconds, UsageQueryError, usageFailure } from './account-claude.mjs';
 import { normalizeLimits, safeLoginUrl } from './account-codex.mjs';
 
 function fixture(overrides = {}) {
@@ -192,11 +192,14 @@ test('Claude usage query uses the native OAuth credential only after an explicit
   const originalFetch = globalThis.fetch;
   let request;
   globalThis.fetch = async (url, init) => {
+    if (url === 'https://api.anthropic.com/api/oauth/profile') return Response.json({ organization: { organization_type: 'claude_pro', rate_limit_tier: 'default_claude_pro' } });
     request = { url, init };
     return Response.json({ five_hour: { utilization: 36, resets_at: '2026-09-15T12:00:00Z' }, seven_day: { utilization: 72, resets_at: '2026-09-20T12:00:00Z' } });
   };
   try {
     const view = await executeAccount({ provider: 'claude_code', action: 'usage', config_dir: directory, config_env: directory, program }, {});
+    assert.equal(view.plan, 'pro');
+    assert.equal(view.quota_tier, JSON.stringify(['claude_pro', 'default_claude_pro']));
     assert.equal(view.usage.source, 'claude_oauth_usage');
     assert.equal(view.usage.availability, 'available');
     assert.equal(view.limits.primary.used_percent, 36);
@@ -206,6 +209,13 @@ test('Claude usage query uses the native OAuth credential only after an explicit
     assert.equal(request.init.headers['anthropic-beta'], 'oauth-2025-04-20');
     // Without Claude Code's user agent the endpoint answers 429 every time.
     assert.match(request.init.headers['User-Agent'], /^claude-code\/\d+\.\d+\.\d+$/);
+    globalThis.fetch = async url => url.endsWith('/profile')
+      ? new Response('{}', { status: 503 })
+      : Response.json({ five_hour: { utilization: 36 } });
+    const withoutProfile = await executeAccount({ provider: 'claude_code', action: 'usage', config_dir: directory, config_env: directory, program }, {});
+    assert.equal(withoutProfile.limits.primary.used_percent, 36);
+    assert.equal(withoutProfile.quota_tier, undefined);
+
   } finally { globalThis.fetch = originalFetch; await rm(directory, { recursive: true, force: true }); }
 });
 
@@ -270,4 +280,15 @@ test('retry hints accept both Retry-After forms and never promise a stale delay'
   assert.equal(usageFailure(new UsageQueryError(429, '30')).retry_after_seconds, 30);
   assert.equal(usageFailure(new UsageQueryError(403)).availability, 'unauthorized');
   assert.equal(usageFailure(Error('offline')).availability, 'query_failed');
+});
+
+test('Claude profile distinguishes capacity tiers and rejects incomplete profiles', () => {
+  const profile = tier => normalizeClaudeProfile({ organization: { organization_type: 'claude_max', rate_limit_tier: tier } });
+  const five = profile('default_claude_max_5x');
+  const twenty = profile('default_claude_max_20x');
+  assert.equal(five.plan, 'max 5x');
+  assert.equal(twenty.plan, 'max 20x');
+  assert.notEqual(five.quota_tier, twenty.quota_tier);
+  assert.deepEqual(normalizeClaudeProfile({ organization: { organization_type: 'claude_max' } }), {});
+  assert.deepEqual(normalizeClaudeProfile(null), {});
 });

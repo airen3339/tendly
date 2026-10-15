@@ -158,6 +158,7 @@ pub(super) fn apply_event(
             current.status = view.status;
             current.email = view.email;
             current.plan = view.plan;
+            current.quota_tier = view.quota_tier;
             current.checked_at = view.checked_at;
             current.error = view.error;
             current.limits = view.limits;

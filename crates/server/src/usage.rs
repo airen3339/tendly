@@ -976,16 +976,25 @@ async fn allowance(State(state): State<AppState>) -> Result<Json<Vec<Allowance>>
                 .limits
                 .clone()
                 .filter(|limits| limits.primary.is_some() || limits.secondary.is_some());
-            // Nobody pressed Check usage: a client whose own session logs
-            // carry the reading it last received (Codex) still has figures.
-            let (limits, observed_at, logged_plan) = match checked {
-                Some(limits) => (limits, None, None),
-                None => match crate::adapters::adapter(provider)
-                    .and_then(|client| client.logged_limits(Path::new(&account.storage_path)))
-                {
-                    Some(logged) => (logged.limits, Some(logged.observed_at), logged.plan),
-                    None => continue,
-                },
+            // A newer session reading supersedes the saved account check,
+            // including its plan, so a downgrade cannot retain old capacity.
+            let logged = crate::adapters::adapter(provider)
+                .and_then(|client| client.logged_limits(Path::new(&account.storage_path)));
+            let checked_at = account
+                .checked_at
+                .as_deref()
+                .and_then(|at| DateTime::parse_from_rfc3339(at).ok())
+                .map(|at| at.timestamp());
+            let prefer_logged = logged.as_ref().is_some_and(|logged| {
+                checked.is_none() || checked_at.is_none_or(|at| logged.observed_at > at)
+            });
+            let (limits, observed_at, logged_plan) = if prefer_logged {
+                let logged = logged.unwrap();
+                (logged.limits, Some(logged.observed_at), logged.plan)
+            } else if let Some(limits) = checked {
+                (limits, None, None)
+            } else {
+                continue;
             };
             let limits = &limits;
             let calls = collect(&[(PathBuf::from(&account.storage_path), None)]);
@@ -1026,21 +1035,31 @@ async fn allowance(State(state): State<AppState>) -> Result<Json<Vec<Allowance>>
                     tokens += call.tokens.total();
                     cost += prices.cost(call).unwrap_or(0.0);
                 }
-                let plan = account.plan.clone().or_else(|| logged_plan.clone());
+                let plan = logged_plan.clone().or_else(|| account.plan.clone());
+                let tier = if provider == ProviderKind::ClaudeCode {
+                    account.quota_tier.as_deref()
+                } else {
+                    plan.as_deref()
+                };
                 let history = learned
-                    .entry(format!(
-                        "{}/{window}/{}",
-                        account.id,
-                        plan.as_deref().unwrap_or("")
-                    ))
+                    .entry(format!("{}/{window}/{}", account.id, tier.unwrap_or("")))
                     .or_default();
-                if let (Some(resets_at), Some(size)) =
-                    (resets_at, window_size(used_percent, tokens, cost))
+                let can_estimate = provider != ProviderKind::ClaudeCode
+                    || (tier.is_some()
+                        && account.usage.as_ref().is_some_and(|usage| {
+                            usage.availability == "available" && usage.retained_checked_at.is_none()
+                        }));
+                if can_estimate
+                    && let (Some(resets_at), Some(size)) =
+                        (resets_at, window_size(used_percent, tokens, cost))
                 {
                     learn(history, resets_at, size);
                 }
-                let (total, remaining, total_cost, remaining_cost, low) =
-                    estimate(used_percent, tokens, cost, capacity(history));
+                let (total, remaining, total_cost, remaining_cost, low) = if can_estimate {
+                    estimate(used_percent, tokens, cost, capacity(history))
+                } else {
+                    (None, None, None, None, true)
+                };
                 rows.push(Allowance {
                     account_id: account.id.to_string(),
                     account: account.name.clone(),

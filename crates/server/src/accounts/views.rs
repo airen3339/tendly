@@ -36,6 +36,7 @@ pub(super) fn initial_view(state: &AppState, record: &AccountRecord) -> Result<A
         status: "unknown".into(),
         email: None,
         plan: None,
+        quota_tier: None,
         checked_at: None,
         error: None,
         login: None,
