@@ -106,7 +106,7 @@ const aliases = computed(() => { try { return { value: parseModelAliases(aliases
 const resolved = computed(() => aliases.value.value[form.model] ?? form.model);
 const offered = computed(() => offeredModels(models.value?.models ?? [], chosenModels.value));
 const choices = computed(() => [...Object.entries(aliases.value.value).map(([id, actual]) => ({id,name:id + " → " + actual})), ...offered.value]);
-const effortOptions = computed(() => modelEfforts(form.provider, resolved.value || undefined, models.value, form.effort));
+const effortOptions = computed(() => modelEfforts(form.provider, resolved.value || undefined, models.value, form.effort, !editingNative.value));
 const canSave = computed(() => !!form.name.trim() && !environmentError.value && contextValid.value && (!!editingNative.value || (secretValid.value && !aliases.value.error)));
 let discoveryRevision = 0;
 function resetDiscovery() { discoveryRevision++; models.value = undefined; modelError.value = ""; discovering.value = false; }
@@ -377,7 +377,8 @@ onBeforeUnmount(()=>{discoveryRevision++;});
               </div>
             </template>
           </div>
-          <label v-if="effortOptions.length">{{ t('Thinking depth') }}<select v-model="form.effort"><option value="">{{ t('Automatic · provider default') }}</option><option v-for="effort in effortOptions" :key="effort" :value="effort">{{ effortLabel(effort) }}</option></select></label>
+          <label v-if="effortOptions.length" :title="!editingNative ? t('Actual effort support depends on the endpoint and model.') : undefined">{{ t('Thinking depth') }}<select v-model="form.effort"><option value="">{{ t('Automatic · provider default') }}</option><option v-for="effort in effortOptions" :key="effort" :value="effort">{{ effortLabel(effort) }}</option></select></label>
+          <p v-if="effortOptions.length && !editingNative" class="form-help">{{ t('Actual effort support depends on the endpoint and model.') }}</p>
           <p v-else class="form-help">{{ t('Load a model list to show the reasoning levels supported by this model.') }}</p>
           <label>{{ t('Model aliases') }}<textarea v-model="aliasesText" rows="3" spellcheck="false" placeholder="fast = actual-model-id&#10;review = another-model-id" /></label>
           <p v-if="aliases.error" class="inline-error">{{ t(aliases.error) }}</p>

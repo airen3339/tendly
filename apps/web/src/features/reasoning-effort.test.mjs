@@ -45,3 +45,12 @@ test('only the expensive end of what is offered is marked', () => {
   assert.equal(effortVivid(effortStops(['high']), 1, 'high'), false, 'a single level is not the expensive end of anything');
   assert.equal(effortVivid(stops, 0, ''), false);
 });
+
+
+test('custom endpoints permit manual effort without model metadata, but honor advertised levels', () => {
+  assert.deepEqual(modelEfforts('codex', 'custom', undefined, undefined, true), ['low', 'medium', 'high', 'xhigh', 'max']);
+  assert.deepEqual(modelEfforts('pi', 'custom', undefined, undefined, true), ['low', 'medium', 'high']);
+  const catalog = { models: [{ id: 'custom', name: 'custom', efforts: ['low', 'high'] }], source_url: 'https://example.invalid/models', has_more: false };
+  assert.deepEqual(modelEfforts('codex', 'custom', catalog, undefined, true), ['low', 'high']);
+  assert.deepEqual(modelEfforts('codex', 'custom', undefined), []);
+});

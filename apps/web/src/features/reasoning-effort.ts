@@ -9,17 +9,19 @@ export type ReasoningEffort = typeof REASONING_EFFORTS[number];
  * Claude Code exposes --effort as a client option, so it gets every level
  * (`effortLadder` in clients.ts). Codex is model-specific and must use the
  * levels advertised by its model/list response; an empty catalog
- * deliberately produces no guessed choices.
+ * deliberately produces no guessed choices. Custom endpoints may omit capability
+ * metadata, so allow a manual choice using the client vocabulary.
  */
 export function modelEfforts(
   provider: AgentProviderKind,
   model: string | undefined,
   catalog: ModelCatalog | undefined,
   current?: string | null,
+  customEndpoint = false,
 ): string[] {
   const advertised = model ? catalog?.models.find(entry => entry.id === model)?.efforts ?? [] : [];
-  const values = agentClient(provider)?.effortLadder && !advertised.length
-    ? [...REASONING_EFFORTS]
+  const values = (customEndpoint || agentClient(provider)?.effortLadder) && !advertised.length
+    ? (provider === 'pi' ? ['low', 'medium', 'high'] : [...REASONING_EFFORTS])
     : advertised.filter(value => (REASONING_EFFORTS as readonly string[]).includes(value));
   if (current && (REASONING_EFFORTS as readonly string[]).includes(current) && !values.includes(current)) values.push(current);
   return [...new Set(values)];
