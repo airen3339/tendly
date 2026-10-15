@@ -299,3 +299,21 @@
 /* The wterm surface: rows are page text, scrolled by the browser rather than repainted. */
 .terminal-host .wterm-surface.wterm { height: 100%; padding: 0; border-radius: 0; box-shadow: none; overscroll-behavior: contain; --term-font-family: "SFMono-Regular", Consolas, "Liberation Mono", "Symbols Nerd Font Mono", "Tendly Symbols", monospace; --term-font-size: var(--text-xs); --term-line-height: 1.25; --term-row-height: calc(var(--text-xs) * 1.25); }
 .terminal-host .wterm-surface, .terminal-host .wterm-surface * { touch-action: pan-y; }
+/* Find in the terminal's history: the button in the status line and the bar over the terminal's top edge. */
+.terminal-find { margin-left: auto; }
+.terminal-attach + .terminal-find { margin-left: 0; }
+.terminal-search { position: absolute; top: 40px; right: 12px; z-index: 6; display: flex; align-items: center; gap: 2px; width: min(360px, calc(100% - 24px)); height: 36px; padding: 0 5px 0 12px; border: 1px solid var(--border); border-radius: var(--radius-full); background: var(--surface); box-shadow: var(--shadow-lg); }
+.terminal-search:focus-within { border-color: var(--teal-line); }
+.terminal-search-icon { flex-shrink: 0; margin-right: 4px; color: var(--muted); }
+.terminal-search .terminal-search-input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; outline: none; appearance: none; font: inherit; font-size: var(--text-sm); color: var(--ink); }
+.terminal-search-input::placeholder { color: var(--muted); }
+.terminal-search-count { padding: 0 6px; white-space: nowrap; font-size: var(--text-xs); font-variant-numeric: tabular-nums; color: var(--muted); }
+.terminal-search-divider { flex-shrink: 0; width: 1px; height: 18px; margin: 0 3px; background: var(--line); }
+.terminal-search-button { display: inline-grid; place-items: center; flex-shrink: 0; width: 28px; height: 28px; border: 0; border-radius: var(--radius-full); background: none; color: var(--ink-soft); cursor: pointer; }
+.terminal-search-button:hover:not(:disabled) { background: var(--sunken); color: var(--ink); }
+.terminal-search-button:disabled { opacity: .35; cursor: default; }
+.terminal-search-up { transform: rotate(-90deg); }
+.terminal-search-down { transform: rotate(90deg); }
+.native-terminal.dark .terminal-search { border-color: var(--term-line); background: var(--term-raised); }
+.native-terminal.dark .terminal-search-input, .native-terminal.dark .terminal-search-button { color: var(--term-ink); }
+.native-terminal.dark .terminal-search-button:hover:not(:disabled) { background: var(--term-line); }

@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
-import type { WTerm } from "@wterm/dom";
+import type { SearchState, WTerm } from "@wterm/dom";
 import type { GhosttyCore } from "@wterm/ghostty";
 import "@wterm/dom/css";
 import Icon from "../features/Icon.vue";
@@ -16,6 +16,8 @@ import { swipeAxis } from "../features/pane-swipe";
 import { addSample, flingStep, releaseVelocity, type TouchSample } from "../features/terminal-scroll";
 import { terminalDark as dark } from "../features/theme";
 import { quietGhostty, terminalEngine } from "../features/terminal-engine";
+import { findCount, isTerminalFind, terminalFindChord } from "../features/terminal-search";
+import { formatChord } from "../features/shortcuts";
 import { filesFrom, imageCaveat, isImage, pasteText, uploadName, uploadProblem, uploadToSession } from "../features/terminal-uploads";
 import { showToast } from "../features/toasts";
 const { t } = useI18n();
@@ -51,6 +53,18 @@ const shiftArmed = ref(false);
 const moreKeys = ref(false);
 /** Whether the view is scrolled back from the newest output, which offers a way back down. */
 const scrolledBack = ref(false);
+/**
+ * Find in the terminal's whole history, not only the rows on screen: the
+ * browser's own find sees just the rows wterm has mounted around the view.
+ */
+const searchOpen = ref(false);
+/** Whether a wterm view is up to search; xterm.js offers no find here. */
+const searchable = ref(false);
+const searchQuery = ref("");
+const searchProgress = ref<SearchState>();
+const searchField = ref<HTMLInputElement>();
+const searchCount = computed(() => findCount(searchQuery.value, searchProgress.value, t("No matches")));
+const findShortcut = formatChord(terminalFindChord());
 /**
  * Text waiting to be pasted, when the clipboard could not be read directly.
  * `undefined` means the paste field is closed.
@@ -443,6 +457,28 @@ function updateScrolledBack() {
 }
 function scrollToLatest() { stopFling(); terminal?.scrollToBottom(); if (wterm && wtermSurface) wtermSurface.scrollTop = wtermSurface.scrollHeight; updateScrolledBack(); }
 
+async function openSearch() {
+  if (!wterm) return;
+  moreKeys.value = false; searchOpen.value = true;
+  await nextTick(); searchField.value?.focus(); searchField.value?.select();
+}
+function closeSearch() {
+  searchOpen.value = false; searchProgress.value = undefined;
+  wterm?.clearSearch(); focusView();
+}
+function stepSearch(direction: 1 | -1) { if (direction > 0) wterm?.findNext(); else wterm?.findPrevious(); }
+function searchKeydown(event: KeyboardEvent) {
+  if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeSearch(); return; }
+  if (event.key === "Enter" && !event.isComposing) { event.preventDefault(); stepSearch(event.shiftKey ? -1 : 1); }
+}
+/** Taken before the terminal sees it, which would otherwise hand the key to the shell. */
+function terminalKeydown(event: KeyboardEvent) {
+  if (!wterm || event.isComposing || !isTerminalFind(event)) return;
+  event.preventDefault(); event.stopPropagation();
+  void openSearch();
+}
+watch(searchQuery, query => { if (!wterm) return; if (query.trim()) wterm.search(query); else { wterm.clearSearch(); searchProgress.value = undefined; } });
+
 function streamUrl(sessionId: string) {
   const url = new URL(`/api/sessions/${encodeURIComponent(sessionId)}/pty/ws`, window.location.href);
   url.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -516,10 +552,10 @@ function initializeWterm(target: HTMLElement) {
       ]);
       // Ghostty budgets history in bytes; this keeps several thousand wide rows.
       const core = await GhosttyCore.load({ wasmPath, scrollbackLimit: 8_000_000 });
-      const view = new WTerm(surface, { core, cursorBlink: true, onData: typed, onBinary: data => stream.send(data) });
+      const view = new WTerm(surface, { core, cursorBlink: true, onData: typed, onBinary: data => stream.send(data), onSearchChange: state => { searchProgress.value = state; } });
       await view.init();
       if (wtermSurface !== surface) { view.destroy(); core.dispose(); return; }
-      wterm = view; wtermCore = core;
+      wterm = view; wtermCore = core; searchable.value = true;
       for (const bytes of early?.splice(0) ?? []) view.write(bytes);
       early = undefined;
       surface.addEventListener("scroll", updateScrolledBack, { passive: true });
@@ -556,6 +592,7 @@ function useWebgl(target: Terminal) {
 }
 function cleanupTerminal() {
   cancelAnimationFrame(resizeFrame); cancelAnimationFrame(burstFrame); burst = undefined; stopFling(); scrolledBack.value = false;
+  searchOpen.value = false; searchProgress.value = undefined; searchable.value = false;
   observer?.disconnect(); observer = undefined;
   for (const subscription of subscriptions.splice(0)) try { subscription.dispose(); } catch { /* Best-effort cleanup after partial initialization. */ }
   try { terminal?.dispose(); } catch { /* A broken renderer should remain retryable. */ }
@@ -591,8 +628,8 @@ onUnmounted(() => { for (const entry of uploads.value) { entry.abort?.(); if (en
 </script>
 
 <template>
-  <div :class="['native-terminal', { dark: dark, dragging }]" @paste.capture="onPaste" @dragover="onDragOver" @dragleave="onDragLeave" @drop="onDrop">
-    <div class="terminal-connection"><span :class="['state-dot', state]" /><span>{{ t(state === 'connected' ? 'Live · native client' : state) }}</span><button v-if="state === 'disconnected' || state === 'error'" class="text-button" :aria-label="t('Reconnect session stream')" @click="connect"><Icon name="refresh" :size="13" />{{ t('Reconnect') }}</button><button v-if="state === 'connected'" type="button" class="text-button terminal-attach" :title="t('Add files or images: paste, drop, or pick them; their paths are typed into the terminal')" @click="pickFiles"><Icon name="plus" :size="13" />{{ t('Add file') }}</button></div>
+  <div :class="['native-terminal', { dark: dark, dragging }]" @keydown.capture="terminalKeydown" @paste.capture="onPaste" @dragover="onDragOver" @dragleave="onDragLeave" @drop="onDrop">
+    <div class="terminal-connection"><span :class="['state-dot', state]" /><span>{{ t(state === 'connected' ? 'Live · native client' : state) }}</span><button v-if="state === 'disconnected' || state === 'error'" class="text-button" :aria-label="t('Reconnect session stream')" @click="connect"><Icon name="refresh" :size="13" />{{ t('Reconnect') }}</button><button v-if="state === 'connected'" type="button" class="text-button terminal-attach" :title="t('Add files or images: paste, drop, or pick them; their paths are typed into the terminal')" @click="pickFiles"><Icon name="plus" :size="13" />{{ t('Add file') }}</button><button v-if="searchable" type="button" class="text-button terminal-find" :title="t('Find in terminal') + ' · ' + findShortcut" @pointerdown="keepFocus" @click="openSearch"><Icon name="search" :size="13" />{{ t('Find') }}</button></div>
     <input ref="fileInput" class="sr-only" type="file" multiple tabindex="-1" aria-hidden="true" @change="filesPicked" />
     <div v-if="dragging" class="terminal-drop" aria-hidden="true"><span>{{ t('Drop to add the files and type their paths') }}</span></div>
     <div v-if="uploads.length" class="terminal-uploads" role="status" aria-live="polite">
@@ -605,6 +642,7 @@ onUnmounted(() => { for (const entry of uploads.value) { entry.abort?.(); if (en
     </div>
     <div v-if="notice" :class="state === 'error' ? 'inline-error' : 'inline-notice'" :role="state === 'error' ? 'alert' : 'status'">{{ nativeNotice ? notice : t(notice) }}</div>
     <div ref="host" class="terminal-host" :aria-label="t('Native session {id}', { id: sessionId })" @pointerdown="gestureStart" @pointerup="gestureEnd" @pointercancel="gesture = undefined" @touchstart="touchScrollStart" @touchmove="touchScrollMove" @touchend="touchScrollEnd" @touchcancel="touchScroll = undefined" />
+    <div v-if="searchOpen" class="terminal-search" role="search"><Icon name="search" :size="14" class="terminal-search-icon" /><input ref="searchField" v-model="searchQuery" class="terminal-search-input" type="text" enterkeyhint="search" autocomplete="off" spellcheck="false" maxlength="200" :placeholder="t('Find in terminal')" :aria-label="t('Find in terminal')" @keydown="searchKeydown" /><span v-if="searchCount" class="terminal-search-count" role="status">{{ searchCount }}</span><span class="terminal-search-divider" aria-hidden="true" /><button type="button" class="terminal-search-button" :aria-label="t('Previous match')" :title="t('Previous match')" :disabled="!searchProgress?.count" @click="stepSearch(-1)"><Icon name="chevron" :size="14" class="terminal-search-up" /></button><button type="button" class="terminal-search-button" :aria-label="t('Next match')" :title="t('Next match')" :disabled="!searchProgress?.count" @click="stepSearch(1)"><Icon name="chevron" :size="14" class="terminal-search-down" /></button><button type="button" class="terminal-search-button" :aria-label="t('Close search')" :title="t('Close search')" @click="closeSearch"><Icon name="close" :size="13" /></button></div>
     <button v-if="scrolledBack" type="button" :class="['terminal-latest', { 'above-keys': touchDevice, 'above-more': touchDevice && moreKeys }]" :aria-label="t('Jump to latest output')" :title="t('Jump to latest output')" @pointerdown="keepFocus" @click="scrollToLatest"><Icon name="chevron" :size="14" /><span>{{ t('Latest') }}</span></button>
     <div v-if="touchDevice" class="terminal-keys" role="group" :aria-label="t('Terminal keys')">
       <div v-if="moreKeys" class="terminal-keys-row">

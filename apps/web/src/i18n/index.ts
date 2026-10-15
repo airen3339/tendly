@@ -387,6 +387,8 @@ export const zhCN: Readonly<Record<string, string>> = {
   "Previous match": "上一个匹配",
   "Next match": "下一个匹配",
   "Close search": "关闭搜索",
+  "Find in terminal": "在终端中查找",
+  "Find": "查找",
   "Search failed.": "搜索失败。",
   "This match is not shown in the conversation.": "此匹配未显示在对话中。",
   "Could not load earlier messages.": "无法加载更早的消息。",
