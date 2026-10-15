@@ -55,6 +55,7 @@ import { readPanelVisibility, sidebarIsRail, writePanelVisibility } from "./feat
 import { hasDirtyDrafts } from "./features/file-drafts";
 import { hasGitDrafts } from "./features/git-view-state";
 import { sessionConnections } from "./features/session-connection";
+import { backTargetFor, draggedSidebarWidth, hasUnsavedWork, rememberPane, resolveReference, storedSidebarWidth } from "./features/app-shell";
 import "@xterm/xterm/css/xterm.css";
 import "./styles.css";
 
@@ -193,13 +194,9 @@ let goingBack = false;
 watch(selectedPaneId, (id, previous) => {
   if (goingBack) { goingBack = false; return; }
   if (!mobile.value || !previous || id === previous) return;
-  paneHistory.value = [...paneHistory.value.filter(item => item !== previous && item !== id), previous].slice(-20);
+  paneHistory.value = rememberPane(paneHistory.value, previous, id);
 });
-const backTarget = computed(() => {
-  if (!focusedPane.value || !["git_diff", "editor", "file_preview"].includes(focusedPane.value.kind)) return undefined;
-  const open = new Set(openPanes.value.map(pane => pane.id));
-  return [...paneHistory.value].reverse().find(id => open.has(id) && id !== focusedPane.value!.id);
-});
+const backTarget = computed(() => backTargetFor(focusedPane.value, paneHistory.value, new Set(openPanes.value.map(pane => pane.id))));
 function goBack() {
   const target = backTarget.value;
   if (!target) return;
@@ -569,35 +566,19 @@ function openFile(id: string, file: FileEntry | string) {
  */
 async function openReference(id: string, reference: { path: string; line?: number; checkout?: string | null }) {
   const workspace = workspaces.value.find(item => item.id === id); if (!workspace) return;
-  let path = reference.path.replace(/^\.\//, '');
-  if (/^([A-Za-z]:)?\//.test(path)) {
-    // A Windows host reports roots as `C:\repo` while references arrive as
-    // `C:/repo/…`; compare one form, and without case, as that filesystem does.
-    const folded = (value: string) => { const plain = value.replace(/\\/g, '/').replace(/\/$/, ''); return /^[A-Za-z]:/.test(plain) ? plain.toLowerCase() : plain; };
-    const inside = (root?: string | null) => !!root && folded(path).startsWith(folded(root) + '/');
-    const base = [workspace.root_path, reference.checkout].find(inside);
-    if (!base) {
-      // Another workspace holds it: open it there. Otherwise it is shown
-      // read-only rather than refused -- the agent named it for a reason.
-      const other = workspaces.value.filter(item => inside(item.root_path)).sort((a, b) => b.root_path.length - a.root_path.length)[0];
-      if (other) {
-        const relative = path.slice(folded(other.root_path).length + 1);
-        if (reference.line) requestJump(other.id, relative, reference.line);
-        openFile(other.id, relative); return;
-      }
-      hostPreview.value = { path, line: reference.line }; return;
-    }
-    path = path.slice(folded(base).length + 1);
-  } else if (!path.includes('/')) {
+  const target = resolveReference(reference, workspace, workspaces.value);
+  if (target.kind === "host") { hostPreview.value = { path: target.path, line: reference.line }; return; }
+  let path: string;
+  if (target.kind === "search") {
     try {
-      const found = await request<{ files: { path: string; name: string; kind: string }[] }>(`${workspacePath(id)}/files/search?${new URLSearchParams({ q: path, limit: '20' })}`);
-      const exact = found.files.filter(hit => hit.kind === 'file' && hit.name === path).sort((a, b) => a.path.split('/').length - b.path.split('/').length || a.path.length - b.path.length);
-      if (!exact.length) { error.value = t('Could not find {name} in this workspace.', { name: path }); return; }
+      const found = await request<{ files: { path: string; name: string; kind: string }[] }>(`${workspacePath(id)}/files/search?${new URLSearchParams({ q: target.name, limit: '20' })}`);
+      const exact = found.files.filter(hit => hit.kind === 'file' && hit.name === target.name).sort((a, b) => a.path.split('/').length - b.path.split('/').length || a.path.length - b.path.length);
+      if (!exact.length) { error.value = t('Could not find {name} in this workspace.', { name: target.name }); return; }
       path = exact[0].path;
     } catch (cause) { report(cause); return; }
-  }
-  if (reference.line) requestJump(id, path, reference.line);
-  openFile(id, path);
+  } else path = target.path;
+  if (reference.line) requestJump(target.workspaceId, path, reference.line);
+  openFile(target.workspaceId, path);
 }
 function openChanges(id = contextWorkspace.value?.id) {
   if (!id || !workspaces.value.some(workspace => workspace.id === id)) return;
@@ -867,12 +848,12 @@ function adaptDrawers() { const desktop = window.innerWidth > 1100; if (wasDeskt
  * this browser, and a double-click on the edge puts it back.
  */
 const SIDEBAR_WIDTH_KEY = "tendly.sidebar-width.v1";
-const sidebarWidth = ref<number | undefined>((() => { try { const value = Number(storage?.getItem(SIDEBAR_WIDTH_KEY)); return value >= 184 && value <= 380 ? value : undefined; } catch { return undefined; } })());
+const sidebarWidth = ref<number | undefined>((() => { try { return storedSidebarWidth(storage?.getItem(SIDEBAR_WIDTH_KEY)); } catch { return undefined; } })());
 const bodyStyle = computed(() => sidebarWidth.value && sidebarRail.value && !sidebarCollapsed.value ? { "--rail-left": sidebarWidth.value + "px" } : undefined);
 function resizeSidebar(event: PointerEvent) {
   const handle = event.currentTarget as HTMLElement, left = handle.parentElement?.getBoundingClientRect().left ?? 0;
   handle.setPointerCapture(event.pointerId);
-  const move = (next: PointerEvent) => { sidebarWidth.value = Math.round(Math.min(380, Math.max(184, next.clientX - left))); };
+  const move = (next: PointerEvent) => { sidebarWidth.value = draggedSidebarWidth(next.clientX, left); };
   const end = () => {
     handle.removeEventListener("pointermove", move); handle.removeEventListener("pointerup", end); handle.removeEventListener("pointercancel", end);
     try { if (sidebarWidth.value) storage?.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth.value)); } catch { /* The width lasts for this page when storage is unavailable. */ }
@@ -885,7 +866,7 @@ function toggleSidebar() { if (sidebarRail.value) sidebarExpanded.value = !sideb
 // revealing a file, so the shell reopens the way the user left it.
 watch([sidebarExpanded, explorerOpen], ([sidebar, explorer]) => writePanelVisibility(storage, { sidebar, explorer }));
 function beforeUnload(event: BeforeUnloadEvent) {
-  if (hasDirtyDrafts() || hasGitDrafts() || pendingLayout || ["Saving…", "Save failed", "Save conflict", "Memory only"].includes(layoutStatus.value)) { event.preventDefault(); event.returnValue = ""; }
+  if (hasUnsavedWork({ fileDrafts: hasDirtyDrafts(), gitDrafts: hasGitDrafts(), layoutPending: !!pendingLayout, layoutStatus: layoutStatus.value })) { event.preventDefault(); event.returnValue = ""; }
 }
 /**
  * Give way to a phone keyboard.
