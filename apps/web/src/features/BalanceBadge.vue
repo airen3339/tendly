@@ -39,7 +39,7 @@ const title = computed(() => {
 </script>
 
 <template>
-  <span v-if="reading" :class="['balance-badge', balanceLevel(reading), { stale, busy }]" :title="title"><template v-if="windowName">{{ windowName }} </template>{{ balanceShort(reading, locale, compact) }}</span>
+  <span v-if="reading" :class="['balance-badge', balanceLevel(reading), { stale, busy }]" :title="title">{{ windowName ? `${windowName} ${balanceShort(reading, locale, compact)}` : balanceShort(reading, locale, compact) }}</span>
 </template>
 
 <style scoped>
