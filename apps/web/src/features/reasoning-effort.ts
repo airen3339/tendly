@@ -3,7 +3,6 @@ import { agentClient } from './clients';
 
 /** The values accepted by both native clients' configuration surfaces. */
 export const REASONING_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
-export type ReasoningEffort = typeof REASONING_EFFORTS[number];
 
 /**
  * Claude Code exposes --effort as a client option, so it gets every level

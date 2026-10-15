@@ -79,17 +79,6 @@ export function accountLimitPercent(limit?: AccountLimit, now = Date.now()): num
   if (!limit || !Number.isFinite(limit.used_percent) || limit.used_percent < 0 || limit.used_percent > 100) return undefined;
   return accountLimitExpired(limit, now) ? 0 : limit.used_percent;
 }
-/**
- * Return a label that makes the primary/secondary -> 5h/weekly mapping
- * explicit. Unknown durations intentionally remain the native slot name.
- */
-export function accountWindowLabel(slot: 'primary' | 'secondary', limit?: AccountLimit): {
-  slot: string;
-  kind?: AccountWindowKind;
-  minutes?: number;
-} {
-  return { slot, ...(limit?.window_kind ? { kind: limit.window_kind } : {}), ...(limit?.window_minutes !== undefined ? { minutes: limit.window_minutes } : {}) };
-}
 export function accountResetCreditState(account: Pick<AccountView, 'status' | 'capabilities' | 'limits'>):
   'unsupported' | 'signed_out' | 'not_reported' | 'available' | 'empty' {
   if (!account.capabilities.quota) return 'unsupported';

@@ -1,31 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chatEscapeAction, composerKeyAction, suggestionKey } from './chat-keyboard.ts';
-
-test('composer shortcuts send on Enter, preserve newlines on Shift+Enter and ignore IME composition', () => {
-  assert.equal(composerKeyAction({ key: 'Enter' }), 'send');
-  assert.equal(composerKeyAction({ key: 'Enter', ctrlKey: true }), 'send');
-  assert.equal(composerKeyAction({ key: 'Enter', metaKey: true }), 'send');
-  assert.equal(composerKeyAction({ key: 'Enter', shiftKey: true }), 'newline');
-  assert.equal(composerKeyAction({ key: 'Enter', altKey: true }), 'newline');
-  assert.equal(composerKeyAction({ key: 'Enter', isComposing: true }), 'none');
-  assert.equal(composerKeyAction({ key: 'Enter', keyCode: 229 }), 'none');
-  assert.equal(composerKeyAction({ key: 'Enter', repeat: true }), 'suppress');
-  assert.equal(composerKeyAction({ key: 'Escape' }), 'none');
-});
-
-const idle = { menuOpen: false, confirmEnd: false, confirmEndpoint: false, actionBusy: false, composerFocused: true, turnRunning: false, awaitingApproval: false, preview: false };
-
-test('Escape closes menu/confirmation first, then interrupts only the active reply', () => {
-  assert.equal(chatEscapeAction({ ...idle, menuOpen: true }), 'close-menu');
-  assert.equal(chatEscapeAction({ ...idle, confirmEnd: true }), 'cancel-end');
-  assert.equal(chatEscapeAction({ ...idle, confirmEndpoint: true }), 'cancel-endpoint');
-  assert.equal(chatEscapeAction({ ...idle, turnRunning: true }), 'interrupt');
-  assert.equal(chatEscapeAction({ ...idle, turnRunning: true, awaitingApproval: true }), 'blur');
-  assert.equal(chatEscapeAction({ ...idle, preview: true, turnRunning: true }), 'blur');
-  assert.equal(chatEscapeAction({ ...idle, actionBusy: true, turnRunning: true }), 'none');
-  assert.equal(chatEscapeAction({ ...idle, composerFocused: false }), 'none');
-});
+import { suggestionKey } from './chat-keyboard.ts';
 
 test('the composer contract documents the outer focus ring and compact desktop typography', async () => {
   const { readFile } = await import('node:fs/promises');

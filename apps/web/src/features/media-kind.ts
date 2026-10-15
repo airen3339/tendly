@@ -33,5 +33,3 @@ export function mediaKind(path: string): MediaKind {
   return BY_EXTENSION.get(extensionOf(path)) ?? "text";
 }
 
-/** Shown in place of the file, rather than read as text. */
-export const isMedia = (kind: MediaKind) => kind !== "text";

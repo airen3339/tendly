@@ -1,41 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isSameNativeSource, nativeProfileImportPayload, ownsNativeConfig, sharesHostConfig, nativeProfileRenamePayload, nativeProfileUpdatePayload, profileEnvironmentPayload, profileEnvironmentDraftChanged, sessionEffortOverride, sessionModelOverride } from './native-profiles.ts';
+import { ownsNativeConfig, sharesHostConfig, nativeProfileRenamePayload, nativeProfileUpdatePayload, profileEnvironmentPayload, profileEnvironmentDraftChanged, sessionEffortOverride, sessionModelOverride } from './native-profiles.ts';
 import { environmentRows } from './environment-model.ts';
 
 const source = { id: 'native-codex', provider: 'codex', label: 'Host Codex', path: '/host/native/config', available: true };
 const profile = { id: 'shared-profile', provider: 'codex', native_config: { source_id: source.id, config_dir: source.path } };
-
-test('an existing native source matches provider, source ID and canonical directory together', () => {
-  assert.equal(isSameNativeSource(profile, source), true);
-  assert.equal(isSameNativeSource(profile, { ...source, label: 'Renamed source' }), true);
-  assert.equal(isSameNativeSource(profile, { ...source, path: '/host/different-account' }), false);
-  assert.equal(isSameNativeSource(profile, { ...source, provider: 'claude_code' }), false);
-  assert.equal(isSameNativeSource(profile, { ...source, id: 'different-source' }), false);
-  assert.equal(isSameNativeSource({ ...profile, native_config: null }, source), false);
-  assert.equal(isSameNativeSource(profile, undefined), false);
-});
-
-test('native sources preserve unset versus explicit directory environment for authentication context', () => {
-  assert.equal(isSameNativeSource(profile, { ...source, config_env: null }), true);
-  assert.equal(isSameNativeSource({ ...profile, native_config: { ...profile.native_config, config_env: null } }, source), true);
-  assert.equal(isSameNativeSource(profile, { ...source, config_env: source.path }), false);
-  const explicitProfile = { ...profile, native_config: { ...profile.native_config, config_env: source.path } };
-  assert.equal(isSameNativeSource(explicitProfile, source), false);
-  assert.equal(isSameNativeSource(explicitProfile, { ...source, config_env: source.path }), true);
-  assert.equal(isSameNativeSource(explicitProfile, { ...source, config_env: '/different-spelling-of-same-directory' }), false);
-});
-
-test('native import requires an available source and explicit shared-configuration consent', () => {
-  assert.equal(nativeProfileImportPayload(source, 'Personal', false), undefined);
-  assert.equal(nativeProfileImportPayload({ ...source, available: false }, 'Personal', true), undefined);
-  assert.equal(nativeProfileImportPayload(undefined, 'Personal', true), undefined);
-});
-
-test('native import posts only a source reference, optional name and consent, never host credentials or overrides', () => {
-  assert.deepEqual(nativeProfileImportPayload(source, ' Personal Codex ', true), { source_id: 'native-codex', name: 'Personal Codex', confirmed_shared_config: true });
-  assert.deepEqual(nativeProfileImportPayload(source, '  ', true), { source_id: 'native-codex', confirmed_shared_config: true });
-});
 
 test('renaming a native profile sends no mutable client settings', () => {
   assert.deepEqual(nativeProfileRenamePayload('  Host work account '), { name: 'Host work account' });

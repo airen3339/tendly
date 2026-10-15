@@ -3,10 +3,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  activatePane, applyPreset, cloneNode, closePane, collapseBelowMin, containerId,
+  activatePane, applyPreset, cloneNode, closePane, containerId,
   createDefaultLayoutDocument, createPane, dockPane, findNode, findNodes,
   flattenPanes, isPaneNode, normalizeRatio, projectLayout, replacePane, resizeSplit,
-  restoreCollapsed, selectionGroups, snapRatio, splitPane, updatePane, validateLayout, validateLayoutDetailed,
+  restoreCollapsed, selectionGroups, snapRatio, splitPane, updatePane, validateLayout,
 } from './layout-engine.ts';
 
 const pane = (id) => createPane(id, 'agent_chat', `Session ${id}`, { session_id: id, input: `draft-${id}` });
@@ -240,9 +240,9 @@ test('center docking into projected group does not flatten its canonical split',
 });
 
 test('legacy collapsed snapshot restoration honors closes, edits and new tabs', () => {
-  const original = { version: 1, root: split('s', pane('a'), pane('b')) };
-  const collapsed = collapseBelowMin(original, 320, 600);
-  assert.equal(collapsed.root.type, 'stack');
+  // What an older version stored for a split too narrow to show: the tabs it
+  // became, and the split to put back.
+  const collapsed = { version: 1, root: stack('s:tabs', [pane('a'), pane('b')]), collapsed: [{ splitId: 's', replacementId: 's:tabs', node: split('s', pane('a'), pane('b')) }] };
   collapsed.root.panes = [{ ...pane('b'), title: 'updated' }, pane('c')];
   collapsed.root.activePaneId = 'c';
   const recovered = restoreCollapsed(collapsed);
@@ -278,13 +278,13 @@ test('repeated move / preset / close / project operations maintain invariant IDs
 });
 
 test('a detailed validation names where each problem is', () => {
-  assert.deepEqual(validateLayoutDetailed({ version: 1, root: split('s', pane('a'), pane('b')) }), { valid: true, errors: [] });
+  assert.deepEqual(validateLayout({ version: 1, root: split('s', pane('a'), pane('b')) }, true), { valid: true, errors: [] });
   const broken = {
     version: 0,
     root: split('s', { type: 'pane', id: 'a', kind: 'browser' }, stack('t', [pane('a'), { type: 'split', id: 'x' }], 'gone'), 'diagonal', 1),
     collapsed: 'nope',
   };
-  const { valid, errors } = validateLayoutDetailed(broken);
+  const { valid, errors } = validateLayout(broken, true);
   assert.equal(valid, false);
   for (const expected of [
     'version must be a positive integer',
@@ -301,7 +301,7 @@ test('a detailed validation names where each problem is', () => {
 test('validation stops at its safety limit instead of walking a runaway tree', () => {
   let node = pane('leaf');
   for (let i = 0; i < 200; i++) node = split(`s${i}`, node, pane(`p${i}`));
-  const result = validateLayoutDetailed(node);
+  const result = validateLayout(node, true);
   assert.equal(result.valid, false);
   assert.deepEqual(result.errors.filter(e => e === 'layout exceeds safety limit'), ['layout exceeds safety limit'], 'reported once');
 });

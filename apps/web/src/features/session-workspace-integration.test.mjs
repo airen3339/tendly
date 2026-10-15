@@ -8,7 +8,7 @@ import { renderToString } from 'vue/server-renderer';
 import { paneSession, paneWorkspace, sessionPane } from './pane-context.ts';
 import { workspaceSessionPane, groupWorkspaces } from './workspace-groups.ts';
 import {
-  applyPreset, closePane, collapseBelowMin, cloneNode, dockPane, flattenPanes,
+  applyPreset, closePane, cloneNode, dockPane, flattenPanes,
   projectLayout, restoreCollapsed, splitPane, validateLayout,
 } from '../layout/layout-engine.ts';
 
@@ -107,7 +107,11 @@ test('splits, responsive collapse, preset remounts and restore preserve session/
   assertMetadata(projectLayout(canonical, 1600, 900));
   assert.equal(JSON.stringify(canonical), before, 'responsive projection is a disposable view');
 
-  const collapsed = collapseBelowMin(canonical, 390, 640);
+  // What an older version stored when the canvas was too narrow: one group of
+  // tabs, and the split to put back. It still has to read back intact.
+  assert.equal(canonical.type, 'split');
+  const tabs = flattenPanes(canonical);
+  const collapsed = { version: 1, root: { type: 'stack', kind: 'stack', id: 'legacy-tabs', panes: tabs, activePaneId: tabs[0].id }, collapsed: [{ splitId: canonical.id, replacementId: 'legacy-tabs', node: cloneNode(canonical) }] };
   assertMetadata(collapsed.root);
   const restored = restoreCollapsed(collapsed);
   assertMetadata(restored.root);
