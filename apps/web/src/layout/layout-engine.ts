@@ -345,3 +345,26 @@ export function validateLayoutDetailed(value: unknown): LayoutValidationResult {
 export function isPaneNode(value: unknown): value is PaneNode {
   return !!value && typeof value === "object" && "type" in value && value.type === "pane" && validateLayout(value);
 }
+
+/**
+ * The pane that stands for a node: the pane itself, a stack's active tab (or
+ * its first), or the first pane under a split.
+ */
+export function representativePane(node: LayoutNode | undefined): PaneNode | undefined {
+  if (!node) return undefined;
+  if (node.type === "pane") return node;
+  if (node.type === "stack") return node.panes.find(pane => pane.id === node.activePaneId) ?? node.panes[0];
+  return flattenPanes(node)[0];
+}
+
+/**
+ * Where a pane dropped into the middle of `id` goes. A split that is shown
+ * collapsed into tabs (narrow screen) takes it beside the tab on show there,
+ * in that tab's own container; anything else takes it as it is.
+ */
+export function centerDockTarget(root: LayoutNode, projected: LayoutNode, id: string): string {
+  if (findNode(root, id)?.type !== "split") return id;
+  const group = findNodes(projected, node => node.type === "stack" && node.collapsedFrom === id)[0];
+  const activeId = group?.type === "stack" ? group.activePaneId : undefined;
+  return activeId ? containerId(root, activeId) : id;
+}

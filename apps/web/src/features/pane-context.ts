@@ -143,3 +143,16 @@ export function paneDisplayTitle(pane: PaneNode, translate: (text: string) => st
   if (pane.title && (pane.metadata?.session_id || pane.metadata?.path)) return pane.title;
   return translate(pane.title || PANE_NAMES[pane.kind] || pane.kind);
 }
+
+/**
+ * An open pane `incoming` can take the place of: one of the same kind that
+ * shows nothing yet -- no session, no file, no unsent draft -- and belongs to
+ * no other workspace. Git changes are never replaced: each workspace keeps its
+ * own.
+ */
+export function reusablePane(open: readonly PaneNode[], incoming: PaneNode): PaneNode | undefined {
+  if (incoming.kind === "git_diff") return undefined;
+  return open.find(candidate => candidate.kind === incoming.kind
+    && !candidate.metadata?.session_id && !candidate.metadata?.path && !candidate.metadata?.draft
+    && (!candidate.metadata?.workspace_id || candidate.metadata.workspace_id === incoming.metadata?.workspace_id));
+}

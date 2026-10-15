@@ -80,3 +80,19 @@ test('unified diff line numbers follow hunk starts and reset between files', () 
   assert.equal(rows[9].kind, 'meta');
   assert.deepEqual([rows[11].before, rows[11].after, rows[11].kind], ['', 1, 'added']);
 });
+
+test('an empty pane of the same kind in the same workspace is reused; git changes never are', async () => {
+  const { reusablePane } = await import('./pane-context.ts');
+  const pane = (id, kind, metadata) => ({ type: 'pane', id, kind, ...(metadata ? { metadata } : {}) });
+  const open = [
+    pane('busy', 'editor', { path: 'a.ts' }),
+    pane('draft', 'editor', { draft: true }),
+    pane('other', 'editor', { workspace_id: 'w2' }),
+    pane('blank', 'editor', { workspace_id: 'w1' }),
+    pane('diff', 'git_diff'),
+  ];
+  assert.equal(reusablePane(open, pane('new', 'editor', { workspace_id: 'w1', path: 'b.ts' }))?.id, 'blank');
+  assert.equal(reusablePane(open, pane('new', 'editor', { workspace_id: 'w3', path: 'b.ts' })), undefined, 'every empty editor belongs to another workspace');
+  assert.equal(reusablePane(open, pane('new', 'git_diff', { workspace_id: 'w1' })), undefined);
+  assert.equal(reusablePane([pane('loose', 'editor')], pane('new', 'editor', { workspace_id: 'w1' }))?.id, 'loose', 'a pane of no workspace can be taken');
+});

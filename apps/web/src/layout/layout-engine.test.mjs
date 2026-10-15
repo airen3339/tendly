@@ -305,3 +305,23 @@ test('validation stops at its safety limit instead of walking a runaway tree', (
   assert.equal(result.valid, false);
   assert.deepEqual(result.errors.filter(e => e === 'layout exceeds safety limit'), ['layout exceeds safety limit'], 'reported once');
 });
+
+test('a node is represented by its active tab, or its first pane', async () => {
+  const { representativePane } = await import('./layout-engine.ts');
+  assert.equal(representativePane(pane('a')).id, 'a');
+  assert.equal(representativePane(stack('t', [pane('a'), pane('b')], 'b')).id, 'b');
+  assert.equal(representativePane(stack('t', [pane('a'), pane('b')], 'gone')).id, 'a', 'a missing active tab falls back to the first');
+  assert.equal(representativePane(split('s', stack('t', [pane('c')]), pane('d'))).id, 'c');
+  assert.equal(representativePane(undefined), undefined);
+});
+
+test('dropping into the middle of a collapsed split lands beside the tab on show', async () => {
+  const { centerDockTarget, projectLayout } = await import('./layout-engine.ts');
+  const root = split('s', stack('left', [pane('a')]), stack('right', [pane('b')]));
+  // Wide enough: the split is a split, and is the target as it is.
+  assert.equal(centerDockTarget(root, root, 's'), 's');
+  // Too narrow: it shows as one stack of tabs, and the drop joins the container of the tab on show.
+  const narrow = projectLayout(root, 300, 600, { selectedPaneId: 'b' });
+  assert.equal(centerDockTarget(root, narrow, 's'), 'right');
+  assert.equal(centerDockTarget(root, narrow, 'a'), 'a', 'a pane is its own target');
+});
