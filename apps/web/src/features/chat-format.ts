@@ -50,3 +50,25 @@ export function dockHeading(tools: readonly ToolItem[], t: Translate): string {
   if (!agents) return commands === 1 ? t("1 background command running") : t("{count} background commands running", { count: commands });
   return t("{agents} subagents and {commands} commands running", { agents, commands });
 }
+
+/** What the pane is doing, as far as its status line is concerned. */
+export interface ChatStatus {
+  preview: boolean;
+  booting: boolean;
+  loading: boolean;
+  awaitingApproval: boolean;
+  working: boolean;
+  disconnected: boolean;
+  structured: boolean;
+}
+
+/** The status line's text, untranslated: the most pressing of the pane's states wins. */
+export function statusLabel(state: ChatStatus): string {
+  if (state.preview) return "Read-only UI preview";
+  if (state.booting) return "Starting {provider}…";
+  if (state.loading) return "Loading conversation…";
+  if (state.awaitingApproval) return "Waiting for your approval";
+  if (state.working) return "Agent is working";
+  if (state.disconnected) return "View disconnected";
+  return state.structured ? "Ready for your next idea" : "Native client session";
+}

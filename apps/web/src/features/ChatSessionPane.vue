@@ -19,7 +19,8 @@ import { useMobile } from './mobile';
 import { describeModel, resolvedDefaultName } from './model-description';
 import ContextRing from './ContextRing.vue';
 import { effortLabel, modelEfforts } from './reasoning-effort';
-import { attachmentError, canSendMessage, composeMessage, formatBytes, MAX_ATTACHMENTS_PER_MESSAGE, type Attachment } from './attachment-state';
+import { attachmentError, canSendMessage, composeMessage, formatBytes, MAX_ATTACHMENTS_PER_MESSAGE, pastedFile, type Attachment } from './attachment-state';
+import { ACCESS_LABEL, approvalBody, approvalChoices, DECISION_LABEL, type ApprovalDecision } from './chat-approvals';
 import { applyCommand, matchCommands, moveHighlight, slashQuery, unsupportedCommand } from './slash-commands';
 import { MarkdownContent } from './MarkdownContent';
 import { handoffArrivals, handoffTranscript } from './handoff';
@@ -37,7 +38,7 @@ import { followsAfterScroll, PERSON_WINDOW_MS, UPWARD_KEYS } from './scroll-foll
 import { filterModels, mergeModels, resolveModel, offeredModels } from './model-choices';
 import { openLightbox } from './image-lightbox';
 import { compactCount, descendants, dockRoots, inDock, isLive, lastLine, runningSubagents, stalledFor, toolRuns, toolRunNames, toolIndicator, toolRunStatus, toolsById, type ToolRun } from './tool-runs';
-import { dockHeading as dockHeadingText, statsLine as formatStats, turnUsageLine as formatTurnUsage, turnUsageTitle as formatTurnUsageTitle } from './chat-format';
+import { dockHeading as dockHeadingText, statusLabel as chatStatusLabel, statsLine as formatStats, turnUsageLine as formatTurnUsage, turnUsageTitle as formatTurnUsageTitle } from './chat-format';
 import { mentionQuery, applyMention } from './file-mentions';
 import { createFileSearch } from './file-search';
 import type { SearchHit } from './file-search';
@@ -755,7 +756,15 @@ const canConfigure = computed(() => !isPreview.value && capabilities.sessionConf
 const structuredSession = computed(() => mode.value === 'structured' || mode.value === undefined && props.session.interaction_mode === 'structured');
 const booting = computed(() => !isPreview.value && supported.value && structuredSession.value && !view.value.ready && !error.value
   && (!!(entry.value as { pending?: unknown }).pending || running.value || loading.value && ['starting', 'running', 'waiting'].includes(props.session.status)));
-const statusLabel = computed(() => isPreview.value ? 'Read-only UI preview' : booting.value ? 'Starting {provider}…' : loading.value ? 'Loading conversation…' : view.value.awaitingApproval ? 'Waiting for your approval' : view.value.turn === 'running' ? 'Agent is working' : streamState.value === 'error' || streamState.value === 'disconnected' ? 'View disconnected' : mode.value === 'structured' ? 'Ready for your next idea' : 'Native client session');
+const statusLabel = computed(() => chatStatusLabel({
+  preview: isPreview.value,
+  booting: booting.value,
+  loading: loading.value,
+  awaitingApproval: view.value.awaitingApproval,
+  working: view.value.turn === 'running',
+  disconnected: streamState.value === 'error' || streamState.value === 'disconnected',
+  structured: mode.value === 'structured',
+}));
 let generation = 0, readController: AbortController | undefined, stream: ReturnType<typeof createSessionStream> | undefined, stopBatch = () => {};
 
 // Whether the view keeps following the newest output (scroll-follow.ts): a
@@ -1030,12 +1039,7 @@ async function pasteFiles(event: ClipboardEvent) {
   // Preserve native insertion (including the caret/selection and undo) for mixed
   // text + image clipboards; suppress only a file-only paste.
   if (!event.clipboardData?.getData('text/plain')) event.preventDefault();
-  await uploadFiles(files.map(file => {
-    if (file.name && file.name !== 'image.png') return file;
-    const extension = file.type.split('/')[1]?.replace(/[^a-z0-9]/gi, '') || 'bin';
-    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    return new File([file], `pasted-${stamp}.${extension}`, { type: file.type });
-  }));
+  await uploadFiles(files.map(file => pastedFile(file, new Date())));
 }
 async function dropFiles(event: DragEvent) {
   const files = [...(event.dataTransfer?.files ?? [])];
@@ -1157,23 +1161,6 @@ const dockedApproval = computed(() => pendingApprovals.value[dockedIndex.value])
 const foldedApprovals = reactive(new Set<string>());
 function toggleApprovalFold(id: string) { if (!foldedApprovals.delete(id)) foldedApprovals.add(id); }
 const acceptKey = isMac ? '⌘↵' : 'Ctrl+↵';
-type ApprovalDecision = 'accept' | 'accept_session' | 'decline' | 'cancel';
-const approvalChoices = (item: Extract<ChatItem, { type: 'approval' }>) => item.choices.filter(choice => ['accept', 'accept_session', 'decline', 'cancel'].includes(choice)) as ApprovalDecision[];
-const DECISION_LABEL: Record<ApprovalDecision, string> = { accept: 'Allow once', accept_session: 'Allow for this session', decline: 'Decline', cancel: 'Cancel turn' };
-const ACCESS_LABEL: Record<string, string> = { read: 'Read', write: 'Write', execute: 'Run a command', network: 'Network access' };
-/**
- * A native request's text is usually the client's own JSON. Its reason reads
- * as a sentence; the rest is detail, folded away rather than shown raw.
- */
-function approvalBody(text: string): { reason?: string; detail?: string } | undefined {
-  try {
-    const parsed: unknown = JSON.parse(text);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
-    const { reason, ...rest } = parsed as Record<string, unknown>;
-    const detail = Object.fromEntries(Object.entries(rest).filter(([, value]) => value !== undefined && value !== null));
-    return { reason: typeof reason === 'string' && reason.trim() ? reason : undefined, detail: Object.keys(detail).length ? JSON.stringify(detail, null, 2) : undefined };
-  } catch { return undefined; }
-}
 function clearAnswers(id?: string) { for (const key of id ? [id] : new Set([...Object.keys(approvalAnswers), ...Object.keys(approvalOther)])) { delete approvalAnswers[key]; delete approvalOther[key]; } }
 function answer(id: string, question: string, event: Event) { const value = (event.target as HTMLInputElement).value; (approvalAnswers[id] ??= Object.create(null))[question] = value && value !== OTHER_ANSWER ? [value] : []; if (value !== OTHER_ANSWER && approvalOther[id]) delete approvalOther[id][question]; }
 function toggleAnswer(id: string, question: string, value: string, event: Event) { const current = (approvalAnswers[id] ??= Object.create(null))[question] ?? []; approvalAnswers[id][question] = (event.target as HTMLInputElement).checked ? [...new Set([...current, value])] : current.filter(item => item !== value); }
