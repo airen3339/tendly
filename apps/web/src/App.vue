@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, provide, reactive, ref, watch } from "vue";
-import { shellHeight } from "./features/viewport-height";
-import type { EndpointProfile, FileEntry, GitStatus, LayoutDocument, LayoutNode, PaneNode, ProviderKind, Session, Workspace } from "@tendly/protocol";
+import { useKeyboardFit } from "./features/viewport-height";
+import type { EndpointProfile, FileEntry, LayoutDocument, PaneNode, ProviderKind, Session, Workspace } from "@tendly/protocol";
 import Canvas from "./components/Canvas.vue";
 import { randomId } from "./features/random-id";
-import { createDefaultLayoutDocument, flattenPanes, validateLayout } from "./layout/layout-engine";
+import { createDefaultLayoutDocument, flattenPanes } from "./layout/layout-engine";
 import WorkspaceSidebar from "./features/WorkspaceSidebar.vue";
 import WorkspacePane from "./features/WorkspacePane.vue";
 import FileExplorer from "./features/FileExplorer.vue";
@@ -34,37 +34,39 @@ import TabIcon from "./features/TabIcon.vue";
 import BottomSheet from "./features/BottomSheet.vue";
 import AgentActivity, { type ShowTarget } from "./features/AgentActivity.vue";
 import ToastHost from "./features/ToastHost.vue";
-import CommandPalette, { type PaletteItem } from "./features/CommandPalette.vue";
+import CommandPalette from "./features/CommandPalette.vue";
 import ShortcutsDialog from "./features/ShortcutsDialog.vue";
-import { SHORTCUTS, formatChord, shortcutFor } from "./features/shortcuts";
+import { shortcutFor } from "./features/shortcuts";
 import { setThemePreference } from "./features/theme";
 import { isSessionArchived } from "./features/session-list";
-import { showToast, type ToastAction } from "./features/toasts";
 import { attentionTitle, trackSessions, waitingIds } from "./features/attention";
 import { useMobile } from "./features/mobile";
 import { useI18n } from "./i18n";
 import { ApiConnectionError, ApiError, errorMessage, json, providerLabel, request, workspacePath } from "./features/api";
 import { AGENT_CLIENTS, DEFAULT_CLIENT, PROVIDER_KINDS } from "./features/clients";
 import { loadPreferences, preferenceFor } from "./features/preferences";
-import { paneDisplayTitle, paneString, paneWorkspace, paneSession, filePane, changesPane, sessionPane, renameSessionPanes, scopeLegacyLayout, acceptsScopedPane, ephemeralSessionIds, markEphemeralPanes, withoutDiscardedPanes } from "./features/pane-context";
+import { paneDisplayTitle, paneString, paneWorkspace, paneSession, filePane, changesPane, sessionPane, renameSessionPanes, acceptsScopedPane, ephemeralSessionIds, withoutDiscardedPanes } from "./features/pane-context";
 import { isEphemeralSession } from "./features/session-list";
 import { lastQuickProvider, planQuickSession, rememberQuickProvider } from "./features/quick-session";
 import { backendCapabilities, setBackendCapabilities, type BackendHealth } from "./features/backend-capabilities";
-import { browserStorage, canvasStorageKey, readCanvasCache, writeCanvasCache, sameCanvasLayout } from "./features/canvas-cache";
-import { readPanelVisibility, sidebarIsRail, writePanelVisibility } from "./features/panel-state";
+import { browserStorage, canvasStorageKey } from "./features/canvas-cache";
+import { readPanelVisibility, sidebarIsRail, useSidebarWidth, writePanelVisibility } from "./features/panel-state";
 import { hasDirtyDrafts } from "./features/file-drafts";
 import { hasGitDrafts } from "./features/git-view-state";
 import { sessionConnections } from "./features/session-connection";
-import { backTargetFor, draggedSidebarWidth, hasUnsavedWork, rememberPane, resolveReference, storedSidebarWidth } from "./features/app-shell";
+import { backTargetFor, hasUnsavedWork, rememberPane, resolveReference } from "./features/app-shell";
+import { layoutInTrouble, useCanvasPersistence } from "./features/canvas-persistence";
+import { opensOnArrival, useSessionChanges } from "./features/session-changes";
+import { paletteItems as buildPaletteItems, shortcutHint } from "./features/palette-items";
+import { useWorkspaceGit } from "./features/workspace-git";
 import "@xterm/xterm/css/xterm.css";
 import "./styles.css";
 
-interface SharedCanvas { layout: LayoutDocument | null; revision: number }
 const { t, locale, setLocale } = useI18n();
 const workspaces = ref<Workspace[]>([]), sessions = ref<Session[]>([]), profiles = ref<EndpointProfile[]>([]);
 const selectedWorkspaceId = ref(""), selectedPaneId = ref<string>();
 const selectedWorkspace = computed(() => workspaces.value.find(workspace => workspace.id === selectedWorkspaceId.value));
-const layout = ref<LayoutDocument>(createDefaultLayoutDocument()), canvasReady = ref(false);
+const layout = ref<LayoutDocument>(createDefaultLayoutDocument());
 const canvas = ref<InstanceType<typeof Canvas>>(), explorer = ref<InstanceType<typeof FileExplorer>>();
 const workspaceSidebar = ref<InstanceType<typeof WorkspaceSidebar>>();
 const focusedPane = computed(() => flattenPanes(layout.value.root).find(pane => pane.id === selectedPaneId.value));
@@ -106,35 +108,30 @@ function leavePage() {
   if (window.history.state?.back) router.back();
   else void router.push({ name: "canvas" });
 }
-const archiveBusyIds = ref<string[]>([]), keepBusyIds = ref<string[]>([]), deleteBusyIds = ref<string[]>([]), quickBusy = ref(false);
+const quickBusy = ref(false);
 const ephemeralIds = computed(() => ephemeralSessionIds(sessions.value));
-const discardPrompt = ref<{ paneId: string; session: Session }>();
-const sessionNotice = ref(""), sessionNoticeValues = ref<Record<string, number>>();
-const enablingChat = new Set<string>();
 const historyWorkspaceId = ref<string>();
 const environmentSessionId = ref<string>();
 const renameSessionId = ref<string>();
 const environmentSession = computed(() => sessions.value.find(session => session.id === environmentSessionId.value));
 const renameSessionTarget = computed(() => sessions.value.find(session => session.id === renameSessionId.value));
 const historyWorkspace = computed(() => workspaces.value.find(workspace => workspace.id === historyWorkspaceId.value));
-const gitStatuses = ref<Record<string, GitStatus>>({}), gitAvailable = ref<Record<string, boolean>>({});
-const fileRefresh = ref<Record<string, number>>({}), gitRefresh = ref<Record<string, number>>({});
-const currentGit = computed<GitStatus>(() => gitStatuses.value[contextWorkspace.value?.id ?? ""] ?? { branch: null, files: [] });
-const currentGitAvailable = computed(() => !!gitAvailable.value[contextWorkspace.value?.id ?? ""]);
+const { gitStatuses, fileRefresh, gitRefresh, currentGit, currentGitAvailable, workspaceBranches, tick, gitChanged, refreshGit, filesSaved } = useWorkspaceGit({ contextWorkspace, activeSessions, paused: () => showAuth.value, report });
 const storage = browserStorage();
 const storageKey = computed(() => canvasStorageKey(window.location.origin, workspaces.value));
-const layoutStatus = ref("Saved"), canvasRevision = ref(0), canvasConflict = ref(false);
-const localRecovery = ref<LayoutDocument>();
-let suspendLayoutSave = true, disposed = false, bootstrapRevision = 0;
-let layoutTimer: ReturnType<typeof setTimeout> | undefined, pollTimer: ReturnType<typeof setInterval> | undefined;
-let pendingLayout: LayoutDocument | undefined;
-let saveQueue: Promise<void> = Promise.resolve();
+const { canvasReady, layoutStatus, canvasRevision, canvasConflict, localRecovery, cacheLayout, queueLayout, flushLayout, initializeCanvas, resolveCanvasConflict, restoreLocalRecovery, agentCanvas, hasPendingLayout, dispose: disposeCanvas } = useCanvasPersistence({
+  layout, selectedPaneId, sessions, storage, storageKey, report,
+  onReady: preferred => { explorerWorkspaceId.value = contextWorkspace.value?.id ?? preferred.id; },
+});
+const layoutTrouble = computed(() => layoutInTrouble(layoutStatus.value));
+let disposed = false, bootstrapRevision = 0;
+let pollTimer: ReturnType<typeof setInterval> | undefined;
 const sessionsLoading = ref(false);
 /** Set once the session list has loaded, so an empty list before then is not read as "every session is gone". */
 const sessionsKnown = ref(false);
 let sessionsRevision = 0;
+const { archiveBusyIds, keepBusyIds, deleteBusyIds, discardPrompt, sessionNotice, archiveSession, archiveSessions, deleteSessions, confirmClosePane, confirmDiscard, keepSession, keepSessionById, renameSession, enableChat } = useSessionChanges({ sessions, layout, canvas, report, t, touch: () => { sessionsRevision++; } });
 let workspaceRegistryRevision = 0;
-const gitLoading = new Set<string>();
 let wasDesktop = window.innerWidth > 1100;
 /**
  * A phone gets one pane at a time. What the tab strip and layout tools do on
@@ -142,6 +139,7 @@ let wasDesktop = window.innerWidth > 1100;
  * title, and the status bar's contents move into the drawer.
  */
 const mobile = useMobile();
+useKeyboardFit();
 const switcherOpen = ref(false);
 const openPanes = computed(() => flattenPanes(layout.value.root));
 const paneTitle = (pane: PaneNode) => paneDisplayTitle(pane, t);
@@ -155,23 +153,6 @@ function switchPane(pane: PaneNode) { switcherOpen.value = false; void canvas.va
 async function closeOpenPane(pane: PaneNode) { await canvas.value?.closePane(pane.id); }
 /** An agent changed something: show it without waiting for the next poll. */
 function agentChanged() { void refreshProfiles(); void refreshResources(); void loadPreferences(true); }
-/**
- * An agent changed the shared canvas on the server (closing tabs). Load it,
- * unless this window has a change of its own not yet saved: then it is the
- * same situation as another window saving first, and the same bar asks.
- */
-async function agentCanvas(revision: number) {
-  if (!canvasReady.value || !backendCapabilities.sharedCanvas || revision <= canvasRevision.value) return;
-  if (pendingLayout || canvasConflict.value) { canvasConflict.value = true; return; }
-  try {
-    const shared = await request<SharedCanvas>("/canvas/layout");
-    if (!shared.layout || !validateLayout(shared.layout) || shared.revision <= canvasRevision.value || pendingLayout) return;
-    canvasRevision.value = shared.revision;
-    suspendLayoutSave = true; layout.value = shared.layout;
-    if (!flattenPanes(shared.layout.root).some(pane => pane.id === selectedPaneId.value)) selectedPaneId.value = initialPane(shared.layout.root)?.id;
-    await nextTick(); suspendLayoutSave = false; cacheLayout(layout.value, false); layoutStatus.value = "Saved";
-  } catch (cause) { report(cause); }
-}
 /** An agent pointed at something (tendly_show), or a notice's Open. */
 async function agentShow(target: ShowTarget) {
   if (target.kind === "file") void openReference(target.workspace_id, { path: target.path, line: target.line ?? undefined, checkout: target.checkout });
@@ -217,102 +198,6 @@ function report(cause: unknown) {
 }
 function rememberWorkspace(id: string) { try { storage?.setItem("tendly:last-workspace", id); } catch { /* Optional preference. */ } }
 function rememberedWorkspace() { try { return storage?.getItem("tendly:last-workspace"); } catch { return null; } }
-function copyLayout(document: LayoutDocument): LayoutDocument { return JSON.parse(JSON.stringify(document)); }
-function sameLayout(a: LayoutDocument, b: LayoutDocument) { return sameCanvasLayout(a, b); }
-function initialPane(node: LayoutNode): PaneNode | undefined {
-  if (node.type === "pane") return node;
-  if (node.type === "stack") return node.panes.find(pane => pane.id === node.activePaneId) ?? node.panes[0];
-  return initialPane(node.first) ?? initialPane(node.second);
-}
-/** Everything that leaves this page — server canvas, browser cache, recovery
- * snapshot — marks temporary windows, so a reload keeps them open (and
- * closable) while their session lives, and drops them once it is discarded. */
-function persistableLayout(document: LayoutDocument) { return markEphemeralPanes(document, sessions.value); }
-function cacheLayout(document: LayoutDocument, pending: boolean) { return writeCanvasCache(storage, storageKey.value, persistableLayout(document), pending); }
-function queueLayout(document: LayoutDocument) {
-  const snapshot = persistableLayout(copyLayout(document));
-  const cached = cacheLayout(snapshot, backendCapabilities.sharedCanvas);
-  if (!backendCapabilities.sharedCanvas) { layoutStatus.value = cached ? "Saved in this browser" : "Memory only"; return; }
-  pendingLayout = snapshot; layoutStatus.value = canvasConflict.value ? "Save conflict" : "Unsaved";
-  clearTimeout(layoutTimer); layoutTimer = setTimeout(() => void flushLayout(), 450);
-}
-function persist(document: LayoutDocument) {
-  saveQueue = saveQueue.then(async () => {
-    if (canvasConflict.value || disposed) return;
-    layoutStatus.value = "Saving…";
-    try {
-      const saved = await request<{ revision: number }>("/canvas/layout", json("PUT", { layout: document, expected_revision: canvasRevision.value }));
-      canvasRevision.value = saved.revision;
-      if (!pendingLayout && sameLayout(document, persistableLayout(layout.value))) { cacheLayout(document, false); layoutStatus.value = "Saved"; }
-    } catch (cause) {
-      if (cause instanceof ApiError && cause.status === 409) {
-        canvasConflict.value = true; layoutStatus.value = "Save conflict";
-      } else { layoutStatus.value = "Save failed"; report(cause); }
-    }
-  });
-  return saveQueue;
-}
-async function flushLayout() {
-  clearTimeout(layoutTimer);
-  if (pendingLayout) { const document = pendingLayout; pendingLayout = undefined; void persist(document); }
-  await saveQueue;
-}
-watch(layout, document => {
-  if (suspendLayoutSave || !canvasReady.value) return;
-  if (selectedPaneId.value && !flattenPanes(document.root).some(pane => pane.id === selectedPaneId.value)) selectedPaneId.value = initialPane(document.root)?.id;
-  queueLayout(document);
-}, { deep: true });
-
-async function initializeCanvas(preferred: Workspace) {
-  suspendLayoutSave = true;
-  const local = readCanvasCache(storage, storageKey.value);
-  let chosen: LayoutDocument | undefined, initialSave = false;
-  if (backendCapabilities.sharedCanvas) {
-    const shared = await request<SharedCanvas>("/canvas/layout");
-    if (!Number.isSafeInteger(shared.revision) || shared.revision < 0 || (shared.layout !== null && !validateLayout(shared.layout))) throw new Error("Invalid shared canvas response");
-    canvasRevision.value = shared.revision;
-    if (shared.layout) {
-      chosen = shared.layout;
-      if (local?.pending && !sameLayout(local.layout, chosen)) {
-        localRecovery.value = local.layout;
-        writeCanvasCache(storage, storageKey.value + ":recovery", local.layout, true);
-      } else localRecovery.value = readCanvasCache(storage, storageKey.value + ":recovery")?.layout;
-    } else { chosen = local?.layout; initialSave = true; }
-  } else chosen = local?.layout;
-  if (!chosen) {
-    const legacy = await request<LayoutDocument | null>(workspacePath(preferred.id) + "/layout");
-    chosen = scopeLegacyLayout(legacy?.root && validateLayout(legacy) ? legacy : createDefaultLayoutDocument(), preferred.id, sessions.value);
-    initialSave = true;
-  }
-  layout.value = copyLayout(chosen);
-  selectedPaneId.value = initialPane(chosen.root)?.id;
-  canvasReady.value = true; canvasConflict.value = false;
-  explorerWorkspaceId.value = contextWorkspace.value?.id ?? preferred.id;
-  await nextTick();
-  suspendLayoutSave = false;
-  if (!backendCapabilities.sharedCanvas || initialSave) queueLayout(layout.value);
-  else layoutStatus.value = "Saved";
-}
-async function resolveCanvasConflict(useCurrent: boolean) {
-  await flushLayout();
-  try {
-    const shared = await request<SharedCanvas>("/canvas/layout");
-    if (!Number.isSafeInteger(shared.revision) || shared.revision < 0 || (shared.layout !== null && !validateLayout(shared.layout))) throw new Error("Invalid shared canvas response");
-    canvasRevision.value = shared.revision; canvasConflict.value = false;
-    if (useCurrent) queueLayout(layout.value);
-    else if (shared.layout) {
-      const backup = persistableLayout(copyLayout(layout.value));
-      writeCanvasCache(storage, storageKey.value + ":recovery", backup, true); localRecovery.value = backup;
-      suspendLayoutSave = true; layout.value = shared.layout; selectedPaneId.value = initialPane(shared.layout.root)?.id;
-      await nextTick(); suspendLayoutSave = false; cacheLayout(layout.value, false); layoutStatus.value = "Saved";
-    }
-  } catch (cause) { report(cause); }
-}
-function restoreLocalRecovery() {
-  if (!localRecovery.value) return;
-  layout.value = copyLayout(localRecovery.value); selectedPaneId.value = initialPane(layout.value.root)?.id;
-  localRecovery.value = undefined;
-}
 function selectWorkspace(id: string) {
   if (!workspaces.value.some(workspace => workspace.id === id)) return;
   selectedWorkspaceId.value = id; rememberWorkspace(id);
@@ -328,12 +213,6 @@ function selectPane(pane: PaneNode) {
   }
 }
 watch(() => contextWorkspace.value?.id, id => { if (id && !explorerPinned.value) explorerWorkspaceId.value = id; });
-// A prompt outlives neither its pane nor its record: a poll that already removed
-// the session, or a pane closed elsewhere, must not leave a stale question.
-watch([sessions, layout], () => {
-  const prompt = discardPrompt.value;
-  if (prompt && (!sessions.value.some(item => item.id === prompt.session.id) || !flattenPanes(layout.value.root).some(pane => pane.id === prompt.paneId))) discardPrompt.value = undefined;
-}, { deep: true });
 // A tab keeps the name its session had when it opened. The server renames a
 // session too -- after its first message -- so every change in the list
 // reaches the tabs, not only a rename made here.
@@ -368,12 +247,6 @@ function openSession(session: Session) {
   sidebarOpen.value = false;
   canvas.value?.openPane(sessionPane(session));
 }
-/** Which sessions start the moment their pane is placed. A structured chat
- * and a terminal are both asked for by the gesture that creates or opens
- * them, and a terminal that shows "ended" on arrival only ever wanted one
- * more tap; a legacy PTY shown in the conversation shell still waits for an
- * explicit reopen. */
-const opensOnArrival = (session: Session) => session.interaction_mode === "structured" || session.provider === "terminal";
 function sessionPaneDropped(pane: PaneNode) {
   const session = paneSession(pane, sessions.value);
   if (session && paneWorkspace(pane, workspaces.value, sessions.value) && opensOnArrival(session)) sessionConnections.requestOpen(session.id);
@@ -402,130 +275,6 @@ watch(sidebarOpen, async open => {
   if (!row()) await workspaceSidebar.value?.revealSession(id);
   row()?.scrollIntoView({ block: "center" });
 });
-/** What just happened, as a toast that goes away by itself; `sessionNotice` keeps the last one for the record. */
-function notice(message: string, values?: Record<string, number>, action?: ToastAction) {
-  sessionNotice.value = message; sessionNoticeValues.value = values;
-  if (message) showToast(t(message, values), { action });
-}
-async function archiveSession(session: Session, archived: boolean, announce = true): Promise<boolean> {
-  if (!backendCapabilities.sessionArchive || archiveBusyIds.value.includes(session.id)) return false;
-  archiveBusyIds.value = [...archiveBusyIds.value, session.id];
-  sessionsRevision++;
-  if (announce) notice("");
-  try {
-    const updated = await request<Session>(`/sessions/${encodeURIComponent(session.id)}/archive`, json("PATCH", { archived }));
-    sessionsRevision++;
-    sessions.value = sessions.value.map(item => item.id === updated.id ? updated : item);
-    if (announce) notice(archived ? "Session archived. History and running agents are unchanged." : "Session restored to its workspace list.", undefined, { label: t("Undo"), run: () => void archiveSession(updated, !archived) });
-    return true;
-  } catch (cause) {
-    report(cause); return false;
-  } finally {
-    archiveBusyIds.value = archiveBusyIds.value.filter(id => id !== session.id);
-  }
-}
-async function archiveSessions(list: Session[], archived: boolean) {
-  if (list.length === 1) { await archiveSession(list[0]!, archived); return; }
-  notice("");
-  const done = (await Promise.all(list.map(session => archiveSession(session, archived, false)))).filter(Boolean).length;
-  if (done) notice(archived ? "{count} sessions archived. History and running agents are unchanged." : "{count} sessions restored to their workspace lists.", { count: done }, { label: t("Undo"), run: () => void archiveSessions(list, !archived) });
-}
-/**
- * Delete sessions for good. The server accepts only temporary sessions and
- * archived ones, and stops anything still running first. Views bound to a
- * deleted session close with it, since there is nothing left to show.
- */
-async function deleteSessions(list: Session[]) {
-  const targets = list.filter(session => !deleteBusyIds.value.includes(session.id) && (isEphemeralSession(session) || !!session.archived_at));
-  if (!targets.length) return;
-  deleteBusyIds.value = [...deleteBusyIds.value, ...targets.map(session => session.id)];
-  sessionsRevision++;
-  notice("");
-  const deleted: string[] = [];
-  await Promise.all(targets.map(async session => {
-    try { await request<{ id: string }>(`/sessions/${encodeURIComponent(session.id)}`, json("DELETE")); deleted.push(session.id); }
-    catch (cause) { if (cause instanceof ApiError && cause.status === 404 && !(cause instanceof ApiConnectionError)) deleted.push(session.id); else report(cause); }
-  }));
-  deleteBusyIds.value = deleteBusyIds.value.filter(id => !targets.some(session => session.id === id));
-  if (!deleted.length) return;
-  sessionsRevision++;
-  const gone = new Set(deleted);
-  sessions.value = sessions.value.filter(item => !gone.has(item.id));
-  for (const id of deleted) sessionConnections.ended(id);
-  // Removed from `sessions` first, so the close guard has no record left to discard again.
-  for (const pane of flattenPanes(layout.value.root).filter(pane => gone.has(paneString(pane, "session_id") ?? ""))) await canvas.value?.closePane(pane.id);
-  notice(deleted.length === 1 ? "Session deleted." : "{count} sessions deleted.", { count: deleted.length });
-}
-/** The one place where closing a view ends a process — allowed only because the
- * user chose "temporary window" when the session was created. */
-async function discardEphemeral(session: Session): Promise<boolean> {
-  try {
-    await request<{ id: string }>(`/sessions/${encodeURIComponent(session.id)}`, json("DELETE"));
-    sessionsRevision++;
-    sessions.value = sessions.value.filter(item => item.id !== session.id);
-    // Retire any open intent with the record, so nothing can reconnect it later.
-    sessionConnections.ended(session.id);
-    return true;
-  } catch (cause) {
-    // Already gone (a restart discards temporary sessions) is the wanted end
-    // state, so the view may close; anything else keeps the pane and reports.
-    if (cause instanceof ApiError && cause.status === 404 && !(cause instanceof ApiConnectionError)) {
-      sessionsRevision++;
-      sessions.value = sessions.value.filter(item => item.id !== session.id);
-      sessionConnections.ended(session.id);
-      return true;
-    }
-    report(cause); return false;
-  }
-}
-/** Close guard. A non-ephemeral pane keeps its existing view-only behaviour and
- * issues no request at all. A temporary window goes with its tab; only a
- * conversation in the middle of a turn asks first. A terminal's process is
- * "running" for as long as it is open, which says nothing about work under way. */
-async function confirmClosePane(pane: PaneNode): Promise<boolean> {
-  const session = paneSession(pane, sessions.value);
-  if (!session || !isEphemeralSession(session)) return true;
-  if (session.interaction_mode === "structured" && ["running", "starting", "waiting"].includes(session.status)) { discardPrompt.value = { paneId: pane.id, session }; return false; }
-  return await discardEphemeral(session);
-}
-async function confirmDiscard() {
-  const prompt = discardPrompt.value;
-  if (!prompt) return;
-  discardPrompt.value = undefined;
-  // The record is gone from `sessions` on success, so the guard now lets the
-  // same pane close instead of prompting a second time.
-  if (await discardEphemeral(prompt.session)) await canvas.value?.closePane(prompt.paneId);
-}
-async function keepSession(session: Session) {
-  if (!isEphemeralSession(session) || keepBusyIds.value.includes(session.id)) return;
-  keepBusyIds.value = [...keepBusyIds.value, session.id];
-  sessionsRevision++;
-  notice("");
-  try {
-    const updated = await request<Session>(`/sessions/${encodeURIComponent(session.id)}/keep`, json("POST"));
-    sessionsRevision++;
-    sessions.value = sessions.value.map(item => item.id === updated.id ? updated : item);
-    if (discardPrompt.value?.session.id === updated.id) discardPrompt.value = undefined;
-    notice("Session kept. It stays in the session list and closing its window no longer discards it.");
-  } catch (cause) { report(cause); }
-  finally { keepBusyIds.value = keepBusyIds.value.filter(id => id !== session.id); }
-}
-function keepSessionById(id: string) {
-  const session = sessions.value.find(item => item.id === id);
-  if (session) void keepSession(session);
-}
-async function renameSession(session: Session, title: string): Promise<boolean> {
-  const nextTitle = title.trim();
-  if (!nextTitle || nextTitle === session.title) return false;
-  try {
-    const updated = await request<Session>(`/sessions/${encodeURIComponent(session.id)}`, json("PATCH", { title: nextTitle }));
-    sessions.value = sessions.value.map(item => item.id === updated.id ? updated : item);
-    const nextRoot = renameSessionPanes(layout.value.root, updated.id, updated.title);
-    if (nextRoot !== layout.value.root) layout.value = { ...layout.value, root: nextRoot };
-    notice("Session renamed. Its ID, history and running process are unchanged.");
-    return true;
-  } catch (cause) { report(cause); return false; }
-}
 function requestRenameSession(id: string) { if (sessions.value.some(session => session.id === id)) renameSessionId.value = id; }
 const runInfoSessionId = ref<string>();
 const runInfoSession = computed(() => sessions.value.find(session => session.id === runInfoSessionId.value));
@@ -546,11 +295,6 @@ function sessionEnvironmentSaved(session: Session) {
   sessions.value = sessions.value.map(item => item.id === session.id ? session : item);
   environmentSessionId.value = undefined;
   // Updating metadata is not an open gesture: never requestOpen or start here.
-}
-async function enableChat(id: string) {
-  if(enablingChat.has(id))return;enablingChat.add(id);
-  try {const updated=await request<Session>('/sessions/'+encodeURIComponent(id)+'/conversation/open',json('POST',{}));sessions.value=sessions.value.map(session=>session.id===id?updated:session);}
-  catch(cause){report(cause);}finally{enablingChat.delete(id);}
 }
 function openFile(id: string, file: FileEntry | string) {
   if (!workspaces.value.some(workspace => workspace.id === id)) return;
@@ -657,22 +401,8 @@ async function workspaceCreated(workspace: Workspace) {
   selectWorkspace(workspace.id);
   if (!canvasReady.value) await initializeCanvas(workspace);
 }
-function tick(counter: typeof fileRefresh, id: string) { counter.value = { ...counter.value, [id]: (counter.value[id] ?? 0) + 1 }; }
-function filesSaved(id: string) { tick(fileRefresh, id); tick(gitRefresh, id); void refreshGit(id); }
 /** A branch switched from the status bar or the sidebar: its files and sessions changed under it. */
-function branchSwitched(id: string) { tick(fileRefresh, id); tick(gitRefresh, id); void refreshGit(id); void refreshSessions(); }
-function gitChanged(id: string, status: GitStatus) { gitStatuses.value = { ...gitStatuses.value, [id]: status }; gitAvailable.value = { ...gitAvailable.value, [id]: true }; }
-async function refreshGit(id: string) {
-  if (!id || showAuth.value || gitLoading.has(id)) return;
-  gitLoading.add(id);
-  try {
-    const result = await request<GitStatus>(workspacePath(id) + "/git/status");
-    const changed = JSON.stringify(gitStatuses.value[id]) !== JSON.stringify(result);
-    gitChanged(id, result);
-    if (changed || activeSessions.value.some(session => session.workspace_id === id)) tick(gitRefresh, id);
-  } catch (cause) { gitAvailable.value = { ...gitAvailable.value, [id]: false }; if (cause instanceof ApiConnectionError || (cause instanceof ApiError && cause.status === 401)) report(cause); }
-  finally { gitLoading.delete(id); }
-}
+function branchSwitched(id: string) { filesSaved(id); void refreshSessions(); }
 async function refreshSessions() {
   if (showAuth.value || sessionsLoading.value) return;
   sessionsLoading.value = true;
@@ -733,42 +463,15 @@ const quickProviderLabel = computed(() => { const provider = lastQuickProvider()
 function closeNewSessionMenu(event: Event) { (event.currentTarget as HTMLElement | null)?.closest("details")?.removeAttribute("open"); }
 /** The command palette and the shortcut sheet, and the keys that open everything else. */
 const paletteOpen = ref(false), shortcutsOpen = ref(false);
-const hint = (id: string) => { const shortcut = SHORTCUTS.find(item => item.id === id); return shortcut ? formatChord(shortcut.chord) : undefined; };
-const paletteItems = computed<PaletteItem[]>(() => {
-  const workspaceName = (id: string) => workspaces.value.find(workspace => workspace.id === id)?.name ?? "";
-  const label = (provider: ProviderKind) => provider === "terminal" ? t("Terminal") : providerLabel(provider);
-  const listed = sessions.value.filter(session => !isSessionArchived(session));
-  const recent = [...listed].sort((a, b) => Date.parse(b.updated_at ?? "") - Date.parse(a.updated_at ?? "")).slice(0, 6).map(session => session.id);
-  const here = contextWorkspace.value?.id;
-  const items: PaletteItem[] = [];
-  for (const session of listed) {
-    const waiting = session.status === "waiting";
-    items.push({ id: `session:${session.id}`, title: session.title, subtitle: `${label(session.provider)} · ${workspaceName(session.workspace_id)}${waiting ? " · " + t("Needs you") : ""}`, group: waiting ? t("Needs you") : t("Sessions"), provider: session.provider, suggested: waiting || recent.includes(session.id), run: () => openSession(session) });
-  }
-  if (here) {
-    for (const provider of PROVIDER_KINDS) items.push({ id: `new:${provider}`, title: provider === "terminal" ? t("New terminal") : t("New {provider} session", { provider: label(provider) }), subtitle: contextWorkspace.value?.name, group: t("Commands"), provider, suggested: provider !== "terminal", keywords: "new create 新建", run: () => void quickSession(here, provider) });
-    items.push({ id: "new:options", title: t("New session with options…"), subtitle: contextWorkspace.value?.name, group: t("Commands"), icon: "plus", hint: hint("new-session"), keywords: "new create 新建", run: () => newSession(here) });
-  }
-  items.push(
-    { id: "page:sessions", title: t("All sessions"), group: t("Go to"), icon: "clock", hint: hint("sessions"), suggested: true, run: () => openPage("sessions") },
-    { id: "page:system", title: t("System"), subtitle: t("CPU, memory, disks and network"), group: t("Go to"), icon: "gauge", hint: hint("system"), suggested: true, keywords: "cpu memory disk network resources 资源 磁盘 内存", run: () => openPage("system") },
-    { id: "page:usage", title: t("Usage"), subtitle: t("Tokens, cost and subscription allowance"), group: t("Go to"), icon: "chart", suggested: true, keywords: "token cost usage quota 用量 费用 额度 统计", run: () => openPage("usage") },
-    { id: "page:canvas", title: t("Workspace canvas"), group: t("Go to"), icon: "grid", hint: hint("canvas"), run: () => void router.push({ name: "canvas" }) },
-  );
-  for (const [section, title, icon] of [["preferences", "Preferences", "gauge"], ["agents", "Agent clients", "spark"], ["endpoints", "Endpoint profiles", "settings"], ["accounts", "Official accounts", "account"], ["updates", "Updates", "download"]] as const)
-    items.push({ id: `settings:${section}`, title: t(title), subtitle: t("Settings"), group: t("Settings"), icon, hint: section === "preferences" ? hint("settings") : undefined, keywords: "settings 设置", run: () => openSettings(section) });
-  for (const workspace of workspaces.value) items.push({ id: `workspace:${workspace.id}`, title: workspace.name, subtitle: workspace.root_path, group: t("Workspaces"), icon: "folder", run: () => { void router.push({ name: "canvas" }); selectWorkspace(workspace.id); } });
-  items.push(
-    { id: "add-workspace", title: t("Add workspace"), group: t("Commands"), icon: "plus", run: () => { showWorkspace.value = true; } },
-    { id: "toggle-sidebar", title: t("Show or hide the sidebar"), group: t("Commands"), icon: "panelLeft", hint: hint("sidebar"), run: toggleSidebar },
-    { id: "toggle-files", title: t("Show or hide the file panel"), group: t("Commands"), icon: "panelRight", hint: hint("files"), run: () => { explorerOpen.value = !explorerOpen.value; } },
-    { id: "theme:light", title: t("Light"), subtitle: t("Appearance"), group: t("Commands"), icon: "gauge", keywords: "theme 主题 外观", run: () => setThemePreference("light") },
-    { id: "theme:dark", title: t("Dark"), subtitle: t("Appearance"), group: t("Commands"), icon: "gauge", keywords: "theme 主题 外观", run: () => setThemePreference("dark") },
-    { id: "theme:system", title: t("Match system"), subtitle: t("Appearance"), group: t("Commands"), icon: "gauge", keywords: "theme 主题 外观", run: () => setThemePreference("system") },
-    { id: "shortcuts", title: t("Keyboard shortcuts"), group: t("Commands"), icon: "info", hint: hint("help"), run: () => { shortcutsOpen.value = true; } },
-  );
-  return items;
-});
+const hint = shortcutHint;
+const paletteItems = computed(() => buildPaletteItems({ sessions: sessions.value, workspaces: workspaces.value, here: contextWorkspace.value, t }, {
+  openSession, quickSession: (id, provider) => void quickSession(id, provider), newSession: id => newSession(id), openPage, openSettings, toggleSidebar, setTheme: setThemePreference,
+  openCanvas: () => void router.push({ name: "canvas" }),
+  openWorkspace: id => { void router.push({ name: "canvas" }); selectWorkspace(id); },
+  addWorkspace: () => { showWorkspace.value = true; },
+  toggleFiles: () => { explorerOpen.value = !explorerOpen.value; },
+  showShortcuts: () => { shortcutsOpen.value = true; },
+}));
 function onGlobalKey(event: KeyboardEvent) {
   if (showAuth.value || event.defaultPrevented) return;
   const shortcut = shortcutFor(event);
@@ -840,58 +543,23 @@ async function bootstrap() {
   finally { if (own === bootstrapRevision) loading.value = false; }
 }
 function adaptDrawers() { const desktop = window.innerWidth > 1100; if (wasDesktop && !desktop) { explorerOpen.value = false; sidebarOpen.value = false; } wasDesktop = desktop; sidebarRail.value = sidebarIsRail(window.innerWidth); }
+const { bodyStyle, resizeSidebar, resetSidebarWidth } = useSidebarWidth(storage, sidebarRail, sidebarCollapsed);
 /** Below the rail width the same control drives the drawer, so the remembered
  * desktop preference is left untouched. */
-/**
- * The workspace column can be dragged narrower or wider; how much room it
- * needs depends on how many workspaces and sessions there are. Remembered in
- * this browser, and a double-click on the edge puts it back.
- */
-const SIDEBAR_WIDTH_KEY = "tendly.sidebar-width.v1";
-const sidebarWidth = ref<number | undefined>((() => { try { return storedSidebarWidth(storage?.getItem(SIDEBAR_WIDTH_KEY)); } catch { return undefined; } })());
-const bodyStyle = computed(() => sidebarWidth.value && sidebarRail.value && !sidebarCollapsed.value ? { "--rail-left": sidebarWidth.value + "px" } : undefined);
-function resizeSidebar(event: PointerEvent) {
-  const handle = event.currentTarget as HTMLElement, left = handle.parentElement?.getBoundingClientRect().left ?? 0;
-  handle.setPointerCapture(event.pointerId);
-  const move = (next: PointerEvent) => { sidebarWidth.value = draggedSidebarWidth(next.clientX, left); };
-  const end = () => {
-    handle.removeEventListener("pointermove", move); handle.removeEventListener("pointerup", end); handle.removeEventListener("pointercancel", end);
-    try { if (sidebarWidth.value) storage?.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth.value)); } catch { /* The width lasts for this page when storage is unavailable. */ }
-  };
-  handle.addEventListener("pointermove", move); handle.addEventListener("pointerup", end); handle.addEventListener("pointercancel", end);
-}
-function resetSidebarWidth() { sidebarWidth.value = undefined; try { storage?.setItem(SIDEBAR_WIDTH_KEY, ""); } catch { /* Nothing stored. */ } }
 function toggleSidebar() { if (sidebarRail.value) sidebarExpanded.value = !sidebarExpanded.value; else sidebarOpen.value = !sidebarOpen.value; }
 // Persist wherever the panels change, including opening the explorer by
 // revealing a file, so the shell reopens the way the user left it.
 watch([sidebarExpanded, explorerOpen], ([sidebar, explorer]) => writePanelVisibility(storage, { sidebar, explorer }));
 function beforeUnload(event: BeforeUnloadEvent) {
-  if (hasUnsavedWork({ fileDrafts: hasDirtyDrafts(), gitDrafts: hasGitDrafts(), layoutPending: !!pendingLayout, layoutStatus: layoutStatus.value })) { event.preventDefault(); event.returnValue = ""; }
-}
-/**
- * Give way to a phone keyboard.
- *
- * `100dvh` counts the browser's own chrome and nothing else, so a keyboard
- * covers the bottom of the page without the page ever knowing. Whatever lives
- * down there goes with it: in a terminal that is the prompt, and the command
- * list a client draws underneath it, which was the whole of what a slash did.
- */
-function fitToKeyboard() {
-  const height = shellHeight(window.visualViewport ?? undefined, window.innerHeight);
-  document.documentElement.style.setProperty("--app-height", height ? `${height}px` : "");
+  if (hasUnsavedWork({ fileDrafts: hasDirtyDrafts(), gitDrafts: hasGitDrafts(), layoutPending: hasPendingLayout(), layoutStatus: layoutStatus.value })) { event.preventDefault(); event.returnValue = ""; }
 }
 onMounted(() => {
   void bootstrap();
   pollTimer = setInterval(() => { if (!document.hidden && !showAuth.value) { void refreshSessions(); for (const id of trackedWorkspaces()) void refreshGit(id); } }, 5000);
   window.addEventListener("beforeunload", beforeUnload); window.addEventListener("resize", adaptDrawers);
   stopPageReturn = onPageReturn(stale => fileWatch.wake(stale));
-  // The visual viewport also scrolls under a keyboard, which is the other way
-  // its height stops describing what can be seen.
-  window.visualViewport?.addEventListener("resize", fitToKeyboard);
-  window.visualViewport?.addEventListener("scroll", fitToKeyboard);
-  fitToKeyboard();
 });
-onUnmounted(() => { if (pendingLayout) cacheLayout(pendingLayout, true); disposed = true; clearInterval(pollTimer); fileWatch.dispose(); stopPageReturn?.(); clearTimeout(layoutTimer); window.removeEventListener("beforeunload", beforeUnload); window.removeEventListener("resize", adaptDrawers); window.visualViewport?.removeEventListener("resize", fitToKeyboard); window.visualViewport?.removeEventListener("scroll", fitToKeyboard); });
+onUnmounted(() => { disposeCanvas(); disposed = true; clearInterval(pollTimer); fileWatch.dispose(); stopPageReturn?.(); window.removeEventListener("beforeunload", beforeUnload); window.removeEventListener("resize", adaptDrawers); });
 </script>
 
 <template>
@@ -927,12 +595,12 @@ onUnmounted(() => { if (pendingLayout) cacheLayout(pendingLayout, true); dispose
       <button v-if="sidebarOpen" class="drawer-overlay sidebar-overlay" :aria-label="t('Close workspace navigation')" @click="sidebarOpen = false"/>
       <aside :class="['sidebar',{'drawer-open':sidebarOpen}]">
         <div v-if="sidebarRail&&!sidebarCollapsed" class="sidebar-resizer" role="separator" aria-orientation="vertical" :aria-label="t('Resize workspace panel')" :title="t('Drag to resize · double-click to reset')" @pointerdown.prevent="resizeSidebar" @dblclick="resetSidebarWidth"/>
-        <WorkspaceSidebar ref="workspaceSidebar" @reveal-session="revealSession" :workspace-branches="Object.fromEntries(Object.entries(gitStatuses).flatMap(([id,status])=>status.branch?[[id,status.branch]]:[]))" @branch-switched="branchSwitched" :workspaces="workspaces" :sessions="sessions" :selected-workspace-id="selectedWorkspaceId" :selected-session-id="selectedSessionId" :history-supported="backendCapabilities.nativeHistory" :storage-key="storageKey" :archive-supported="backendCapabilities.sessionArchive" :ephemeral-supported="backendCapabilities.ephemeralSessions" :archive-busy-ids="archiveBusyIds" :keep-busy-ids="keepBusyIds" :delete-busy-ids="deleteBusyIds" :sessions-loading="sessionsLoading" @select-workspace="selectWorkspace" @open-session="openSession" @rename-session="renameSession" @archive-session="archiveSession" @archive-sessions="archiveSessions" @delete-sessions="deleteSessions" @keep-session="keepSession" @refresh-sessions="refreshSessions" @session-environment="environmentSessionId=$event;sidebarOpen=false" @open-files="openFiles" @open-changes="openChanges" @new-session="newSession" @quick-session="quickSession" @load-history="loadHistory" @add-workspace="showWorkspace=true" @canvas="sidebarOpen=false;router.push({ name: 'canvas' })" @all-sessions="openPage('sessions')" @system="openPage('system')" @usage="openPage('usage')" @show-in-sessions="(id, archived) => openPage('sessions', { highlight: id, archive: archived ? 'archived' : 'current' })" :current-page="page ?? 'canvas'"/>
+        <WorkspaceSidebar ref="workspaceSidebar" @reveal-session="revealSession" :workspace-branches="workspaceBranches" @branch-switched="branchSwitched" :workspaces="workspaces" :sessions="sessions" :selected-workspace-id="selectedWorkspaceId" :selected-session-id="selectedSessionId" :history-supported="backendCapabilities.nativeHistory" :storage-key="storageKey" :archive-supported="backendCapabilities.sessionArchive" :ephemeral-supported="backendCapabilities.ephemeralSessions" :archive-busy-ids="archiveBusyIds" :keep-busy-ids="keepBusyIds" :delete-busy-ids="deleteBusyIds" :sessions-loading="sessionsLoading" @select-workspace="selectWorkspace" @open-session="openSession" @rename-session="renameSession" @archive-session="archiveSession" @archive-sessions="archiveSessions" @delete-sessions="deleteSessions" @keep-session="keepSession" @refresh-sessions="refreshSessions" @session-environment="environmentSessionId=$event;sidebarOpen=false" @open-files="openFiles" @open-changes="openChanges" @new-session="newSession" @quick-session="quickSession" @load-history="loadHistory" @add-workspace="showWorkspace=true" @canvas="sidebarOpen=false;router.push({ name: 'canvas' })" @all-sessions="openPage('sessions')" @system="openPage('system')" @usage="openPage('usage')" @show-in-sessions="(id, archived) => openPage('sessions', { highlight: id, archive: archived ? 'archived' : 'current' })" :current-page="page ?? 'canvas'"/>
         <div v-if="!mobile" class="host-card"><span class="host-symbol"><Icon name="terminal"/></span><div><strong>{{ t('Host native') }}</strong><small>{{ platform || 'macOS / Linux' }} · {{ t('no containers') }}</small></div><span :class="['state-dot',apiOnline?'running':'stopped']"/></div>
       
         <div v-else class="drawer-footer">
           <div v-if="contextWorkspace" class="drawer-git"><span :title="contextWorkspace.root_path"><Icon name="git" :size="15"/><WorkspaceBranchMenu v-if="currentGitAvailable" :workspace-id="contextWorkspace.id" :branch="currentGit.branch" @switched="branchSwitched(contextWorkspace.id)" @changed="branchSwitched(contextWorkspace.id)" /><template v-else>{{ t('Git unavailable') }}</template></span><button v-if="currentGitAvailable" type="button" @click="openChanges(contextWorkspace.id)">{{ t(currentGit.files.length===1?'{count} change':'{count} changes',{count:currentGit.files.length}) }}</button></div>
-          <div class="drawer-host"><HostUsage :sessions="sessions" @open="openPage('system')" /><span v-if="['Save failed','Save conflict','Memory only'].includes(layoutStatus)" class="danger-text">{{ t('Layout {status}',{status:t(layoutStatus)}) }}</span><button class="icon-button" type="button" :aria-label="t('Settings')" :title="t('Settings')" @click="openSettings()"><Icon name="settings" :size="19"/></button></div>
+          <div class="drawer-host"><HostUsage :sessions="sessions" @open="openPage('system')" /><span v-if="layoutTrouble" class="danger-text">{{ t('Layout {status}',{status:t(layoutStatus)}) }}</span><button class="icon-button" type="button" :aria-label="t('Settings')" :title="t('Settings')" @click="openSettings()"><Icon name="settings" :size="19"/></button></div>
         </div>
       </aside>
       <main class="main-workspace">
@@ -942,7 +610,7 @@ onUnmounted(() => { if (pendingLayout) cacheLayout(pendingLayout, true); dispose
         <div v-if="canvasConflict" class="confirmation-bar" role="alert">{{ t('Another page updated the shared canvas. Your current layout is kept locally.') }}<button class="small-button" @click="resolveCanvasConflict(false)">{{ t('Load server layout') }}</button><button class="small-button danger" @click="resolveCanvasConflict(true)">{{ t('Save my current layout instead') }}</button></div>
         <div v-if="localRecovery" class="canvas-compat-notice"><span>{{ t('A local recovery layout is available.') }}</span><button class="text-button" @click="restoreLocalRecovery">{{ t('Restore local layout') }}</button><button class="icon-button" :aria-label="t('Dismiss error')" @click="localRecovery=undefined"><Icon name="close" :size="13"/></button></div>
         <template v-if="workspaces.length">
-          <Canvas v-if="canvasReady" ref="canvas" v-model="layout" :compact="mobile" :selected-pane-id="selectedPaneId" :default-workspace-id="contextWorkspace?.id" :accept-pane="acceptDroppedPane" :confirm-close-pane="confirmClosePane" :ephemeral-session-ids="ephemeralIds" :ephemeral-supported="backendCapabilities.ephemeralSessions" @create-session="createSessionInPane" :workspace-labels="Object.fromEntries(workspaces.map(workspace=>[workspace.id,workspace.name]))" :mixed-workspaces="new Set(flattenPanes(layout.root).map(pane=>paneString(pane,'workspace_id')).filter(Boolean)).size>1" :session-branches="Object.fromEntries(sessions.flatMap(session=>session.checkout_path&&session.checkout_branch?[[session.id,session.checkout_branch]]:[]))" :workspace-branches="Object.fromEntries(Object.entries(gitStatuses).flatMap(([id,status])=>status.branch?[[id,status.branch]]:[]))" :session-providers="sessionProviders" @select-pane="selectPane" @open-pane="sessionPaneDropped">
+          <Canvas v-if="canvasReady" ref="canvas" v-model="layout" :compact="mobile" :selected-pane-id="selectedPaneId" :default-workspace-id="contextWorkspace?.id" :accept-pane="acceptDroppedPane" :confirm-close-pane="confirmClosePane" :ephemeral-session-ids="ephemeralIds" :ephemeral-supported="backendCapabilities.ephemeralSessions" @create-session="createSessionInPane" :workspace-labels="Object.fromEntries(workspaces.map(workspace=>[workspace.id,workspace.name]))" :mixed-workspaces="new Set(flattenPanes(layout.root).map(pane=>paneString(pane,'workspace_id')).filter(Boolean)).size>1" :session-branches="Object.fromEntries(sessions.flatMap(session=>session.checkout_path&&session.checkout_branch?[[session.id,session.checkout_branch]]:[]))" :workspace-branches="workspaceBranches" :session-providers="sessionProviders" @select-pane="selectPane" @open-pane="sessionPaneDropped">
             <template #pane="{ pane }"><WorkspacePane :key="pane.id" :pane="pane" :workspaces="workspaces" :sessions="sessions" :profiles="profiles" :git-refresh="gitRefresh" @session-changed="refreshSessions" @new-session="(id,provider)=>newSession(id??selectedWorkspaceId,provider)" @open-session="openSession" @reveal-session="revealSession" @keep-session="keepSessionById" @rename-request="requestRenameSession" @session-environment="environmentSessionId=$event" @structured-session="enableChat" @profiles="openSettings('endpoints')" @git-changed="gitChanged" @open-file="openFile" @open-reference="openReference" @files-saved="filesSaved" @browse="id=>openFiles(id??selectedWorkspaceId)" @draft-created="draftCreated" @close-draft="id=>canvas?.closePane(id)"/></template>
           </Canvas>
           <div v-else class="pane-empty"><p>{{ t('Opening workspace…') }}</p></div>
@@ -959,7 +627,7 @@ onUnmounted(() => { if (pendingLayout) cacheLayout(pendingLayout, true); dispose
         <FileExplorer ref="explorer" :workspace-id="explorerWorkspace.id" :refresh-token="fileRefresh[explorerWorkspace.id]??0" :selected-path="activeFilePath" @open="openFile(explorerWorkspace.id,$event)" @close="explorerOpen=false"/>
       </aside>
     </div>
-    <footer v-if="!mobile" class="statusbar"><span :title="contextWorkspace?.root_path"><Icon name="git" :size="13"/>{{ contextWorkspace?.name || t('No workspace') }} · <WorkspaceBranchMenu v-if="contextWorkspace&&currentGitAvailable" :workspace-id="contextWorkspace.id" :branch="currentGit.branch" @switched="branchSwitched(contextWorkspace.id)" @changed="branchSwitched(contextWorkspace.id)" /><template v-else>{{ t('Git unavailable') }}</template></span><button v-if="contextWorkspace" @click="openChanges(contextWorkspace.id)">{{ currentGitAvailable?t(currentGit.files.length===1?'{count} change':'{count} changes',{count:currentGit.files.length}):t('Changes') }}</button><span v-if="currentGit.ahead!==undefined">↑ {{ currentGit.ahead }}</span><span v-if="currentGit.behind!==undefined">↓ {{ currentGit.behind }}</span><span class="flex-spacer"/><span v-if="canvasReady" :class="{'danger-text':['Save failed','Save conflict','Memory only'].includes(layoutStatus)}">{{ t('Layout {status}',{status:t(layoutStatus)}) }}</span><HostUsage :sessions="sessions" @open="openPage('system')" /><span class="status-agent-count"><i :class="['state-dot',activeSessions.length?'running':'stopped']"/>{{ t('{count} active sessions',{count:activeSessions.length}) }}</span></footer>
+    <footer v-if="!mobile" class="statusbar"><span :title="contextWorkspace?.root_path"><Icon name="git" :size="13"/>{{ contextWorkspace?.name || t('No workspace') }} · <WorkspaceBranchMenu v-if="contextWorkspace&&currentGitAvailable" :workspace-id="contextWorkspace.id" :branch="currentGit.branch" @switched="branchSwitched(contextWorkspace.id)" @changed="branchSwitched(contextWorkspace.id)" /><template v-else>{{ t('Git unavailable') }}</template></span><button v-if="contextWorkspace" @click="openChanges(contextWorkspace.id)">{{ currentGitAvailable?t(currentGit.files.length===1?'{count} change':'{count} changes',{count:currentGit.files.length}):t('Changes') }}</button><span v-if="currentGit.ahead!==undefined">↑ {{ currentGit.ahead }}</span><span v-if="currentGit.behind!==undefined">↓ {{ currentGit.behind }}</span><span class="flex-spacer"/><span v-if="canvasReady" :class="{'danger-text':layoutTrouble}">{{ t('Layout {status}',{status:t(layoutStatus)}) }}</span><HostUsage :sessions="sessions" @open="openPage('system')" /><span class="status-agent-count"><i :class="['state-dot',activeSessions.length?'running':'stopped']"/>{{ t('{count} active sessions',{count:activeSessions.length}) }}</span></footer>
   </div>
   <WorkspaceDialog v-if="showWorkspace" :initial-path="workspaceInitialPath" @close="showWorkspace=false;workspaceInitialPath=undefined" @created="workspaceCreated"/>
   <HostFilePreview v-if="hostPreview" :key="hostPreview.path" :path="hostPreview.path" :line="hostPreview.line" @close="hostPreview=undefined" @add-workspace="folder=>{hostPreview=undefined;workspaceInitialPath=folder;showWorkspace=true}"/>

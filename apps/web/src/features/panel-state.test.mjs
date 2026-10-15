@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { PANEL_STORAGE_KEY, readPanelVisibility, sidebarIsRail, SIDEBAR_RAIL_MIN_WIDTH, writePanelVisibility } from './panel-state.ts';
+import { ref } from 'vue';
+import { PANEL_STORAGE_KEY, readPanelVisibility, sidebarIsRail, SIDEBAR_RAIL_MIN_WIDTH, SIDEBAR_WIDTH_KEY, useSidebarWidth, writePanelVisibility } from './panel-state.ts';
 
 const memory = () => { const map = new Map(); return { getItem: key => map.get(key) ?? null, setItem: (key, value) => map.set(key, value), map }; };
 const fallback = { sidebar: true, explorer: false };
@@ -34,4 +35,21 @@ test('a drawer-width viewport never treats the sidebar as a collapsible rail', (
   assert.equal(sidebarIsRail(SIDEBAR_RAIL_MIN_WIDTH - 1), false);
   assert.equal(sidebarIsRail(390), false);
   assert.equal(sidebarIsRail(1440), true);
+});
+
+test('a remembered column width applies only to an expanded rail, and a reset forgets it', () => {
+  const values = new Map([[SIDEBAR_WIDTH_KEY, '260']]);
+  const storage = { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };
+  const rail = ref(true), collapsed = ref(false);
+  const { sidebarWidth, bodyStyle, resetSidebarWidth } = useSidebarWidth(storage, rail, collapsed);
+  assert.equal(sidebarWidth.value, 260);
+  assert.deepEqual(bodyStyle.value, { '--rail-left': '260px' });
+  collapsed.value = true; assert.equal(bodyStyle.value, undefined);
+  collapsed.value = false; rail.value = false; assert.equal(bodyStyle.value, undefined, 'a drawer keeps its own width');
+  resetSidebarWidth();
+  assert.equal(sidebarWidth.value, undefined);
+  assert.equal(values.get(SIDEBAR_WIDTH_KEY), '');
+  values.set(SIDEBAR_WIDTH_KEY, '999');
+  assert.equal(useSidebarWidth(storage, rail, collapsed).sidebarWidth.value, undefined, 'a width out of bounds is not used');
+  assert.equal(useSidebarWidth({ getItem() { throw Error('blocked'); }, setItem() {} }, rail, collapsed).sidebarWidth.value, undefined);
 });

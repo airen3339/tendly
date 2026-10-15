@@ -1,3 +1,5 @@
+import { onMounted, onUnmounted } from "vue";
+
 /**
  * How tall the page actually is, once a phone keyboard is in the way.
  *
@@ -22,4 +24,25 @@ export function shellHeight(visual: Visual | undefined, innerHeight: number): nu
   // A collapsing URL bar moves this by tens of pixels and is already `dvh`'s
   // job. Only a keyboard takes this much, and only then is this worth doing.
   return hidden >= KEYBOARD ? Math.round(visual.height) : undefined;
+}
+
+/**
+ * Give way to a phone keyboard, for as long as the calling component is
+ * mounted. Whatever lives at the bottom of the page goes under a keyboard with
+ * it: in a terminal that is the prompt, and the command list a client draws
+ * underneath it, which was the whole of what a slash did.
+ */
+export function useKeyboardFit() {
+  function fitToKeyboard() {
+    const height = shellHeight(window.visualViewport ?? undefined, window.innerHeight);
+    document.documentElement.style.setProperty("--app-height", height ? `${height}px` : "");
+  }
+  onMounted(() => {
+    // The visual viewport also scrolls under a keyboard, which is the other way
+    // its height stops describing what can be seen.
+    window.visualViewport?.addEventListener("resize", fitToKeyboard);
+    window.visualViewport?.addEventListener("scroll", fitToKeyboard);
+    fitToKeyboard();
+  });
+  onUnmounted(() => { window.visualViewport?.removeEventListener("resize", fitToKeyboard); window.visualViewport?.removeEventListener("scroll", fitToKeyboard); });
 }
