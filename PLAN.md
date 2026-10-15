@@ -39,64 +39,44 @@ Tendly 是一个浏览器优先的远程多 Agent 编排壳：用户在远程 Li
 ## 4. 技术基线
 
 - Rust：stable toolchain、Cargo workspace、Tokio、Axum、Serde、Tracing
-- 前端：TypeScript、Vue 3、Vite、Pinia、VueUse、Tailwind、shadcn-vue
-- 编辑器/终端：Monaco Editor、xterm.js
+- 前端：TypeScript、Vue 3、Vite、vue-router、@tanstack/vue-virtual、highlight.js；状态用 Vue 自身的 ref/reactive，样式是手写 CSS token（`apps/web/src/styles.css`）
+- 编辑器/终端：自带的轻量编辑器（高亮叠层）；终端默认 wterm（`@wterm/dom` + Ghostty WASM 内核），xterm.js 作为 `?terminal=xterm` 回退
 - 实时通信：WebSocket（终端/Agent 事件），HTTP/REST（资源和命令）
-- 持久化：SQLite（v0.1 默认，WAL 模式）；PostgreSQL 作为后续多节点/团队部署选项
+- 持久化：SQLite（WAL 模式）
 - workspace：宿主机目录 + 进程 supervisor；PTY 使用 portable-pty
 - Git：优先调用系统 git，并由 Rust service 做安全参数校验
 - 部署：单个 Rust server + systemd 用户服务起步；后续可选接入 Podman/microVM
 
 ## 5. 目录设计
 
+最初设想的细分 crate（api、agent-providers、workspace、filesystem、git-service）和 runtimes/ 目录没有落地；实际布局如下：
+
 ```text
 Tendly/
-├── apps/
-│   ├── web/                 # Vue 3 Web UI
-│   └── desktop/             # 后续 Tauri 壳，不阻塞 Web MVP
+├── apps/web/                # Vue 3 Web UI（components/、features/、layout/、i18n/）
 ├── crates/
-│   ├── api/                 # HTTP/WebSocket 路由、鉴权中间件
-│   ├── domain/              # 领域模型、事件、错误类型（无基础设施依赖）
-│   ├── agent-runtime/       # Agent 生命周期、PTY、任务恢复、事件总线
-│   ├── agent-providers/     # Claude Code/Codex 适配器；未来可插件化
-│   ├── workspace/           # workspace 创建、容器、目录和权限
-│   ├── filesystem/          # 文件树、读写、上传下载、预览元数据
-│   ├── git-service/         # status/diff/stage/commit/branch
-│   ├── persistence/         # SQLite/PostgreSQL、迁移、repositories
-│   └── server/              # 二进制入口、配置、启动装配
+│   ├── server/              # HTTP/WebSocket API、会话、账户、workspace IO、Git、CLI 入口
+│   ├── agent-runtime/       # 进程与 PTY 监管（构建名 tendly-runtime）
+│   ├── persistence/         # SQLite Store
+│   └── domain/              # 共享领域模型
 ├── packages/
-│   ├── ui/                  # 共享 UI 组件和主题
-│   ├── protocol/            # 前后端共享事件/DTO/schema
-│   └── config/              # TS 配置、lint、构建共享配置
+│   ├── protocol/            # 前后端共享 DTO 与布局模型
+│   └── native-bridge/       # Node 桥：结构化对话（默认）、账户登录、原生历史、文件搜索
 ├── migrations/              # 数据库迁移
-├── runtimes/
-│   ├── host/                # 宿主机原生进程运行时（默认）
-│   ├── container/           # 可选 Podman/Docker 运行时
-│   └── microvm/             # 后续可选 Firecracker 等强隔离运行时
-├── deploy/
-│   ├── systemd/             # Linux 用户服务和安装脚本
-│   └── compose/              # 可选的服务依赖部署
+├── npm/                     # @wnzzer/tendly 及各平台包
 ├── docs/
-│   ├── architecture.md      # 架构和边界
-│   ├── security.md          # 凭证、沙箱、权限模型
-│   └── adr/                 # 重要技术决策记录
-├── tests/
-│   ├── integration/         # Rust/API/容器集成测试
-│   └── e2e/                 # Playwright 端到端测试
 ├── Cargo.toml
-├── package.json             # Bun workspaces and scripts
-├── bun.lock
-├── rust-toolchain.toml
-└── README.md
+├── package.json             # pnpm workspace 与脚本
+└── pnpm-lock.yaml
 ```
 
-目录边界原则：`domain` 不依赖数据库和 Web 框架；Agent provider 只负责启动和适配官方 CLI；前后端通过 `packages/protocol` 的版本化 schema 通信；Agent 工具审批、聊天交互和推理展示交给 provider 原生客户端，Tendly 只负责 PTY/事件透传、workspace 编排和宿主机生命周期边界。
+目录边界原则：`domain` 不依赖数据库和 Web 框架；Agent provider 只负责启动和适配官方 CLI；前后端通过 `packages/protocol` 的版本化 schema 通信；Agent 工具审批、聊天交互和推理展示交给 provider 原生客户端，Tendly 只负责把原生客户端的事件渲染出来（结构化对话或 PTY）、workspace 编排和宿主机生命周期边界。
 
 ## 6. 里程碑
 
 ### M0：骨架与技术验证
 
-- 建立 Cargo/Bun monorepo、CI、格式化和 lint
+- 建立 Cargo/pnpm monorepo、CI、格式化和 lint
 - 打通一个宿主机 workspace、进程 supervisor 和 PTY
 - WebSocket 端到端显示终端输出
 

@@ -16,7 +16,7 @@ Open **http://127.0.0.1:28789/**. The Rust server serves the built Web client an
 
 For development, run `pnpm run dev` to start Cargo + Vite, then open **http://127.0.0.1:5173/**. If Rust is already running, use only `pnpm run dev:web`. Vite proxies `/api` and WebSockets to Rust. pnpm manages the workspace and dependencies; Vite, Vue SFC typechecking, tests and the native-history bridge run under Node. Rust builds still use Cargo.
 
-The previous Bun lockfile and version pin are retained under `docs/toolchain-history/` as historical evidence, not an active toolchain. Do not use them for current installs. In the observed macOS debugging case, the backend WebSocket opened directly but timed out through Bun-run Vite; running Vite under Node restored the proxy handshake. The existing development frontend on 5173 was switched to Node without restarting the running backend on 8787 or its Agent processes.
+The previous Bun lockfile and version pin are retained under `docs/toolchain-history/` as historical evidence, not an active toolchain. Do not use them for current installs. In the observed macOS debugging case, the backend WebSocket opened directly but timed out through Bun-run Vite; running Vite under Node restored the proxy handshake. The existing development frontend on 5173 was switched to Node without restarting the running backend (then on its old port, 8787) or its Agent processes.
 
 Choose an existing host directory in the workspace picker, then create/open a session. New Web-created Agent sessions use structured conversation cards on a capable backend; existing PTY sessions keep their original interface. Tool approvals remain native decisions, rendered by the Web client. **Interrupt** cancels current work, while **End session** remains a separate, confirmed secondary action. Closing a pane never ends its process.
 
@@ -25,10 +25,10 @@ Choose an existing host directory in the workspace picker, then create/open a se
 | Path                     | Contents                                                     |
 | ------------------------ | ------------------------------------------------------------ |
 | `crates/server`          | HTTP/WebSocket API, daemon, security, accounts, workspace IO |
-| `crates/agent-runtime`   | Process and PTY supervision                                  |
+| `crates/agent-runtime`   | Process and PTY supervision (built as `tendly-runtime`)      |
 | `crates/persistence`     | SQLite store and migrations (`migrations/`)                  |
 | `crates/domain`          | Shared domain model                                          |
-| `packages/native-bridge` | Node JSONL bridge to Claude Code and Codex                   |
+| `packages/native-bridge` | Node bridges: structured chat (the default layer), account sign-in, native history, file search |
 | `packages/protocol`      | DTOs and layout model shared with the client                 |
 | `apps/web`               | Vue 3 + TypeScript client and layout engine                  |
 | `npm/`                   | Packaging for `@wnzzer/tendly` and platform packages      |
