@@ -1,5 +1,5 @@
 import { cloneVNode, defineComponent, h, reactive, type VNodeChild } from 'vue';
-import { markdownBlocksWithLines, markdownInline, safeWebUrl, workspaceImagePath, type MarkdownInline } from './chat-model';
+import { markdownBlocksWithLines, markdownInline, safeWebUrl, workspaceImagePath, type MarkdownInline } from './markdown-model';
 import { fenceLanguage, loadHighlighter, type Highlighter } from './highlighting';
 import { hasInlineHtml, parseHtml, type HtmlNode } from './html-subset';
 import { openLightbox } from './image-lightbox';

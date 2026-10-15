@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { continueList, indentLines } from './markdown-editing.ts';
 import { framedAnchors, lineAtOffset, lineForPreviewTop, offsetAtLine, previewTopForLine } from './markdown-sync.ts';
-import { markdownBlocks, markdownBlocksWithLines } from './chat-model.ts';
+import { markdownBlocks, markdownBlocksWithLines } from './markdown-model.ts';
 
 function apply(text, edit) { return text.slice(0, edit.from) + edit.insert + text.slice(edit.to); }
 

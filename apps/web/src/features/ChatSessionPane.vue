@@ -24,7 +24,8 @@ import { applyCommand, matchCommands, moveHighlight, slashQuery, unsupportedComm
 import { MarkdownContent } from './MarkdownContent';
 import { handoffArrivals, handoffTranscript } from './handoff';
 import { messageQueue, queuedContent, type QueuedMessage } from './message-queue';
-import { attachedImagePaths, lastChatSeq } from './chat-model';
+import { lastChatSeq } from './chat-model';
+import { attachedImagePaths } from './markdown-model';
 import { conversationCache } from './conversation-cache';
 import { createFrameBatch } from './frame-batch';
 import { createStableRows } from './stable-items';
