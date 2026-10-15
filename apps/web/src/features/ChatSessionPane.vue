@@ -7,7 +7,6 @@ import { agentClient } from './clients';
 import { sessionConnections } from './session-connection';
 import { createSessionStream, type SessionStreamState } from './session-stream';
 import { onPageReturn } from './page-return';
-import { parseConversationPage, prependChatEvents } from './chat-model';
 import { acknowledgeDraft, appendChatEvent, approvalPayloadAnswers, canClearContext, chatDrafts, createChatDraftStore, conversationView, isChatEvent, parseConversationSnapshot, pendingMessageRetry, pruneChatEvents, sessionConfigurationPayload, type ChatDraft, type ChatEvent, type ChatItem, type ConversationSnapshot, type NativeModel, type ToolItem, type ToolStats, type TurnUsage, SUBAGENT_TOOLS } from './chat-model';
 import ProviderIcon from './ProviderIcon.vue';
 import Icon from './Icon.vue';
@@ -32,15 +31,17 @@ import { attachedImagePaths } from './markdown-model';
 import { conversationCache } from './conversation-cache';
 import { createFrameBatch } from './frame-batch';
 import { createStableRows } from './stable-items';
-import { occurrences, parseSearchResult, rowForHit, stepHit, type SearchHit as ConversationHit } from './conversation-search';
+import { useConversationSearch } from './conversation-search';
+import { useOlderHistory } from './older-history';
+import { useSubagentDock } from './subagent-dock';
 import type { Virtualizer } from '@tanstack/vue-virtual';
 import VirtualRows from './VirtualRows.vue';
 import { estimateRowHeight, rowHeights } from './row-heights';
 import { followsAfterScroll, PERSON_WINDOW_MS, UPWARD_KEYS } from './scroll-follow';
 import { filterModels, mergeModels, resolveModel, offeredModels } from './model-choices';
 import { openLightbox } from './image-lightbox';
-import { compactCount, descendants, dockRoots, inDock, isLive, lastLine, runningSubagents, stalledFor, toolRuns, toolRunNames, toolIndicator, toolRunStatus, toolsById, type ToolRun } from './tool-runs';
-import { dockHeading as dockHeadingText, statusLabel as chatStatusLabel, statsLine as formatStats, turnUsageLine as formatTurnUsage, turnUsageTitle as formatTurnUsageTitle } from './chat-format';
+import { compactCount, descendants, inDock, lastLine, toolRuns, toolRunNames, toolIndicator, toolRunStatus, type ToolRun } from './tool-runs';
+import { statusLabel as chatStatusLabel, statsLine as formatStats, turnUsageLine as formatTurnUsage, turnUsageTitle as formatTurnUsageTitle } from './chat-format';
 import { mentionQuery, applyMention } from './file-mentions';
 import { createFileSearch } from './file-search';
 import type { SearchHit } from './file-search';
@@ -125,131 +126,13 @@ function measureRowsMargin() {
 // Rows measured while the view follows the newest output keep it at the bottom.
 function onRowsResize() { if (followBottom.value) void scrollToLatest(); }
 
-/** The cursor to the history before what the view holds, while there is any. */
-const older = ref<number | undefined>(), loadingOlder = ref(false), olderSentinel = ref<HTMLElement>();
-/** Reads the page before what the view holds, once at a time for everyone who asks. */
-let olderRead: Promise<void> | undefined;
-function loadOlder(): Promise<void> {
-  olderRead ??= readOlder().finally(() => { olderRead = undefined; });
-  return olderRead;
-}
-/** The page before what the view holds, keeping the row in view where it was. */
-async function readOlder() {
-  const id = props.session.id, own = generation, before = older.value, el = viewport.value;
-  if (before === undefined || isPreview.value || !el) return;
-  loadingOlder.value = true;
-  try {
-    const page = parseConversationPage(await request<unknown>(`${sessionPath(id)}/conversation?before=${before}`));
-    if (own !== generation || props.session.id !== id || !mounted.value) return;
-    // The first row in view, and how far it sits below the top, before and after.
-    const anchor = windowed()?.getVirtualItems().find(item => item.end > el.scrollTop);
-    const anchorKey = anchor ? String(anchor.key) : undefined, anchorOffset = anchor ? anchor.start - el.scrollTop : 0;
-    events.value = prependChatEvents(page.events, events.value);
-    older.value = page.older;
-    await nextTick();
-    const index = anchorKey === undefined ? -1 : rows.value.keys.indexOf(anchorKey);
-    if (index >= 0) { const start = windowed()?.getOffsetForIndex(index, 'start')?.[0]; if (start !== undefined) el.scrollTop = start - anchorOffset; }
-    measureRowsMargin();
-  } catch { if (own === generation) notice.value = 'Could not load earlier messages.'; }
-  finally { if (own === generation) loadingOlder.value = false; }
-  // A short page may leave the top still in reach.
-  if (own === generation && older.value !== undefined && el.scrollTop < 1200) queueMicrotask(() => void loadOlder());
-}
-let olderObserver: IntersectionObserver | undefined;
-watch(olderSentinel, sentinel => {
-  olderObserver?.disconnect(); olderObserver = undefined;
-  if (!sentinel || !viewport.value || typeof IntersectionObserver !== 'function') return;
-  // Reached within 1200px of the top, the page before is read: it is there by the time it is scrolled to.
-  olderObserver = new IntersectionObserver(entries => { if (entries.some(entry => entry.isIntersecting)) void loadOlder(); }, { root: viewport.value, rootMargin: '1200px 0px 0px 0px' });
-  olderObserver.observe(sentinel);
+const { older, loadingOlder, olderSentinel, holds, loadOlder } = useOlderHistory({
+  sessionId: () => props.session.id, preview: () => isPreview.value, mounted: () => mounted.value, generation: () => generation,
+  events, viewport, windowed, rowKeys: () => rows.value.keys, measured: measureRowsMargin, failed: message => { notice.value = message; },
 });
-onBeforeUnmount(() => olderObserver?.disconnect());
-
-/**
- * Search through the whole conversation (the server reads its full history):
- * each match is brought into view -- older pages read as far as it needs, the
- * calls it is folded inside opened -- and the words are highlighted where they
- * show, with the CSS highlight registry, so no row is changed to mark them.
- */
-const searchOpen = ref(false), searchQuery = ref(''), searchHits = ref<ConversationHit[]>([]), searchMore = ref(false), searchIndex = ref(-1), searchBusy = ref(false), searchNotice = ref(''), searchInput = ref<HTMLInputElement>();
-let searchTimer: ReturnType<typeof setTimeout> | undefined, searchGeneration = 0, searchRow = -1;
-const searchCount = computed(() => searchBusy.value ? '…' : !searchQuery.value.trim() ? '' : !searchHits.value.length ? t('No matches') : `${searchIndex.value + 1} / ${searchHits.value.length}${searchMore.value ? '+' : ''}`);
-function openSearch() { searchOpen.value = true; void nextTick(() => { searchInput.value?.focus(); searchInput.value?.select(); }); }
-function closeSearch() { clearTimeout(searchTimer); searchGeneration++; searchOpen.value = false; searchHits.value = []; searchIndex.value = -1; searchRow = -1; searchBusy.value = false; searchNotice.value = ''; paintHighlights(); }
-watch(searchQuery, query => { clearTimeout(searchTimer); searchTimer = setTimeout(() => void runSearch(query), 250); });
-watch(() => props.session.id, () => { if (searchOpen.value) closeSearch(); });
-async function runSearch(query: string) {
-  const own = ++searchGeneration, id = props.session.id;
-  searchNotice.value = ''; searchRow = -1;
-  if (!query.trim()) { searchHits.value = []; searchIndex.value = -1; searchBusy.value = false; paintHighlights(); return; }
-  searchBusy.value = true;
-  try {
-    const result = parseSearchResult(await request<unknown>(`${sessionPath(id)}/conversation/search?q=${encodeURIComponent(query.trim())}`));
-    if (own !== searchGeneration || props.session.id !== id) return;
-    searchHits.value = result.hits; searchMore.value = result.more; searchIndex.value = -1; searchBusy.value = false;
-    if (result.hits.length) await showHit(0); else paintHighlights();
-  } catch { if (own === searchGeneration) { searchBusy.value = false; searchNotice.value = 'Search failed.'; } }
-}
-async function stepSearch(direction: 1 | -1) { const next = stepHit(searchHits.value.length, searchIndex.value, direction); if (next >= 0) await showHit(next); }
-/** Whether the view holds the event `seq`: everything from the older cursor on is held. */
-const holds = (seq: number) => older.value === undefined || seq >= older.value;
-async function showHit(index: number) {
-  const hit = searchHits.value[index], own = searchGeneration;
-  if (!hit) return;
-  searchIndex.value = index; searchNotice.value = '';
-  for (let pages = 0; pages < 500 && !holds(hit.seq); pages++) { await loadOlder(); if (own !== searchGeneration) return; }
-  const target = rowForHit(rows.value.rows, hit);
-  if (!target) { searchRow = -1; searchNotice.value = 'This match is not shown in the conversation.'; paintHighlights(); return; }
-  followBottom.value = false; searchRow = target.index;
-  windowed()?.scrollToIndex(target.index, { align: 'center' });
-  await nextTick(); await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-  if (own !== searchGeneration) return;
-  const row = viewport.value?.querySelector(`.chat-row[data-index="${target.index}"]`);
-  if (row) {
-    // A run of calls, and each call the match is folded inside, open to show it.
-    if (row.firstElementChild instanceof HTMLDetailsElement) row.firstElementChild.open = true;
-    for (const id of target.path) { const fold = row.querySelector(`[data-tool-id="${CSS.escape(id)}"]`); if (fold instanceof HTMLDetailsElement) fold.open = true; }
-    windowed()?.scrollToIndex(target.index, { align: 'center' });
-  }
-  // Let the row settle where the virtualizer put it (it keeps steering to the
-  // row for a few frames), then bring the words themselves to the middle: a
-  // long reply is taller than the view. Through the virtualizer, so the row
-  // it was steering to does not pull the view back.
-  for (let frame = 0; frame < 4; frame++) await new Promise(resolve => requestAnimationFrame(resolve));
-  if (own !== searchGeneration) return;
-  const words = paintHighlights(), el = viewport.value;
-  if (words && el) { const at = words.getBoundingClientRect(), view = el.getBoundingClientRect(); if (at.height) windowed()?.scrollBy(at.top - view.top - (view.height - at.height) / 2); }
-}
-/** Marks the matches in the rows shown; the first in the current match's row stands out, and is returned. */
-function paintHighlights(): Range | undefined {
-  const registry = (globalThis.CSS as unknown as { highlights?: Map<string, unknown> } | undefined)?.highlights;
-  const HighlightType = (globalThis as unknown as { Highlight?: new (...ranges: Range[]) => unknown }).Highlight;
-  if (!registry || !HighlightType) return undefined;
-  registry.delete('chat-search'); registry.delete('chat-search-current');
-  const query = searchOpen.value ? searchQuery.value : '', el = viewport.value;
-  if (!query.trim() || !el) return undefined;
-  const all: Range[] = [], current: Range[] = [];
-  for (const row of el.querySelectorAll<HTMLElement>('.chat-row')) {
-    const inCurrent = Number(row.dataset.index) === searchRow;
-    const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
-    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-      for (const [start, end] of occurrences(node.textContent ?? '', query)) {
-        const range = new Range(); range.setStart(node, start); range.setEnd(node, end);
-        (inCurrent && !current.length ? current : all).push(range);
-      }
-    }
-  }
-  registry.set('chat-search', new HighlightType(...all));
-  if (current.length) registry.set('chat-search-current', new HighlightType(...current));
-  return current[0];
-}
-// Rows coming into view while searching are marked too.
-function onRowsRange() { if (searchOpen.value && searchQuery.value.trim()) void nextTick(paintHighlights); }
-onBeforeUnmount(() => { clearTimeout(searchTimer); if (searchOpen.value) { searchOpen.value = false; paintHighlights(); } });
-function searchKeydown(event: KeyboardEvent) {
-  if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeSearch(); return; }
-  if (event.key === 'Enter' && !event.isComposing) { event.preventDefault(); void stepSearch(event.shiftKey ? -1 : 1); }
-}
+const { searchOpen, searchQuery, searchHits, searchNotice, searchInput, searchCount, openSearch, closeSearch, stepSearch, onRowsRange, searchKeydown } = useConversationSearch({
+  sessionId: () => props.session.id, viewport, rows: () => rows.value.rows, windowed, holds, loadOlder, stopFollowing: () => { followBottom.value = false; }, t,
+});
 // What sits above the rows -- the trimmed notice, the older-history marker,
 // the welcome -- moves where they begin.
 watch([truncated, () => older.value !== undefined, () => rows.value.rows.length === 0], () => { void nextTick(measureRowsMargin); });
@@ -312,51 +195,7 @@ const mentionIndex = ref(0);
 watch(() => mentionHits.value.map(hit => hit.path).join('\u0000'), () => { mentionIndex.value = 0; });
 watch(() => draft.value.text, () => { mentionsDismissed.value = false; });
 onBeforeUnmount(() => mentionSearch.cancel());
-/**
- * Subagents.
- *
- * They run in the background, so most of their work lands after the turn that
- * started them has ended. While one runs it sits in a dock above the composer
- * rather than in the history: what it is doing now, what it has cost, and a
- * preview that opens to its log and its own calls. A finished one stays in the
- * dock, marked, until dismissed, and is in the history from then on. A card the
- * client has gone quiet on for a while says so, since a stuck subagent and a
- * slow one look the same otherwise.
- */
-const now = ref(Date.now());
-const subagents = computed(() => running.value ? runningSubagents(view.value.items) : []);
-// The clock only ticks while something could go quiet; an idle pane holds no timer.
-let clock: ReturnType<typeof setInterval> | undefined;
-watch(() => subagents.value.length > 0, active => {
-  clearInterval(clock); clock = undefined;
-  if (active) { now.value = Date.now(); clock = setInterval(() => { now.value = Date.now(); }, 30_000); }
-}, { immediate: true });
-onBeforeUnmount(() => clearInterval(clock));
-/** Rows in the order their subagents started; one joins when it is first seen running. */
-const dockIds = ref<string[]>([]), dockOpen = ref(true), expandedAgent = ref<string | null>(null), dock = ref<HTMLElement>();
-watch(() => props.session.id, () => { dockIds.value = []; expandedAgent.value = null; });
-watch(() => dockRoots(view.value.items).map(tool => tool.id), ids => {
-  const fresh = ids.filter(id => !dockIds.value.includes(id));
-  if (fresh.length) dockIds.value = [...dockIds.value, ...fresh];
-}, { immediate: true });
-const dockAgents = computed(() => {
-  if (!running.value) return [];
-  const tools = toolsById(view.value.items);
-  // One whose client exited is in the history, marked ended; it has no live row.
-  return dockIds.value.flatMap(id => { const tool = tools.get(id); return tool && !tool.ended ? [tool] : []; });
-});
-const dockRunning = computed(() => dockAgents.value.filter(isLive).length);
-const dockHeading = computed(() => dockHeadingText(dockAgents.value, t));
-function dismissAgent(id: string) { dockIds.value = dockIds.value.filter(entry => entry !== id); if (expandedAgent.value === id) expandedAgent.value = null; }
-function clearFinished() { for (const agent of dockAgents.value) if (agent.status !== 'running') dismissAgent(agent.id); }
-// The open log follows the newest line, unless it was scrolled back to read.
-let followLog = true;
-function logScrolled(event: Event) { const el = event.target as HTMLElement; followLog = el.scrollHeight - el.scrollTop - el.clientHeight < 24; }
-watch(expandedAgent, () => { followLog = true; });
-watch(() => dockAgents.value.find(agent => agent.id === expandedAgent.value)?.activity?.length, () => {
-  if (!followLog) return;
-  void nextTick(() => { const log = dock.value?.querySelector<HTMLElement>('.subagent-log'); if (log) log.scrollTop = log.scrollHeight; });
-}, { flush: 'post' });
+const { now, dock, dockOpen, expandedAgent, dockAgents, dockRunning, dockHeading, dismissAgent, clearFinished, logScrolled, quietLine } = useSubagentDock({ sessionId: () => props.session.id, running, items: () => view.value.items, t });
 const statsLine = (stats: ToolStats) => formatStats(stats, t);
 /** Below this a result is too small to matter to the context, and a size on
  * every card would only be noise. */
@@ -364,10 +203,6 @@ const NOTABLE_RESULT = 1000;
 const sizeWorthShowing = (tool: ToolItem) => (tool.result_tokens ?? 0) >= NOTABLE_RESULT;
 const turnUsageLine = (spent: TurnUsage) => formatTurnUsage(spent, t);
 const turnUsageTitle = (spent: TurnUsage) => formatTurnUsageTitle(spent, t);
-function quietLine(tool: ToolItem) {
-  const quiet = running.value ? stalledFor(tool, now.value) : undefined;
-  return quiet === undefined ? '' : t('No progress for {minutes} min', { minutes: Math.floor(quiet / 60_000) });
-}
 function chooseMention(hit: SearchHit | undefined) {
   const query = mentionTarget.value; if (!query || !hit) return;
   const next = applyMention(draft.value.text, query, hit.path);
