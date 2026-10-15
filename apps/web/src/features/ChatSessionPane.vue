@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, h, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { computed, h, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch, type Ref } from 'vue';
 import type { EndpointProfile, Session, Workspace } from '@tendly/protocol';
 import { assetUrl, errorMessage, json, providerLabel, request, sessionPath, workspacePath } from './api';
 import { backendCapabilities } from './backend-capabilities';
@@ -47,6 +47,7 @@ import { createFileSearch } from './file-search';
 import type { SearchHit } from './file-search';
 import { useI18n } from '../i18n';
 import { isMac } from './shortcuts';
+import { suggestionKey } from './chat-keyboard';
 import { pendingMessage, settleAccepted, settleFailed } from './message-delivery';
 import { useSessionMenuPosition } from './session-menu-position';
 import { canReopenInTerminal, terminalReopen } from './terminal-reopen';
@@ -980,38 +981,22 @@ function chooseCommand(command: string) {
     input.focus(); input.setSelectionRange(next.caret, next.caret); caret.value = next.caret;
   });
 }
+/** A key for the open suggestion list; whether the list took it. */
+function listKeydown(event: KeyboardEvent, index: Ref<number>, count: number, choose: () => void, dismiss: () => void) {
+  const action = suggestionKey(event);
+  if (!action) return false;
+  event.preventDefault();
+  if (action === 'next' || action === 'previous') { index.value = moveHighlight(index.value, count, action === 'next' ? 1 : -1); return true; }
+  event.stopPropagation();
+  if (action === 'choose') choose(); else dismiss();
+  return true;
+}
 function keydown(event: KeyboardEvent) {
   if (composing.value || event.isComposing || event.keyCode === 229) return;
-  // While the suggestion list is open it owns the arrows, Tab and Enter, so a
-  // highlighted command is completed instead of being sent as literal text.
-  if (commandsOpen.value) {
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-      event.preventDefault();
-      commandIndex.value = moveHighlight(commandIndex.value, commandMatches.value.length, event.key === 'ArrowDown' ? 1 : -1);
-      return;
-    }
-    if (event.key === 'Tab' || (event.key === 'Enter' && !event.shiftKey && !event.repeat)) {
-      event.preventDefault(); event.stopPropagation();
-      chooseCommand(commandMatches.value[commandIndex.value] ?? commandMatches.value[0]);
-      return;
-    }
-    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); commandsDismissed.value = true; return; }
-  }
-  // Mentions take the same keys, and only when no command list is open — the
-  // two cannot be under one caret, so they never contend for the arrows.
-  if (mentionsOpen.value) {
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-      event.preventDefault();
-      mentionIndex.value = moveHighlight(mentionIndex.value, mentionHits.value.length, event.key === 'ArrowDown' ? 1 : -1);
-      return;
-    }
-    if (event.key === 'Tab' || (event.key === 'Enter' && !event.shiftKey && !event.repeat)) {
-      event.preventDefault(); event.stopPropagation();
-      chooseMention(mentionHits.value[mentionIndex.value] ?? mentionHits.value[0]);
-      return;
-    }
-    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); mentionsDismissed.value = true; return; }
-  }
+  // Only one list is ever open: a command and a mention cannot both be under
+  // the caret, so they never contend for the keys (chat-keyboard.ts).
+  if (commandsOpen.value && listKeydown(event, commandIndex, commandMatches.value.length, () => chooseCommand(commandMatches.value[commandIndex.value] ?? commandMatches.value[0]), () => { commandsDismissed.value = true; })) return;
+  if (mentionsOpen.value && listKeydown(event, mentionIndex, mentionHits.value.length, () => chooseMention(mentionHits.value[mentionIndex.value] ?? mentionHits.value[0]), () => { mentionsDismissed.value = true; })) return;
   if (event.key !== 'Enter') return;
   // Shift+Enter keeps the native newline behavior; plain Enter and Ctrl/⌘
   // Enter submit. Repeated keydown is suppressed to avoid duplicate turns.

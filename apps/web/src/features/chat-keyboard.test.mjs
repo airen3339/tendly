@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chatEscapeAction, composerKeyAction } from './chat-keyboard.ts';
+import { chatEscapeAction, composerKeyAction, suggestionKey } from './chat-keyboard.ts';
 
 test('composer shortcuts send on Enter, preserve newlines on Shift+Enter and ignore IME composition', () => {
   assert.equal(composerKeyAction({ key: 'Enter' }), 'send');
@@ -86,4 +86,15 @@ test('the working indicator actually animates rather than showing three still do
   // Motion is opt-out, like every other animation in this pane.
   const reduced = /@media\(prefers-reduced-motion:reduce\)\{[^}]*\}[^@]*/.exec(source)[0];
   assert.match(reduced, /\.chat-working-mark,\.chat-working-label\{animation:none\}/);
+});
+
+test('an open suggestion list takes the arrows, Tab, Enter and Escape, and nothing else', () => {
+  assert.equal(suggestionKey({ key: 'ArrowDown' }), 'next');
+  assert.equal(suggestionKey({ key: 'ArrowUp' }), 'previous');
+  assert.equal(suggestionKey({ key: 'Tab' }), 'choose');
+  assert.equal(suggestionKey({ key: 'Enter' }), 'choose');
+  assert.equal(suggestionKey({ key: 'Escape' }), 'dismiss');
+  assert.equal(suggestionKey({ key: 'Enter', shiftKey: true }), undefined, 'Shift+Enter is still a new line');
+  assert.equal(suggestionKey({ key: 'Enter', repeat: true }), undefined, 'a held Enter completes nothing');
+  assert.equal(suggestionKey({ key: 'a' }), undefined);
 });
