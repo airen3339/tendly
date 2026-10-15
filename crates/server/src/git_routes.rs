@@ -137,3 +137,16 @@ pub(super) async fn git_commit(
         json!({"commit":workspace_io::git_commit(&root(&state,id).await?,&input.message,input.amend).await?}),
     ))
 }
+
+/// The routes this module serves.
+pub(super) fn routes() -> Router<AppState> {
+    Router::new()
+        .route("/api/workspaces/{id}/git/status", get(git_status))
+        .route("/api/workspaces/{id}/git/diff", get(git_diff))
+        .route("/api/workspaces/{id}/git/stage", post(git_stage))
+        .route("/api/workspaces/{id}/git/unstage", post(git_unstage))
+        .route("/api/workspaces/{id}/git/discard", post(git_discard))
+        .route("/api/workspaces/{id}/git/branches", get(git_branches))
+        .route("/api/workspaces/{id}/git/switch", post(git_switch))
+        .route("/api/workspaces/{id}/git/commit", post(git_commit))
+}

@@ -453,3 +453,33 @@ pub(super) async fn send_message(
         .map_err(|e| ApiError::conflict(e.to_string()))?;
     Ok(StatusCode::NO_CONTENT)
 }
+
+/// The routes this module serves.
+pub(super) fn routes() -> Router<AppState> {
+    Router::new()
+        .route("/api/workspaces/{id}/sessions", post(create_session))
+        .route("/api/sessions", get(list_sessions))
+        .route(
+            "/api/sessions/{id}",
+            get(get_session)
+                .patch(update_session_title)
+                .delete(discard_session),
+        )
+        .route("/api/sessions/{id}/keep", post(keep_session))
+        .route(
+            "/api/sessions/{id}/archive",
+            axum::routing::patch(update_session_archive),
+        )
+        .route("/api/sessions/{id}/start", post(start_session))
+        .route(
+            "/api/sessions/{id}/terminal",
+            post(open_session_in_terminal),
+        )
+        .route("/api/sessions/{id}/launch-plan", post(session_launch_plan))
+        .route("/api/sessions/{id}/stop", post(stop_session))
+        .route(
+            "/api/sessions/{id}/environment",
+            axum::routing::patch(update_session_environment),
+        )
+        .route("/api/sessions/{id}/message", post(send_message))
+}

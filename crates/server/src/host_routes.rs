@@ -152,3 +152,34 @@ pub(super) async fn read_host_raw(
             .map_err(ApiError::internal)??;
     media::serve(target, q.format.as_deref() == Some("png"), request).await
 }
+
+/// The routes this module serves.
+pub(super) fn routes() -> Router<AppState> {
+    Router::new()
+        .route("/api/host/directories", get(browse_directories))
+        .route("/api/host/file", get(read_host_file))
+        .route("/api/host/raw", get(read_host_raw))
+        .route("/api/native-history/sources", get(native_sources))
+        .route(
+            "/api/workspaces/{id}/native-history",
+            get(list_native_history),
+        )
+        .route(
+            "/api/workspaces/{id}/native-history/import",
+            post(import_native_history),
+        )
+        .route(
+            "/api/workspaces/{id}/attachments",
+            // Raw bytes, so a phone upload costs no base64 inflation. The limit
+            // is per-route: the shared 3 MiB JSON cap is for API payloads.
+            post(upload_attachment).layer(DefaultBodyLimit::max(
+                workspace_io::MAX_ATTACHMENT_BYTES as usize + 4096,
+            )),
+        )
+        .route(
+            "/api/sessions/{id}/uploads",
+            post(upload_paste).layer(DefaultBodyLimit::max(
+                workspace_io::MAX_ATTACHMENT_BYTES as usize + 4096,
+            )),
+        )
+}

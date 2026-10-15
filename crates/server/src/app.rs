@@ -121,3 +121,18 @@ pub(super) fn bounded_name(s: &str) -> Result<String> {
 pub(super) fn optional(value: Option<String>) -> Option<String> {
     value.map(|s| s.trim().to_owned()).filter(|s| !s.is_empty())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn names_are_trimmed_and_bounded_and_blank_optionals_are_absent() {
+        assert_eq!(bounded_name("  repo  ").unwrap(), "repo");
+        assert!(bounded_name("   ").is_err());
+        assert!(bounded_name(&"x".repeat(201)).is_err());
+        assert_eq!(optional(Some("  x ".into())).as_deref(), Some("x"));
+        assert_eq!(optional(Some("   ".into())), None);
+        assert_eq!(optional(None), None);
+    }
+}

@@ -92,10 +92,7 @@ use uuid::Uuid;
 use app::*;
 use cli::*;
 use file_routes::*;
-use git_routes::*;
-use host_routes::*;
 use layout_routes::*;
-use profile_routes::*;
 use pty_routes::*;
 use session_routes::*;
 use workspace_routes::*;
@@ -392,116 +389,20 @@ fn router(state: AppState) -> Router {
         .merge(file_watch::routes())
         .merge(update::routes())
         .merge(tailscale::routes())
+        .merge(host_routes::routes())
+        .merge(workspace_routes::routes())
+        .merge(session_routes::routes())
+        .merge(pty_routes::routes())
+        .merge(profile_routes::routes())
+        .merge(file_routes::routes())
+        .merge(git_routes::routes())
+        .merge(layout_routes::routes())
         .route("/api/health", get(health))
         .route("/api/auth", get(security::status).post(security::login))
         .route(
             "/api/canvas/layout",
             get(canvas::get_layout).put(canvas::save_layout),
         )
-        .route("/api/host/directories", get(browse_directories))
-        .route("/api/host/file", get(read_host_file))
-        .route("/api/host/raw", get(read_host_raw))
-        .route(
-            "/api/host/native-configurations",
-            get(native_configuration_sources),
-        )
-        .route("/api/native-history/sources", get(native_sources))
-        .route(
-            "/api/workspaces/{id}/native-history",
-            get(list_native_history),
-        )
-        .route(
-            "/api/workspaces/{id}/native-history/import",
-            post(import_native_history),
-        )
-        .route(
-            "/api/endpoint-profiles/discover-models",
-            post(discover_models),
-        )
-        .route(
-            "/api/endpoint-profiles/{id}/models",
-            get(discover_profile_models),
-        )
-        .route(
-            "/api/endpoint-profiles/import-native",
-            post(import_native_profile),
-        )
-        .route(
-            "/api/workspaces",
-            get(list_workspaces).post(create_workspace),
-        )
-        .route("/api/workspaces/{id}", get(get_workspace))
-        .route("/api/workspaces/{id}/sessions", post(create_session))
-        .route(
-            "/api/workspaces/{id}/layout",
-            get(get_layout).put(save_layout),
-        )
-        .route("/api/workspaces/{id}/files", get(list_files))
-        .route("/api/workspaces/{id}/files/search", get(search_files))
-        .route(
-            "/api/workspaces/{id}/file",
-            get(read_file).put(write_file).delete(delete_file),
-        )
-        .route("/api/workspaces/{id}/file/create", post(create_file))
-        .route("/api/workspaces/{id}/file/rename", post(rename_file))
-        .route(
-            "/api/workspaces/{id}/attachments",
-            // Raw bytes, so a phone upload costs no base64 inflation. The limit
-            // is per-route: the shared 3 MiB JSON cap is for API payloads.
-            post(upload_attachment).layer(DefaultBodyLimit::max(
-                workspace_io::MAX_ATTACHMENT_BYTES as usize + 4096,
-            )),
-        )
-        .route(
-            "/api/sessions/{id}/uploads",
-            post(upload_paste).layer(DefaultBodyLimit::max(
-                workspace_io::MAX_ATTACHMENT_BYTES as usize + 4096,
-            )),
-        )
-        .route("/api/workspaces/{id}/asset", get(read_asset))
-        .route("/api/workspaces/{id}/git/status", get(git_status))
-        .route("/api/workspaces/{id}/git/diff", get(git_diff))
-        .route("/api/workspaces/{id}/git/stage", post(git_stage))
-        .route("/api/workspaces/{id}/git/unstage", post(git_unstage))
-        .route("/api/workspaces/{id}/git/discard", post(git_discard))
-        .route("/api/workspaces/{id}/git/branches", get(git_branches))
-        .route("/api/workspaces/{id}/git/switch", post(git_switch))
-        .route("/api/workspaces/{id}/git/commit", post(git_commit))
-        .route(
-            "/api/endpoint-profiles",
-            get(list_profiles).post(create_profile),
-        )
-        .route(
-            "/api/endpoint-profiles/{id}",
-            get(get_profile)
-                .patch(update_profile)
-                .delete(delete_profile),
-        )
-        .route("/api/sessions", get(list_sessions))
-        .route(
-            "/api/sessions/{id}",
-            get(get_session)
-                .patch(update_session_title)
-                .delete(discard_session),
-        )
-        .route("/api/sessions/{id}/keep", post(keep_session))
-        .route(
-            "/api/sessions/{id}/archive",
-            axum::routing::patch(update_session_archive),
-        )
-        .route("/api/sessions/{id}/start", post(start_session))
-        .route(
-            "/api/sessions/{id}/terminal",
-            post(open_session_in_terminal),
-        )
-        .route("/api/sessions/{id}/launch-plan", post(session_launch_plan))
-        .route("/api/sessions/{id}/stop", post(stop_session))
-        .route(
-            "/api/sessions/{id}/environment",
-            axum::routing::patch(update_session_environment),
-        )
-        .route("/api/sessions/{id}/message", post(send_message))
-        .route("/api/sessions/{id}/pty/ws", get(session_socket))
         .route(
             "/api/{*path}",
             get(|| async { ApiError::missing("API route") }),
@@ -557,4 +458,41 @@ async fn health() -> Json<Value> {
     Json(
         json!({"ok":true,"service":"tendly-server","platform":env::consts::OS,"mode":"trusted-single-user","api_version":2,"capabilities":["shared_canvas","native_configurations","native_history","host_directories","endpoint_models","session_environment","structured_chat","official_accounts","session_configuration","session_archive","account_import_native","agent_clients","ephemeral_sessions","session_model","workspace_file_search","session_terminal_escape","stored_secrets","agent_tools","self_update","resource_monitoring","tailnet"],"instance_label":env::var("TENDLY_INSTANCE_LABEL").ok(),"version":env!("CARGO_PKG_VERSION")}),
     )
+}
+
+#[cfg(test)]
+mod router_tests {
+    use super::*;
+    use axum::http::{Extensions, HeaderMap, HeaderValue, StatusCode as Status, Version, header};
+
+    fn compressed(status: Status, kind: &str, length: Option<u64>) -> bool {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::CONTENT_TYPE, HeaderValue::from_str(kind).unwrap());
+        if let Some(length) = length {
+            headers.insert(header::CONTENT_LENGTH, HeaderValue::from(length));
+        }
+        compressible(status, Version::HTTP_11, &headers, &Extensions::new())
+    }
+
+    #[test]
+    fn text_is_compressed_and_media_ranges_and_small_bodies_are_not() {
+        assert!(compressed(Status::OK, "application/json", Some(50_000)));
+        assert!(
+            compressed(Status::OK, "text/javascript; charset=utf-8", None),
+            "a stream of unknown length"
+        );
+        assert!(compressed(Status::OK, "image/svg+xml", Some(4096)));
+        assert!(
+            !compressed(Status::OK, "image/png", Some(50_000)),
+            "already compressed"
+        );
+        assert!(
+            !compressed(Status::OK, "application/json", Some(1023)),
+            "too small to be worth it"
+        );
+        assert!(
+            !compressed(Status::PARTIAL_CONTENT, "application/json", Some(50_000)),
+            "a byte range"
+        );
+    }
 }

@@ -202,3 +202,19 @@ token is given, and `status` prints it again. State lives in ~/.tendly;
 TENDLY_HOME or TENDLY_STATE_DIR override it (that one cannot come from the
 file, which lives inside it), and existing project-local .tendly databases
 are preserved."#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_banner_names_where_the_gateway_can_be_reached() {
+        let local = banner_urls("127.0.0.1:28789".parse().unwrap());
+        assert_eq!(local, [("Local  ", "http://127.0.0.1:28789/".to_owned())]);
+        let every = banner_urls("0.0.0.0:28789".parse().unwrap());
+        assert_eq!(every.len(), 2, "local, and the network");
+        assert_eq!(every[1].1, "http://<this machine>:28789/");
+        let one = banner_urls("192.168.1.5:9000".parse().unwrap());
+        assert_eq!(one, [("Address", "http://192.168.1.5:9000/".to_owned())]);
+    }
+}

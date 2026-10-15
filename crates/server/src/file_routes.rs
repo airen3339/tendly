@@ -153,3 +153,17 @@ pub(super) async fn read_asset(
     )?;
     media::serve(target, q.format.as_deref() == Some("png"), request).await
 }
+
+/// The routes this module serves.
+pub(super) fn routes() -> Router<AppState> {
+    Router::new()
+        .route("/api/workspaces/{id}/files", get(list_files))
+        .route("/api/workspaces/{id}/files/search", get(search_files))
+        .route(
+            "/api/workspaces/{id}/file",
+            get(read_file).put(write_file).delete(delete_file),
+        )
+        .route("/api/workspaces/{id}/file/create", post(create_file))
+        .route("/api/workspaces/{id}/file/rename", post(rename_file))
+        .route("/api/workspaces/{id}/asset", get(read_asset))
+}

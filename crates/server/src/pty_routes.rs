@@ -171,3 +171,88 @@ pub(super) async fn send_frame(
         .map_err(|_| ())?
         .map_err(|_| ())
 }
+
+/// The routes this module serves.
+pub(super) fn routes() -> Router<AppState> {
+    Router::new().route("/api/sessions/{id}/pty/ws", get(session_socket))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn output(seq: u64) -> RuntimeEvent {
+        RuntimeEvent::Output {
+            seq,
+            data: vec![b'x'],
+        }
+    }
+    fn query(runtime: &str, after: Option<u64>) -> PtyQuery {
+        PtyQuery {
+            runtime: Some(runtime.into()),
+            after,
+            framed: true,
+            ..PtyQuery::default()
+        }
+    }
+
+    #[test]
+    fn a_reconnect_resumes_only_when_the_replay_still_reaches_back_far_enough() {
+        let replay = [output(5), output(6), output(7)];
+        // The view drew up to 4: the replay starts at 5, so nothing is missing.
+        assert_eq!(resume_point(&replay, "r1", &query("r1", Some(4))), Some(4));
+        assert_eq!(resume_point(&replay, "r1", &query("r1", Some(7))), Some(7));
+        // Up to 3: frame 4 has already left the replay, so the view must redraw.
+        assert_eq!(resume_point(&replay, "r1", &query("r1", Some(3))), None);
+        // Ahead of what was ever sent.
+        assert_eq!(resume_point(&replay, "r1", &query("r1", Some(8))), None);
+        // A different process, or no resume point at all.
+        assert_eq!(resume_point(&replay, "r2", &query("r1", Some(5))), None);
+        assert_eq!(resume_point(&replay, "r1", &query("r1", None)), None);
+        // Nothing sent yet: resuming from the start is resuming.
+        assert_eq!(resume_point(&[], "r1", &query("r1", Some(0))), Some(0));
+        assert_eq!(resume_point(&[], "r1", &query("r1", Some(1))), None);
+    }
+
+    #[test]
+    fn framed_output_carries_its_sequence_number_and_exit_ends_the_stream() {
+        let (seq, message, last) = wire_event(
+            RuntimeEvent::Output {
+                seq: 258,
+                data: b"hi".to_vec(),
+            },
+            true,
+        );
+        assert_eq!((seq, last), (258, false));
+        let Message::Binary(frame) = message else {
+            panic!("binary expected")
+        };
+        assert_eq!(&frame[..], &[0, 0, 0, 0, 0, 0, 1, 2, b'h', b'i']);
+        let (_, message, _) = wire_event(
+            RuntimeEvent::Output {
+                seq: 1,
+                data: b"hi".to_vec(),
+            },
+            false,
+        );
+        let Message::Binary(plain) = message else {
+            panic!("binary expected")
+        };
+        assert_eq!(&plain[..], b"hi", "an unframed view gets the bytes alone");
+        let (seq, message, last) = wire_event(
+            RuntimeEvent::Exited {
+                seq: 9,
+                code: Some(3),
+            },
+            true,
+        );
+        assert_eq!((seq, last), (9, true));
+        let Message::Text(text) = message else {
+            panic!("text expected")
+        };
+        assert_eq!(
+            serde_json::from_str::<Value>(&text).unwrap(),
+            json!({"type": "exit", "code": 3})
+        );
+    }
+}

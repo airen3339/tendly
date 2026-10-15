@@ -85,3 +85,66 @@ pub(super) fn valid_layout(layout: &Value) -> bool {
             .get("root")
             .is_some_and(|r| node(r, &mut HashSet::new(), 0, &mut 0))
 }
+
+/// The routes this module serves.
+pub(super) fn routes() -> Router<AppState> {
+    Router::new().route(
+        "/api/workspaces/{id}/layout",
+        get(get_layout).put(save_layout),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pane(id: &str, kind: &str) -> Value {
+        json!({"type": "pane", "id": id, "kind": kind})
+    }
+
+    #[test]
+    fn the_default_layout_is_valid() {
+        assert!(valid_layout(&default_layout()));
+    }
+
+    #[test]
+    fn a_layout_is_refused_for_bad_ratios_kinds_ids_or_shape() {
+        let split = |ratio: f64, first: Value, second: Value| json!({"version": 1, "root": {"type": "split", "id": "s", "direction": "vertical", "ratio": ratio, "first": first, "second": second}});
+        assert!(valid_layout(&split(
+            0.5,
+            pane("a", "terminal"),
+            pane("b", "editor")
+        )));
+        assert!(
+            !valid_layout(&split(0.02, pane("a", "terminal"), pane("b", "editor"))),
+            "too narrow"
+        );
+        assert!(
+            !valid_layout(&split(0.5, pane("a", "terminal"), pane("a", "editor"))),
+            "duplicate id"
+        );
+        assert!(
+            !valid_layout(&split(0.5, pane("a", "browser"), pane("b", "editor"))),
+            "unknown kind"
+        );
+        assert!(
+            !valid_layout(&split(0.5, pane("", "terminal"), pane("b", "editor"))),
+            "empty id"
+        );
+        assert!(
+            !valid_layout(&json!({"version": 2, "root": pane("a", "terminal")})),
+            "unknown version"
+        );
+        let stack = json!({"version": 1, "root": {"type": "stack", "id": "t", "panes": [pane("a", "terminal"), {"type": "split", "id": "x"}]}});
+        assert!(!valid_layout(&stack), "a stack holds panes only");
+    }
+
+    #[test]
+    fn a_layout_cannot_nest_without_bound() {
+        let mut node = pane("leaf", "terminal");
+        for depth in 0..40 {
+            node = json!({"type": "split", "id": format!("s{depth}"), "direction": "horizontal", "ratio": 0.5, "first": node, "second": pane(&format!("p{depth}"), "editor")});
+        }
+        assert!(!valid_layout(&json!({"version": 1, "root": node})));
+    }
+}

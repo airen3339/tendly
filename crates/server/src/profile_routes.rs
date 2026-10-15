@@ -241,3 +241,34 @@ pub(super) async fn delete_profile(
     }
     Ok(StatusCode::NO_CONTENT)
 }
+
+/// The routes this module serves.
+pub(super) fn routes() -> Router<AppState> {
+    Router::new()
+        .route(
+            "/api/host/native-configurations",
+            get(native_configuration_sources),
+        )
+        .route(
+            "/api/endpoint-profiles/discover-models",
+            post(discover_models),
+        )
+        .route(
+            "/api/endpoint-profiles/{id}/models",
+            get(discover_profile_models),
+        )
+        .route(
+            "/api/endpoint-profiles/import-native",
+            post(import_native_profile),
+        )
+        .route(
+            "/api/endpoint-profiles",
+            get(list_profiles).post(create_profile),
+        )
+        .route(
+            "/api/endpoint-profiles/{id}",
+            get(get_profile)
+                .patch(update_profile)
+                .delete(delete_profile),
+        )
+}

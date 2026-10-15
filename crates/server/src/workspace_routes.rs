@@ -47,3 +47,13 @@ pub(super) async fn create_workspace(
         Json(db(&state, move |s| s.create_workspace(&name, &path)).await?),
     ))
 }
+
+/// The routes this module serves.
+pub(super) fn routes() -> Router<AppState> {
+    Router::new()
+        .route(
+            "/api/workspaces",
+            get(list_workspaces).post(create_workspace),
+        )
+        .route("/api/workspaces/{id}", get(get_workspace))
+}
