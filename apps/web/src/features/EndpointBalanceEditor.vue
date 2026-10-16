@@ -36,6 +36,8 @@ defineExpose({dirty,busy,reset});
 async function save(){busy.value=true;error.value='';message.value='';try{const next=await request<BalanceView>(url,json('PUT',config()));apply(next);applyView(props.profileId,next);message.value=t('Balance query saved');}catch(cause){error.value=errorMessage(cause);}finally{busy.value=false;}}
 async function test(){busy.value=true;error.value='';message.value='';preview.value=undefined;try{preview.value=await request<BalanceReading>(url+'/test',json('POST',config()));}catch(cause){error.value=errorMessage(cause);}finally{busy.value=false;}}
 async function refresh(){busy.value=true;error.value='';message.value='';try{view.value=await request<BalanceView>(url+'/query',json('POST'));applyView(props.profileId,view.value);preview.value=undefined;}catch(cause){error.value=errorMessage(cause);}finally{busy.value=false;}}
+/** The help sentence with its code set apart; the code reads the same in every language. */
+const codeParts=(text:string)=>text.split(/(await ctx\.request\(\)|\{ value \})/);
 function useExample(event:Event){const select=event.target as HTMLSelectElement;const example=BALANCE_EXAMPLES.find(entry=>entry.id===select.value);if(example)script.value=example.script;select.value='';}
 
 /** What a script can reach: ctx.request(), and the words its body is built from. */
@@ -65,11 +67,11 @@ const completions:CompletionSource=context=>{
       <template v-if="mode!=='disabled'">
         <div class="balance-grid">
           <label class="wide">{{ t('Balance query URL') }}<input v-model="queryUrl" type="url" placeholder="https://api.example.com/balance" autocomplete="off" spellcheck="false" /></label>
-          <label v-if="mode==='money'">{{ t('Currency code') }}<input v-model="currency" maxlength="3" placeholder="USD / CNY" spellcheck="false" autocomplete="off" class="balance-currency" /></label>
+          <label v-if="mode==='money'">{{ t('Currency code') }}<input v-model="currency" maxlength="3" placeholder="USD / CNY" spellcheck="false" autocomplete="off" class="field-mono balance-currency" /></label>
           <label>{{ t('Authentication') }}<select v-model="auth.preset"><option value="bearer">{{ t('Bearer token (Authorization header)') }}</option><option value="api_key">{{ t('x-api-key header') }}</option><option value="header">{{ t('Custom header') }}</option><option value="query">{{ t('Query parameter') }}</option><option value="none">{{ t('No authentication') }}</option></select></label>
-          <template v-if="auth.preset==='header'"><label>{{ t('Header name') }}<input v-model="auth.headerName" placeholder="X-Token" autocomplete="off" spellcheck="false" class="balance-mono" /></label><label>{{ t('Header value') }}<input v-model="auth.headerValue" placeholder="Bearer {key}" autocomplete="off" spellcheck="false" class="balance-mono" /><small>{{ t('{key} is replaced by the key on the server.') }}</small></label></template>
-          <label v-else-if="auth.preset==='query'">{{ t('Parameter name') }}<input v-model="auth.queryName" placeholder="api_key" autocomplete="off" spellcheck="false" class="balance-mono" /></label>
-          <label v-if="auth.preset!=='none'" class="wide">{{ t('Balance key reference') }}<input v-model="secret" :placeholder="t('Empty uses the endpoint key · env:TENDLY_SECRET_…')" autocomplete="off" spellcheck="false" /></label>
+          <template v-if="auth.preset==='header'"><label>{{ t('Header name') }}<input v-model="auth.headerName" placeholder="X-Token" autocomplete="off" spellcheck="false" class="field-mono" /></label><label>{{ t('Header value') }}<input v-model="auth.headerValue" placeholder="Bearer {key}" autocomplete="off" spellcheck="false" class="field-mono" /><small>{{ t('{key} is replaced by the key on the server.') }}</small></label></template>
+          <label v-else-if="auth.preset==='query'">{{ t('Parameter name') }}<input v-model="auth.queryName" placeholder="api_key" autocomplete="off" spellcheck="false" class="field-mono" /></label>
+          <label v-if="auth.preset!=='none'" class="wide">{{ t('Balance key reference') }}<input v-model="secret" class="field-mono" :placeholder="t('Empty uses the endpoint key · env:TENDLY_SECRET_…')" autocomplete="off" spellcheck="false" /></label>
         </div>
         <div class="balance-script">
           <div class="balance-script-head">
@@ -77,7 +79,7 @@ const completions:CompletionSource=context=>{
             <select class="balance-examples" :aria-label="t('Insert an example')" @change="useExample"><option value="">{{ t('Insert an example…') }}</option><option v-for="entry in BALANCE_EXAMPLES" :key="entry.id" :value="entry.id">{{ t(entry.label) }}</option></select>
           </div>
           <CodeEditor v-model="script" :label="t('Balance JavaScript')" :disabled="disabled" :completions="completions" />
-          <p class="form-help">{{ t(mode==='money'?'An async function body: read JSON with await ctx.request(), then return { value }. A decimal string keeps money exact.':'An async function body: read JSON with await ctx.request(), then return { value } as the percentage left, 0–100.') }}</p>
+          <p class="form-help"><template v-for="(part,index) in codeParts(t(mode==='money'?'An async function body: read JSON with await ctx.request(), then return { value }. A decimal string keeps money exact.':'An async function body: read JSON with await ctx.request(), then return { value } as the percentage left, 0–100.'))" :key="index"><code v-if="index%2">{{ part }}</code><template v-else>{{ part }}</template></template></p>
           <details class="balance-api-help"><summary>{{ t('Request options') }}</summary><pre><code>await ctx.request({
   url: '/balance',            // {{ t('same origin as the query URL') }}
   method: 'GET',              // GET | POST
@@ -115,12 +117,14 @@ const completions:CompletionSource=context=>{
 .balance-grid .wide{grid-column:1 / -1}
 .balance-editor label{display:grid;gap:6px;font-size:var(--text-sm);color:var(--ink-soft);min-width:0}
 .balance-editor input,.balance-editor select{width:100%;box-sizing:border-box}
-.balance-currency{text-transform:uppercase;font-family:var(--mono)}
-.balance-mono{font-family:var(--mono)}
+.balance-currency{text-transform:uppercase}
 .balance-editor small{color:var(--muted);font-size:var(--text-xs);font-weight:400}
 .balance-script{display:grid;gap:8px}
-.balance-script-head{display:flex;align-items:center;gap:10px;font-size:var(--text-sm);color:var(--ink-soft)}
-.balance-examples{margin-left:auto;width:auto !important;max-width:55%;font-size:var(--text-xs)}
+.balance-script-head{display:flex;align-items:center;gap:10px;font-size:var(--text-sm);font-weight:550;color:var(--ink-soft)}
+.balance-examples{margin-left:auto;width:auto !important;max-width:55%;min-height:28px;padding:3px 10px;font-size:var(--text-xs)}
+/* A balance script is a few lines; the shared editor's height is sized for longer code. */
+.balance-script .code-editor :deep(.cm-content),.balance-script .code-editor :deep(.cm-gutter){min-height:96px}
+.balance-script .form-help code{padding:0 4px;border-radius:var(--radius-xs);background:var(--fill);color:var(--ink-soft);font-size:.9em}
 .balance-api-help{font-size:var(--text-xs);color:var(--muted)}
 .balance-api-help summary{cursor:pointer;width:max-content}
 .balance-api-help pre{margin:8px 0;padding:10px 12px;border-radius:var(--radius-md);background:var(--code-line);overflow:auto;font:var(--text-xs)/1.6 var(--mono);color:var(--syn-text)}
@@ -128,7 +132,8 @@ const completions:CompletionSource=context=>{
 .balance-outcome{display:grid;gap:8px;min-width:0;flex:1 1 220px}
 .balance-preview{padding:10px 12px;border:1px dashed var(--accent-line);border-radius:var(--radius-md);background:var(--accent-soft)}
 .balance-preview>strong{display:block;font-size:var(--text-xs);color:var(--accent-ink);margin-bottom:6px}
-.toolbar-buttons{display:flex;flex-wrap:wrap;gap:8px;margin-left:auto}
+/* The shared toolbar style never shrinks; here the row wraps inside the card instead of running past it. */
+.toolbar-buttons{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;margin-left:auto;flex-shrink:1;min-width:0}
 .toolbar-buttons .small-button{display:inline-flex;align-items:center;gap:5px}
 .form-help{margin:0}
 </style>
