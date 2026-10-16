@@ -12,6 +12,7 @@
   <img src="https://img.shields.io/badge/node-%E2%89%A5%2024-0f7f70?style=flat-square" alt="Node.js 24 及以上">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-7760b5?style=flat-square" alt="平台：macOS、Linux 和 Windows">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-7760b5?style=flat-square" alt="许可证：MIT"></a>
+  <a href="https://linux.do/"><img src="https://img.shields.io/badge/LINUX%20DO-community-7760b5?style=flat-square" alt="LINUX DO 社区"></a>
 </p>
 
 <p align="center">
@@ -183,3 +184,5 @@ pnpm run check && cargo test --workspace
 ## 许可证
 
 [MIT](LICENSE)。第三方内容见[第三方声明](docs/third-party-notices.md)。Claude Code 和 Codex 分别是 Anthropic 和 OpenAI 的产品。Tendly 是独立项目，与这两家公司没有隶属或背书关系。
+
+感谢 [LINUX DO](https://linux.do/) 社区。

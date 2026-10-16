@@ -12,6 +12,7 @@
   <img src="https://img.shields.io/badge/node-%E2%89%A5%2024-0f7f70?style=flat-square" alt="Node.js 24 or newer">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-7760b5?style=flat-square" alt="Platforms: macOS, Linux and Windows">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-7760b5?style=flat-square" alt="License: MIT"></a>
+  <a href="https://linux.do/"><img src="https://img.shields.io/badge/LINUX%20DO-community-7760b5?style=flat-square" alt="LINUX DO community"></a>
 </p>
 
 <p align="center">
@@ -183,3 +184,5 @@ See [Development](docs/development.md) for the full check list and repository la
 ## License
 
 [MIT](LICENSE). Third-party material is listed in [third-party notices](docs/third-party-notices.md). Claude Code and Codex are products of Anthropic and OpenAI respectively. Tendly is an independent project and is not affiliated with or endorsed by either company.
+
+Thanks to the [LINUX DO](https://linux.do/) community.
