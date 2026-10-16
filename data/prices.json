@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-10T09:49:58Z",
+  "updatedAt": "2026-10-16T08:10:37Z",
   "source": "LiteLLM model_prices_and_context_window.json, with data/prices-overrides.json",
   "models": {
     "claude-3-5-haiku": {
@@ -496,6 +496,11 @@
       "maxOutput": 128000
     },
     "gpt-5.5-cyber": {
+      "input": 12.5,
+      "output": 75,
+      "cacheRead": 1.25
+    },
+    "gpt-5.5-cyber-preview": {
       "input": 12.5,
       "output": 75,
       "cacheRead": 1.25
