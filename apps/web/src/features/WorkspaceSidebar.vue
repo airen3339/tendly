@@ -168,14 +168,17 @@ defineExpose({ revealSession });
       <section v-for="group in groups" :key="group.workspace.id" class="workspace-group" :class="{ selected: selectedWorkspaceId === group.workspace.id }" :aria-label="group.workspace.name">
         <div class="workspace-group-header" @contextmenu.prevent="openMenuId = group.workspace.id">
           <button class="icon-button workspace-disclosure" :class="{ expanded: group.expanded }" :aria-expanded="group.expanded" :aria-label="t(group.expanded ? 'Collapse {workspace} sessions' : 'Expand {workspace} sessions', { workspace: group.workspace.name })" :aria-controls="`workspace-sessions-${group.workspace.id}`" @click="setExpanded(group.workspace.id, !group.expanded)"><Icon name="chevron" :size="11" /></button>
-          <button class="workspace-group-name" :title="`${group.workspace.name}\n${group.workspace.root_path}`" :aria-expanded="group.expanded" :aria-controls="`workspace-sessions-${group.workspace.id}`" @click="selectWorkspace(group)" @keydown="navigateWorkspace($event, group)"><strong>{{ group.workspace.name }}</strong><svg v-if="group.pinned" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" :aria-label="t('Pinned workspace')"><path d="m16 3 5 5-4 1-4 5v4l-3-3-6 6 6-6-3-3h4l5-5z" /></svg></button>
-          <button :ref="element => recordMenuButton(group.workspace.id, element)" class="icon-button workspace-more-button" :class="{ selected: openMenuId === group.workspace.id }" :aria-label="t('Workspace actions for {workspace}', { workspace: group.workspace.name })" :aria-expanded="openMenuId === group.workspace.id" :aria-controls="`workspace-menu-${group.workspace.id}`" @click="openMenuId = openMenuId === group.workspace.id ? undefined : group.workspace.id"><Icon name="more" :size="15" /></button>
-        </div>
-        <div class="workspace-group-details">
-          <WorkspaceBranchMenu v-if="workspaceBranches?.[group.workspace.id]" compact :workspace-id="group.workspace.id" :branch="workspaceBranches[group.workspace.id]" @switched="emit('branchSwitched', group.workspace.id)" @changed="emit('branchSwitched', group.workspace.id)" />
+          <!-- One row: a long name takes a second line, and the branch sits under
+               it when there is one, rather than every workspace giving a row to
+               a lone "+". -->
+          <div class="workspace-group-title">
+            <button class="workspace-group-name" :title="`${group.workspace.name}\n${group.workspace.root_path}`" :aria-expanded="group.expanded" :aria-controls="`workspace-sessions-${group.workspace.id}`" @click="selectWorkspace(group)" @keydown="navigateWorkspace($event, group)"><strong>{{ group.workspace.name }}</strong><svg v-if="group.pinned" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" :aria-label="t('Pinned workspace')"><path d="m16 3 5 5-4 1-4 5v4l-3-3-6 6 6-6-3-3h4l5-5z" /></svg></button>
+            <WorkspaceBranchMenu v-if="workspaceBranches?.[group.workspace.id]" compact :workspace-id="group.workspace.id" :branch="workspaceBranches[group.workspace.id]" @switched="emit('branchSwitched', group.workspace.id)" @changed="emit('branchSwitched', group.workspace.id)" />
+          </div>
           <span v-if="group.waitingCount" class="workspace-active-count waiting" :title="t('{count} waiting for you', { count: group.waitingCount })" :aria-label="t('{count} waiting for you', { count: group.waitingCount })"><i class="state-dot waiting" />{{ group.waitingCount }}</span>
           <span v-else-if="group.activeCount" class="workspace-active-count" :title="t('{count} active sessions', { count: group.activeCount })" :aria-label="t('{count} active sessions', { count: group.activeCount })"><i class="state-dot running" />{{ group.activeCount }}</span>
           <button class="icon-button workspace-new-action" :title="t('New {provider} session in {workspace}', { provider: quickLabel, workspace: group.workspace.name })" :aria-label="t('New {provider} session in {workspace}', { provider: quickLabel, workspace: group.workspace.name })" @click="quick(group.workspace.id, quickProvider)"><Icon name="plus" :size="15" /></button>
+          <button :ref="element => recordMenuButton(group.workspace.id, element)" class="icon-button workspace-more-button" :class="{ selected: openMenuId === group.workspace.id }" :aria-label="t('Workspace actions for {workspace}', { workspace: group.workspace.name })" :aria-expanded="openMenuId === group.workspace.id" :aria-controls="`workspace-menu-${group.workspace.id}`" @click="openMenuId = openMenuId === group.workspace.id ? undefined : group.workspace.id"><Icon name="more" :size="15" /></button>
         </div>
         <div v-if="openMenuId === group.workspace.id" :id="`workspace-menu-${group.workspace.id}`" class="workspace-more-panel">
           <div class="workspace-menu-label">{{ t('New') }}</div>
@@ -223,15 +226,13 @@ defineExpose({ revealSession });
 @media(prefers-reduced-motion:reduce){.workspace-disclosure>svg{transition:none}}
 .workspace-active-count.waiting{color:var(--warn-ink);font-weight:600}
 
-/* Keep the workspace identity stable while branch and actions share a second row. */
-.workspace-group-header{align-items:flex-start;padding-top:3px}
-.workspace-group-name>strong{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;white-space:normal;overflow-wrap:anywhere;line-height:1.4}
-.workspace-disclosure,.workspace-more-button{flex-shrink:0;margin-top:4px}
-.workspace-group-details{display:flex;align-items:center;gap:6px;min-width:0;margin:0 2px 6px 21px;min-height:27px}
-.workspace-group-details :deep(.ws-branch){min-width:0;flex:0 1 auto}
-.workspace-group-details :deep(.ws-branch.compact){max-width:calc(100% - 70px)}
-.workspace-group-details .workspace-active-count{flex-shrink:0;margin-left:auto}
-.workspace-group-details>.workspace-new-action{flex-shrink:0;margin-left:auto;width:26px;height:26px;color:var(--teal)}
-.workspace-group-details .workspace-active-count+.workspace-new-action{margin-left:0}
-@media(pointer:coarse){.workspace-group-details>.workspace-new-action{width:36px;height:44px}}
+/* The name may take two lines rather than lose its end, and the branch sits
+   under it; the controls stay centred on the row beside them either way. */
+.workspace-group-title{flex:1;min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:4px 0}
+.workspace-group-title>.workspace-group-name{width:100%;padding:2px 0}
+.workspace-group-name>strong{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;white-space:normal;overflow-wrap:anywhere;line-height:1.35}
+.workspace-group-title :deep(.ws-branch.compact){max-width:100%;margin-left:-2px}
+.workspace-disclosure,.workspace-more-button,.workspace-active-count{flex-shrink:0}
+.workspace-group-header>.workspace-new-action{flex-shrink:0;width:24px;height:24px;padding:4px;color:var(--teal)}
+@media(pointer:coarse){.workspace-group-header>.workspace-new-action{width:36px;height:44px}.workspace-group-title{padding:6px 0}}
 </style>
