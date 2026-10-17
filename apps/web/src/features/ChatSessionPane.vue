@@ -1417,18 +1417,22 @@ function keydown(event: KeyboardEvent) {
 .chat-attached-images img{width:96px;height:72px;object-fit:cover;border-radius:var(--radius-md);border:1px solid var(--teal-line);background:var(--surface);cursor:zoom-in}
 
 .chat-branch{max-width:min(30%,160px)}
-.chat-branch :deep(.chip-menu-panel){width:300px;max-height:min(420px,66vh);overflow-y:auto;padding:8px}
-.chat-branch-body header{font-size:var(--text-sm);font-weight:600;color:var(--ink);margin:2px 4px}
-.chat-branch-body p{font-size:var(--text-xs);line-height:1.5;color:var(--muted);margin:4px 4px 8px;white-space:normal}
-.chat-branch-body nav button{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;padding:7px 8px;border:0;border-radius:var(--radius-sm);background:none;cursor:pointer;text-align:left}
-.chat-branch-body nav button:hover,.chat-branch-body nav button.selected{background:var(--teal-soft)}
-.chat-branch-body nav button.selected span{color:var(--teal);font-weight:600}
-.chat-branch-body nav span{font:var(--text-sm) var(--mono);color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chat-branch :deep(.chip-menu-panel){min-width:220px;width:max-content;max-width:min(300px,78cqw);max-height:min(420px,66vh);overflow-y:auto;padding:5px}
+/* Reads as the other chips' menus: a quiet heading, rows that lift on hover,
+   and the current one in the selected tone rather than a colour of its own. */
+.chat-branch-body header{padding:8px 10px 2px;font-size:var(--text-xs);font-weight:600;color:var(--ink-soft)}
+.chat-branch-body p{font-size:var(--text-xs);line-height:1.6;color:var(--muted);margin:0 10px 6px;white-space:normal}
+.chat-branch-body nav button{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-height:36px;padding:8px 10px;border:0;border-radius:var(--radius-md);background:none;cursor:pointer;text-align:left}
+.chat-branch-body nav button+button{margin-top:1px}
+.chat-branch-body nav button:hover{background:var(--fill)}
+.chat-branch-body nav button.selected{background:var(--selected)}
+.chat-branch-body nav button.selected span{color:var(--accent-ink);font-weight:600}
+.chat-branch-body nav span{font-size:var(--text-sm);color:var(--ink-soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .chat-branch-body nav small{flex-shrink:0;font-size:var(--text-xs);color:var(--muted)}
-.chat-branch-body form{display:flex;gap:6px;margin:8px 2px 2px;padding-top:8px;border-top:1px solid var(--line)}
-.chat-branch-body input{flex:1;min-width:0;height:30px;padding:0 8px;border:1px solid var(--line);border-radius:var(--radius-sm);font:var(--text-sm) var(--mono);background:var(--surface);color:var(--ink)}
+.chat-branch-body form{display:flex;gap:6px;margin:5px 3px 3px;padding-top:6px;border-top:1px solid var(--line)}
+.chat-branch-body input{flex:1;min-width:0;height:30px;padding:0 8px;border:1px solid var(--line);border-radius:var(--radius-sm);font:inherit;font-size:var(--text-xs);background:var(--surface);color:var(--ink)}
 .chat-branch-body form button{height:30px;padding:0 10px;border:0;border-radius:var(--radius-sm);background:var(--teal);color:var(--on-accent);font-size:var(--text-xs);cursor:pointer}
-.chat-branch-body form button:disabled{opacity:.45}
+.chat-branch-body form button:disabled{opacity:.45;cursor:not-allowed}
 
 /* The composer's controls sit in one row that scrolls sideways when the pane
    is too narrow for them, at any width, instead of squeezing until none is

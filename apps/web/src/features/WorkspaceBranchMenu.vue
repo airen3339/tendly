@@ -227,31 +227,35 @@ onBeforeUnmount(close);
 .ws-branch span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ws-branch:hover,.ws-branch[aria-expanded=true]{background:var(--fill-hover);color:var(--ink);border-color:var(--line)}
 .ws-branch.compact{font-size:var(--text-xs);color:var(--ink-soft);background:var(--fill);max-width:110px}
-.ws-branch-panel{position:fixed;z-index:1200;overflow-y:auto;padding:8px;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface);box-shadow:var(--shadow-lg);font-size:var(--text-sm);color:var(--ink);text-align:left}
-.ws-branch-panel header{font-weight:600;margin:2px 4px}
-.ws-branch-panel>p{margin:4px 4px 8px;font-size:var(--text-xs);line-height:1.5;color:var(--muted)}
+/* Dressed like the composer's chip menus (ChipMenu.vue): a quiet heading, rows
+   that lift on hover, the current one in the selected tone. */
+.ws-branch-panel{position:fixed;z-index:1200;overflow-y:auto;padding:5px;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface);box-shadow:var(--shadow-lg),inset 0 1px 0 var(--card-highlight);font-size:var(--text-sm);color:var(--ink);text-align:left}
+.ws-branch-panel>header{padding:8px 10px 2px;font-size:var(--text-xs);font-weight:600;color:var(--ink-soft)}
+.ws-branch-panel>p{margin:0 10px 6px;font-size:var(--text-xs);line-height:1.6;color:var(--muted)}
 .ws-branch-panel .ws-branch-ok{color:var(--ok-ink);background:var(--ok-soft);border-radius:var(--radius-sm);padding:6px 8px}
-.ws-filter{display:block;width:calc(100% - 8px);height:28px;margin:0 4px 6px;padding:0 8px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface);color:var(--ink);font:var(--text-sm) var(--mono)}
+.ws-filter{display:block;width:calc(100% - 6px);height:30px;margin:2px 3px 5px;padding:0 8px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface);color:var(--ink);font:inherit;font-size:var(--text-xs)}
 .ws-track{color:var(--accent-ink)!important;font-family:var(--mono)!important}
-.ws-section-toggle{display:flex;align-items:center;gap:6px;width:100%;margin:2px 0;padding:4px 6px;border:0;border-radius:var(--radius-sm);background:none;font-size:var(--text-xs);color:var(--muted);cursor:pointer;text-align:left}
-.ws-section-toggle:hover{background:var(--sunken);color:var(--ink)}
+.ws-section-toggle{display:flex;align-items:center;gap:6px;width:100%;margin:2px 0;padding:6px 10px;border:0;border-radius:var(--radius-md);background:none;font-size:var(--text-xs);color:var(--muted);cursor:pointer;text-align:left}
+.ws-section-toggle:hover{background:var(--fill);color:var(--ink)}
 .ws-section-toggle>span{display:inline-block;width:10px;transition:transform var(--duration-fast)}
 .ws-section-toggle>span.open{transform:rotate(90deg)}
 .ws-section-toggle small{color:var(--faint)}
 .ws-branch-panel .ws-branch-error{color:var(--danger-ink);background:var(--danger-soft);border-radius:var(--radius-sm);padding:6px 8px}
-.ws-row{display:flex;flex-wrap:wrap;align-items:center;border-radius:var(--radius-sm)}
-.ws-row:hover{background:var(--sunken)}
-.ws-row-main{flex:1;min-width:0;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 8px;border:0;border-radius:var(--radius-sm);background:none;cursor:pointer;text-align:left;font:var(--text-sm) var(--mono);color:var(--ink)}
+.ws-row{display:flex;flex-wrap:wrap;align-items:center;border-radius:var(--radius-md)}
+.ws-row+.ws-row{margin-top:1px}
+.ws-row:hover{background:var(--fill)}
+.ws-row.current{background:var(--selected)}
+.ws-row-main{flex:1;min-width:0;display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:36px;padding:8px 10px;border:0;border-radius:var(--radius-md);background:none;cursor:pointer;text-align:left;font:inherit;font-size:var(--text-sm);color:var(--ink-soft)}
 .ws-row-main span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ws-row.current .ws-row-main{background:var(--teal-soft);color:var(--teal);font-weight:600;cursor:default}
+.ws-row.current .ws-row-main{color:var(--accent-ink);font-weight:600;cursor:default}
 .ws-row-main:disabled{cursor:not-allowed}
 .ws-row:not(.current) .ws-row-main:disabled span{color:var(--muted)}
-.ws-row-main small{flex-shrink:0;font:var(--text-xs) system-ui,sans-serif;color:var(--muted)}
+.ws-row-main small{flex-shrink:0;font-size:var(--text-xs);font-weight:400;color:var(--muted)}
 .ws-tree{flex-direction:column;align-items:flex-start;gap:1px;cursor:default}
 .ws-tree small{font:var(--text-xs) var(--mono)}
 .ws-more{flex-shrink:0;width:26px;height:26px;margin-right:2px;border:0;border-radius:var(--radius-sm);background:none;color:var(--muted);font-size:var(--text-base);line-height:1;cursor:pointer;opacity:0}
 .ws-row:hover .ws-more,.ws-more:focus-visible,.ws-more[aria-expanded=true]{opacity:1}
-.ws-more:hover{background:var(--fill);color:var(--ink)}
+.ws-more:hover{background:var(--fill-hover);color:var(--ink)}
 .ws-actions{flex-basis:100%;display:flex;flex-wrap:wrap;gap:6px;padding:2px 8px 8px}
 /* One set of buttons for the whole menu: neutral by default, filled only to
    commit a form, red only for what destroys something. */
@@ -274,9 +278,9 @@ onBeforeUnmount(close);
 .ws-blocking li{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ws-blocking .ws-branch-note{color:var(--ink-soft)}
 .ws-rename{flex:1;display:flex;gap:6px;padding:4px}
-.ws-rename input,.ws-create input{flex:1;min-width:0;height:30px;padding:0 8px;border:1px solid var(--line);border-radius:var(--radius-sm);font:var(--text-sm) var(--mono);background:var(--surface);color:var(--ink)}
-.ws-create{display:flex;gap:6px;margin:8px 2px 2px;padding-top:8px;border-top:1px solid var(--line)}
-.ws-trees{margin-top:8px;padding-top:6px;border-top:1px solid var(--line)}
-.ws-trees header{font-size:var(--text-xs);color:var(--muted);margin:4px 6px}
+.ws-rename input,.ws-create input{flex:1;min-width:0;height:30px;padding:0 8px;border:1px solid var(--line);border-radius:var(--radius-sm);font:inherit;font-size:var(--text-xs);background:var(--surface);color:var(--ink)}
+.ws-create{display:flex;gap:6px;margin:5px 3px 3px;padding-top:6px;border-top:1px solid var(--line)}
+.ws-trees{margin-top:5px;padding-top:5px;border-top:1px solid var(--line)}
+.ws-trees header{font-size:var(--text-xs);color:var(--muted);margin:4px 10px}
 @media(pointer:coarse){.ws-more{opacity:1;width:36px;height:36px}.ws-row-main{min-height:44px}.ws-create input,.ws-rename input,.ws-btn{height:40px}}
 </style>
