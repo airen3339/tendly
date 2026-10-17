@@ -136,8 +136,10 @@ export function resizeSplit(root: LayoutNode, id: string, ratio: number): Layout
   return replaceNode(root, id, (node) => node.type === "split" ? { ...node, ratio: normalizeRatio(ratio) } : node);
 }
 
-/** Removing a view must never stop or delete the underlying session. */
-export function closePane(root: LayoutNode, paneId: string): LayoutNode {
+/** Removing a view must never stop or delete the underlying session.
+ * `recent` lists pane ids oldest-first; when given, a stack whose active tab
+ * closes returns to the tab used before it rather than its neighbour. */
+export function closePane(root: LayoutNode, paneId: string, recent: readonly string[] = []): LayoutNode {
   const remove = (node: LayoutNode): LayoutNode | null => {
     if (node.type === "pane") return node.id === paneId ? null : node;
     if (node.type === "stack") {
@@ -146,7 +148,9 @@ export function closePane(root: LayoutNode, paneId: string): LayoutNode {
       if (index < 0) return node;
       const panes = node.panes.filter((pane) => pane.id !== paneId);
       if (!panes.length) return null;
-      return { ...node, panes, activePaneId: panes.some((pane) => pane.id === node.activePaneId) ? node.activePaneId : panes[Math.min(index, panes.length - 1)].id };
+      if (panes.some((pane) => pane.id === node.activePaneId)) return { ...node, panes };
+      const previous = [...recent].reverse().find((id) => id !== paneId && panes.some((pane) => pane.id === id));
+      return { ...node, panes, activePaneId: previous ?? panes[Math.min(index, panes.length - 1)].id };
     }
     const first = remove(node.first);
     const second = remove(node.second);

@@ -134,6 +134,14 @@ test('closing active tab selects neighbor, and never changes session metadata', 
   assert.equal(original.panes.length, 3);
 });
 
+test('closing active tab returns to the tab used before it', () => {
+  const original = stack('tabs', [pane('a'), pane('b'), pane('c'), pane('d')], 'c');
+  assert.equal(closePane(original, 'c', ['b', 'a', 'd', 'c']).activePaneId, 'd');
+  assert.equal(closePane(original, 'c', ['d', 'a', 'c']).activePaneId, 'a');
+  assert.equal(closePane(original, 'c', ['x', 'c']).activePaneId, 'd');
+  assert.equal(closePane(original, 'a', ['d', 'a']).activePaneId, 'c');
+});
+
 test('closing last leaf leaves an addable empty stack; branches are pruned', () => {
   const original = split('s', pane('a'), pane('b'));
   const first = closePane(original, 'a');

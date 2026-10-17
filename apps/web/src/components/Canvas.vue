@@ -56,6 +56,10 @@ const selected = ref<string | null>(props.selectedPaneId ?? null);
 const maximized = ref<string | null>(null);
 const resizing = ref(false);
 const activeByGroup = ref<Record<string, string>>({});
+/** Pane ids in the order they were last selected, oldest first, so closing a
+ * tab goes back to the one used before it. */
+let recent: string[] = [];
+watch(selected, (id) => { if (id) recent = [...recent.filter((item) => item !== id), id]; }, { immediate: true });
 const notice = ref("");
 const locatedPaneId = ref<string | null>(null);
 let observer: ResizeObserver | undefined;
@@ -115,11 +119,19 @@ async function close(id: string) {
   // rather than hiding a record that still exists on the server.
   if (props.confirmClosePane && target?.type === "pane" && !await props.confirmClosePane(target)) return;
   if (maximized.value === id) maximized.value = null;
-  commit(removePane(working.value.root, id));
+  const stackId = containerId(working.value.root, id);
+  commit(removePane(working.value.root, id, recent));
+  recent = recent.filter((item) => item !== id);
   if (selected.value === id) {
-    const first = flattenPanes(working.value.root)[0];
-    selected.value = first?.id ?? null;
-    if (first) selectPane(first);
+    const remaining = flattenPanes(working.value.root);
+    // Stay in the same tab group when it survives, as its own previous tab is
+    // what the close revealed; otherwise go back to the last pane used anywhere.
+    const stack = stackId !== id ? findNode(working.value.root, stackId) : undefined;
+    const sibling = stack?.type === "stack" ? stack.panes.find((pane) => pane.id === stack.activePaneId) : undefined;
+    const previous = [...recent].reverse().map((item) => remaining.find((pane) => pane.id === item)).find(Boolean);
+    const next = sibling ?? previous ?? remaining[0];
+    selected.value = next?.id ?? null;
+    if (next) selectPane(next);
   }
 }
 function maximize(id: string) { maximized.value = maximized.value === id ? null : id; }
