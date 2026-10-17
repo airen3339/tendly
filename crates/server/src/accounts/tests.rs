@@ -26,6 +26,7 @@ impl Fixture {
             native_sources: vec![],
             native_bridge: root.join("unused-history.mjs"),
             chat_bridge: root.join("unused-chat.mjs"),
+            chat_in_process: None,
             chats: crate::conversations::ChatManager::default(),
             watches: crate::file_watch::FileWatches::default(),
             accounts: AccountManager::default(),

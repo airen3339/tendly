@@ -15,6 +15,9 @@ pub(super) struct AppState {
     pub(super) native_sources: Vec<native_history::NativeSource>,
     pub(super) native_bridge: PathBuf,
     pub(super) chat_bridge: PathBuf,
+    /// Which layer conversations run on, for every client at once; `None`
+    /// leaves it to each client's own setting (`chat_adapter::in_process`).
+    pub(super) chat_in_process: Option<bool>,
     pub(super) chats: conversations::ChatManager,
     pub(super) watches: file_watch::FileWatches,
     pub(super) accounts: accounts::AccountManager,

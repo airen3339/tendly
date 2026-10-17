@@ -283,6 +283,7 @@ async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
         runtime: RuntimeManager::new(),
         native_bridge: installation::native_bridge(&state_dir),
         chat_bridge: bridge::script(&state_dir, "TENDLY_CHAT_BRIDGE", "chat.mjs"),
+        chat_in_process: None,
         chats: conversations::ChatManager::default(),
         watches: file_watch::FileWatches::default(),
         accounts: accounts::AccountManager::new(),

@@ -61,9 +61,12 @@ pub async fn start_locked(state: &AppState, session: &Session) -> Result<Arc<Cha
         cwd: spec.cwd.to_string_lossy().into_owned(),
         resume_id: session.provider_session_id.clone(),
     };
-    // Codex and Pi can run in this process instead of under the Node
-    // bridge; which is a deployment's choice (chat_adapter::in_process).
-    if crate::chat_adapter::in_process(session.provider) {
+    // Every client runs in this process unless a deployment asks for the
+    // Node bridge instead (chat_adapter::in_process).
+    if state
+        .chat_in_process
+        .unwrap_or_else(|| crate::chat_adapter::in_process(session.provider))
+    {
         let adapter = match session.provider {
             ProviderKind::Pi => crate::pi_chat::adapter(&spec.env, &spec.env_remove),
             ProviderKind::ClaudeCode => crate::claude_chat::adapter(&spec.env, &spec.env_remove),

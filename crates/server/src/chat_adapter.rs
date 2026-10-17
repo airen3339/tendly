@@ -37,12 +37,12 @@ impl ChatInit {
 }
 
 /// Whether `provider`'s conversations run in this process rather than under
-/// the Node bridge: `TENDLY_CODEX_ADAPTER=rust` for Codex
-/// ([`crate::codex_chat`]), `TENDLY_PI_ADAPTER=rust` for Pi
-/// ([`crate::pi_chat`]), `TENDLY_CLAUDE_ADAPTER=rust` for Claude Code
+/// the Node bridge. They do unless `node` is asked for: `TENDLY_CODEX_ADAPTER`
+/// for Codex ([`crate::codex_chat`]), `TENDLY_PI_ADAPTER` for Pi
+/// ([`crate::pi_chat`]), `TENDLY_CLAUDE_ADAPTER` for Claude Code
 /// ([`crate::claude_chat`]); `codex_adapter`, `pi_adapter` and
-/// `claude_adapter = "rust"` in config.toml set them. Anything else, or nothing, is the bridge, so a problem
-/// in a Rust client is one setting from undone. Read at each start: a running
+/// `claude_adapter = "node"` in config.toml set them, so a problem in a Rust
+/// client is one setting from undone. Read at each start: a running
 /// conversation keeps the layer it began on.
 pub fn in_process(provider: tendly_domain::ProviderKind) -> bool {
     let variable = match provider {
@@ -55,7 +55,10 @@ pub fn in_process(provider: tendly_domain::ProviderKind) -> bool {
 }
 
 fn adapter_choice(value: Option<&str>) -> bool {
-    value.is_some_and(|value| value.trim().eq_ignore_ascii_case("rust"))
+    !value.is_some_and(|value| {
+        let value = value.trim();
+        value.eq_ignore_ascii_case("node") || value.eq_ignore_ascii_case("bridge")
+    })
 }
 
 /// One decision a person can give a native request.
@@ -457,15 +460,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_bridge_runs_a_client_unless_rust_is_asked_for() {
+    fn a_client_runs_in_process_unless_the_bridge_is_asked_for() {
         // Terminals have no layer to choose.
         assert!(!in_process(tendly_domain::ProviderKind::Terminal));
-        assert!(!adapter_choice(None));
-        assert!(!adapter_choice(Some("bridge")));
-        assert!(!adapter_choice(Some("")));
-        assert!(!adapter_choice(Some("rusty")));
+        assert!(adapter_choice(None));
+        assert!(adapter_choice(Some("")));
         assert!(adapter_choice(Some("rust")));
-        assert!(adapter_choice(Some(" Rust ")));
+        assert!(adapter_choice(Some("rusty")));
+        assert!(!adapter_choice(Some("node")));
+        assert!(!adapter_choice(Some(" Node ")));
+        assert!(!adapter_choice(Some("bridge")));
     }
 
     #[test]
