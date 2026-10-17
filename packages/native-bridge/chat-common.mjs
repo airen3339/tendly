@@ -26,7 +26,14 @@ export function approvalScope(cwd, request = {}) {
 }
 
 export const MAX_INPUT_LINE = 512 * 1024;
-export const MAX_NATIVE_LINE = 4 * 1024 * 1024;
+// One line from the client. Codex reports a generated image inline as base64,
+// several megabytes for one picture, so this is sized for images, not text.
+export const MAX_NATIVE_LINE = 64 * 1024 * 1024;
+// Everything the client writes over the session's life. Each line is read and
+// let go, so this only stops a runaway stream; an image-heavy session is not one.
+export const MAX_NATIVE_TOTAL = 2 * 1024 * 1024 * 1024;
+// What this bridge may queue for the client to read.
+export const MAX_NATIVE_INPUT = 4 * 1024 * 1024;
 export const MAX_TEXT = 64 * 1024;
 export const MAX_EVENT_LINE = 192 * 1024;
 export const nativeId = value => typeof value === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(value);
@@ -49,28 +56,32 @@ export function redactEvents(environment, output) {
  * `skipInvalid` passes over a line that is not JSON instead of failing the
  * stream, for protocols that only care about the answers they asked for.
  */
-export function jsonLines(readable, onMessage, onFailure, { maxLine = MAX_NATIVE_LINE, maxTotal = 128 * 1024 * 1024, lineTimeout = 10_000, skipInvalid = false } = {}) {
-  const decoder = new StringDecoder('utf8'); let buffer = '', total = 0, timer, stopped = false;
+export function jsonLines(readable, onMessage, onFailure, { maxLine = MAX_NATIVE_LINE, maxTotal = MAX_NATIVE_TOTAL, lineTimeout = 10_000, skipInvalid = false } = {}) {
+  // An incomplete line is kept as the pieces it came in, with their size, so a
+  // long one is looked through once as it arrives rather than with every chunk.
+  const decoder = new StringDecoder('utf8'); let pieces = [], pending = 0, total = 0, timer, stopped = false;
   const clear = () => { clearTimeout(timer); timer = undefined; };
   const fail = message => { if (!stopped) { stopped = true; clear(); onFailure(message); } };
   const data = chunk => {
     if (stopped) return;
     total += chunk.length; if (total > maxTotal) { fail('Structured stream exceeded its size limit.'); return; }
-    buffer += decoder.write(chunk);
-    let index;
-    while ((index = buffer.indexOf('\n')) !== -1) {
-      clear(); const line = buffer.slice(0,index); buffer = buffer.slice(index+1);
-      if (Buffer.byteLength(line) > maxLine) { fail('Structured message exceeded its size limit.'); return; }
+    let text = decoder.write(chunk), index;
+    while ((index = text.indexOf('\n')) !== -1) {
+      clear(); const head = text.slice(0,index); text = text.slice(index+1);
+      const size = pending + Buffer.byteLength(head), line = pieces.length ? pieces.join('') + head : head;
+      pieces = []; pending = 0;
+      if (size > maxLine) { fail('Structured message exceeded its size limit.'); return; }
       if (!line.trim()) continue;
       let message;
       try { message = JSON.parse(line); } catch { if (skipInvalid) continue; fail('Invalid structured message received.'); return; }
       try { onMessage(message); } catch { fail('Invalid structured message received.'); return; }
       if (stopped) return;
     }
-    if (Buffer.byteLength(buffer) > maxLine) { fail('Structured message exceeded its size limit.'); return; }
-    if (buffer && !timer) timer = setTimeout(() => fail('Incomplete structured message timed out.'), lineTimeout);
+    if (text) { pieces.push(text); pending += Buffer.byteLength(text); }
+    if (pending > maxLine) { fail('Structured message exceeded its size limit.'); return; }
+    if (pending && !timer) timer = setTimeout(() => fail('Incomplete structured message timed out.'), lineTimeout);
   };
-  const end = () => { buffer += decoder.end(); if (buffer.trim() && !stopped) fail('Structured stream ended mid-message.'); clear(); };
+  const end = () => { const rest = pieces.join('') + decoder.end(); if (rest.trim() && !stopped) fail('Structured stream ended mid-message.'); clear(); };
   readable.on('data',data); readable.on('end',end);
   return () => { stopped = true; clear(); readable.off('data',data); readable.off('end',end); };
 }
@@ -136,7 +147,7 @@ export class NativeProcess {
   send(message) {
     if (this.closed || !this.child.stdin.writable) throw new Error('Native client input is unavailable.');
     const line = JSON.stringify(message) + '\n';
-    if (Buffer.byteLength(line) > MAX_NATIVE_LINE || this.child.stdin.writableLength > MAX_NATIVE_LINE) throw new Error('Native input exceeded its buffer limit.');
+    if (Buffer.byteLength(line) > MAX_NATIVE_INPUT || this.child.stdin.writableLength > MAX_NATIVE_INPUT) throw new Error('Native input exceeded its buffer limit.');
     this.child.stdin.write(line);
   }
   /**
@@ -146,12 +157,16 @@ export class NativeProcess {
    */
   rpc(method, params, optional = false) {
     const id = `tendly-${++this.sequence}`;
+    // A model list is asked for in the background and nothing waits on it,
+    // while a ChatGPT-signed Codex can take five seconds to fetch one; cut off
+    // at the probe's limit, the composer lost its model, depth and permission chips.
+    const listing = ['model/list','get_available_models'].includes(method);
     return new Promise((resolve,reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);reject(new Error('Native control request timed out.'));
         // A timed-out start may have executed. Do not reopen the send gate and guess/replay it.
         if(!optional&&!['interrupt','turn/interrupt','abort'].includes(method))this.failure('Native control request timed out; the structured connection was stopped.');
-      },optional?Math.min(this.rpcTimeout,4000):this.rpcTimeout);
+      },optional&&!listing?Math.min(this.rpcTimeout,4000):this.rpcTimeout);
       this.pending.set(id,{resolve,reject,timer});
       try { this.send(this.frame(id, method, params)); }
       catch(error) { clearTimeout(timer);this.pending.delete(id);reject(error); }
@@ -265,7 +280,9 @@ export class ChatBase {
     // equivalent of plan or accept-edits, and offering a control that errors on
     // use would be worse than not offering it.
     const available=Array.isArray(this.permissionModes)&&this.permissionModes.length?this.permissionModes.filter(mode=>/^[a-z_]{1,24}$/.test(mode)).slice(0,8):undefined;
-    if(!list?.length&&!selected&&!depth&&!permission)return;
+    // The modes alone are worth saying: without them a client whose model list
+    // never came had no permission chip either.
+    if(!list?.length&&!selected&&!depth&&!permission&&!available?.length)return;
     this.emit({type:'settings',...(selected?{model:selected}:{}),...(depth?{effort:depth}:{}),...(permission?{permission_mode:permission}:{}),...(available?.length?{permission_modes:available}:{}),...(list?.length?{models:list}:{})});
   }
   approval(key, description, answer) {

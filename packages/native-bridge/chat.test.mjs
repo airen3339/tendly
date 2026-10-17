@@ -203,6 +203,13 @@ test('native lines are UTF-8 safe, bounded, and reject incomplete streams',async
   input.write('x'.repeat(65));assert.equal(errors.length,1);stop();input.destroy();
   const partial=new PassThrough();await new Promise(resolve=>{jsonLines(partial,()=>{},message=>{assert.match(message,/timed out/);resolve();},{lineTimeout:10});partial.write('{');});partial.destroy();
 });
+test('a generated image, one line of megabytes in many chunks, is read whole',()=>{
+  const input=new PassThrough(),events=[],errors=[];const stop=jsonLines(input,value=>events.push(value),value=>errors.push(value));
+  const image='A'.repeat(6*1024*1024),line=Buffer.from(JSON.stringify({type:'image',result:image})+'\n{"type":"after"}\n');
+  for(let at=0;at<line.length;at+=64*1024)input.write(line.subarray(at,at+64*1024));
+  assert.deepEqual(errors,[]);assert.equal(events[0].result.length,image.length);assert.equal(events[1].type,'after');
+  stop();input.destroy();
+});
 test('credential-shaped environment values never appear in structured bridge events',()=>{
   const events=[],emit=redactEvents({TENDLY_SECRET_TEST:'private-fixture',PATH:'/bin'},event=>events.push(event));
   emit({type:'error',message:'Diagnostic private-fixture'});assert.equal(events[0].message,'Diagnostic [redacted]');
@@ -562,7 +569,7 @@ test('the client answers in its own vocabulary, and never in the interface\'s', 
   assert.equal((await settingsFor({}, 'plan')).permission_mode, 'plan');
   // An answer this bridge cannot name is left for the status message to settle,
   // rather than reported as the mode that happened to be requested.
-  assert.equal((await settingsFor({ mode: 'someFutureMode' }, 'ask')), undefined);
+  assert.equal((await settingsFor({ mode: 'someFutureMode' }, 'ask'))?.permission_mode, undefined);
 });
 
 const STEER_A='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', STEER_B='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';

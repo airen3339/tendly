@@ -21,6 +21,9 @@ pub(super) async fn read_lines_within<R: tokio::io::AsyncRead + Unpin>(
     let mut buffer: Vec<u8> = Vec::new();
     let mut total = 0usize;
     let mut bytes = vec![0u8; 64 * 1024];
+    // How much of `buffer` is known to hold no newline: a long line is looked
+    // through once as it arrives, not again with every read.
+    let mut scanned = 0usize;
     // When the incomplete line began: the bridge sets its timer once, then,
     // and clears it only when a line is complete.
     let mut began: Option<Instant> = None;
@@ -53,7 +56,9 @@ pub(super) async fn read_lines_within<R: tokio::io::AsyncRead + Unpin>(
             return;
         }
         buffer.extend_from_slice(&bytes[..count]);
-        while let Some(end) = buffer.iter().position(|b| *b == b'\n') {
+        while let Some(offset) = buffer[scanned..].iter().position(|b| *b == b'\n') {
+            let end = scanned + offset;
+            scanned = 0;
             began = None;
             let line: Vec<u8> = buffer.drain(..=end).collect();
             let line = String::from_utf8_lossy(&line[..line.len() - 1]).into_owned();
@@ -76,6 +81,7 @@ pub(super) async fn read_lines_within<R: tokio::io::AsyncRead + Unpin>(
                 }
             }
         }
+        scanned = buffer.len();
         if buffer.len() > MAX_NATIVE_LINE {
             let _ = inputs.send(Input::Broken("Structured message exceeded its size limit."));
             return;

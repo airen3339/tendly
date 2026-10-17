@@ -394,7 +394,15 @@ impl<T, R, X: Default> Core<T, R, X> {
             (1..=24).contains(&m.len()) && m.bytes().all(|b| b.is_ascii_lowercase() || b == b'_')
         });
         let list = list.filter(|list| !list.is_empty());
-        if list.is_none() && selected.is_none() && depth.is_none() && permission.is_none() {
+        // The modes alone are worth saying: without them a client whose model
+        // list never came had no permission chip either.
+        let modes = self.permission_modes.filter(|m| !m.is_empty());
+        if list.is_none()
+            && selected.is_none()
+            && depth.is_none()
+            && permission.is_none()
+            && modes.is_none()
+        {
             return;
         }
         let mut event = Map::new();
@@ -408,7 +416,7 @@ impl<T, R, X: Default> Core<T, R, X> {
         if let Some(mode) = permission {
             event.insert("permission_mode".into(), json!(mode));
         }
-        if let Some(modes) = self.permission_modes.filter(|m| !m.is_empty()) {
+        if let Some(modes) = modes {
             event.insert("permission_modes".into(), json!(modes));
         }
         if let Some(list) = list {

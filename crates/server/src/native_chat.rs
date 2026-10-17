@@ -36,12 +36,18 @@ pub use launch::*;
 use run::*;
 pub use values::*;
 
-pub const MAX_NATIVE_LINE: usize = 4 * 1024 * 1024;
+/// One line from the client. Codex reports a generated image inline as
+/// base64, several megabytes for one picture, so this is sized for images.
+pub const MAX_NATIVE_LINE: usize = 64 * 1024 * 1024;
+/// What may be queued for the client to read (chat.mjs).
+pub const MAX_NATIVE_INPUT: usize = 4 * 1024 * 1024;
 pub const MAX_TEXT: usize = 64 * 1024;
 pub const MAX_EVENT_LINE: usize = 192 * 1024;
 /// Events sent and not yet taken, past which a conversation stops (chat.mjs).
 const MAX_UNSENT: usize = 4 * 1024 * 1024;
-const MAX_NATIVE_TOTAL: usize = 128 * 1024 * 1024;
+/// Everything the client writes over the session's life. Each line is read
+/// and let go, so this only stops a runaway stream, not an image-heavy session.
+const MAX_NATIVE_TOTAL: usize = 2 * 1024 * 1024 * 1024;
 const LINE_TIMEOUT: Duration = Duration::from_secs(10);
 pub const RPC_TIMEOUT: Duration = Duration::from_secs(30);
 const PROBE_TIMEOUT: Duration = Duration::from_secs(4);

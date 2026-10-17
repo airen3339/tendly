@@ -88,7 +88,7 @@ impl<T, R, X: Default> Core<T, R, X> {
             return Err("Native client input is unavailable.");
         };
         let line = format!("{}\n", stringify(&message)).into_bytes();
-        if line.len() > MAX_NATIVE_LINE || self.queued.load(Ordering::Acquire) > MAX_NATIVE_LINE {
+        if line.len() > MAX_NATIVE_INPUT || self.queued.load(Ordering::Acquire) > MAX_NATIVE_INPUT {
             return Err("Native input exceeded its buffer limit.");
         }
         self.queued.fetch_add(line.len(), Ordering::AcqRel);
@@ -107,7 +107,12 @@ impl<T, R, X: Default> Core<T, R, X> {
     ) -> Result<(), (T, String)> {
         self.sequence += 1;
         let id = format!("tendly-{}", self.sequence);
-        let timeout = if optional {
+        // A model list is asked for in the background and nothing waits on it,
+        // while a ChatGPT-signed Codex can take five seconds to fetch one; cut
+        // off at the probe's limit, the composer lost its model, depth and
+        // permission chips.
+        let listing = matches!(method, "model/list" | "get_available_models");
+        let timeout = if optional && !listing {
             PROBE_TIMEOUT.min(RPC_TIMEOUT)
         } else {
             RPC_TIMEOUT

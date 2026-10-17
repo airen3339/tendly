@@ -220,6 +220,29 @@ async fn an_incomplete_line_times_out_from_when_it_began() {
     assert!(started.elapsed() < Duration::from_millis(1000));
 }
 
+/// A generated image arrives as one line of several megabytes of base64, in
+/// many reads; it is read whole rather than ending the conversation.
+#[tokio::test]
+async fn an_image_sized_line_is_read_whole() {
+    use tokio::io::AsyncWriteExt;
+    let (mut writer, reader) = tokio::io::duplex(64 * 1024);
+    let (inputs, mut received) = mpsc::unbounded_channel();
+    tokio::spawn(read_lines_within(reader, inputs, Duration::from_secs(5)));
+    let image = "A".repeat(6 * 1024 * 1024);
+    let line = format!("{{\"type\":\"image\",\"result\":\"{image}\"}}\n{{\"type\":\"after\"}}\n");
+    tokio::spawn(async move { writer.write_all(line.as_bytes()).await });
+    let mut seen = Vec::new();
+    while seen.len() < 2 {
+        match tokio::time::timeout(Duration::from_secs(5), received.recv()).await {
+            Ok(Some(Input::Native(message))) => seen.push(message),
+            Ok(Some(Input::Broken(message))) => panic!("{message}"),
+            other => panic!("no line: {}", other.is_ok()),
+        }
+    }
+    assert_eq!(seen[0]["result"].as_str().map(str::len), Some(image.len()));
+    assert_eq!(seen[1]["type"], "after");
+}
+
 /// Events nobody takes stop piling up past 4 MB, as the bridge stops when
 /// its output backs up: the conversation is shut down instead of the
 /// server's memory growing without bound.
