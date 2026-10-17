@@ -50,6 +50,20 @@ const virtualizer = useVirtualizer(computed(() => ({
   initialOffset: Number.MAX_SAFE_INTEGER,
 })));
 
+// A row measured above the view would have the view moved by what it grew, to
+// keep what is read in place. iOS WebKit stops a coasting scroll that is moved,
+// so the virtualizer saves those moves for when it stops and makes them all at
+// once: a flick through older rows jumped by everything they grew, mid-coast.
+// Nothing is read in place mid-scroll anyway: on iOS, rows measured then move nothing.
+const iosWebKit = typeof navigator !== 'undefined' && (/iP(hone|od|ad)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 0));
+if (iosWebKit) virtualizer.value.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) => {
+  if (instance.isScrolling) return false;
+  // Otherwise the virtualizer's own rule: a row seen for the first time when it
+  // starts above the view, one seen before when it lies wholly above it.
+  const offset = (instance.scrollOffset ?? 0) + instance.scrollAdjustments;
+  return instance.itemSizeCache.has(item.key) ? item.end <= offset && instance.scrollDirection !== 'backward' : item.start < offset;
+};
+
 const visible = computed(() => virtualizer.value.getVirtualItems().map(virtual => ({ key: String(virtual.key), index: virtual.index, row: props.rows[virtual.index]! })));
 const padding = computed(() => {
   const items = virtualizer.value.getVirtualItems(), first = items[0], last = items[items.length - 1];
