@@ -39,7 +39,7 @@ export type ChatItem =
   | { type: 'error'; id: string; text: string };
 
 /** A tool call; `children` are the calls a subagent made inside it, nested as deep as they went. */
-export interface ToolItem { type: 'tool'; id: string; name: string; status: 'running' | 'completed' | 'failed'; text: string; activity?: string; parent?: string; stats?: ToolStats; at?: number; label?: string; ended?: boolean; background?: boolean; result_tokens?: number; children?: ToolItem[] }
+export interface ToolItem { type: 'tool'; id: string; name: string; status: 'running' | 'completed' | 'failed'; text: string; activity?: string; parent?: string; stats?: ToolStats; at?: number; ms_at?: number; since?: number; label?: string; ended?: boolean; background?: boolean; result_tokens?: number; children?: ToolItem[] }
 
 /** The tools that start a subagent. Claude Code renamed Task to Agent. */
 export const SUBAGENT_TOOLS = new Set(['Agent', 'Task']);
@@ -116,8 +116,11 @@ export function conversationView(events: readonly ChatEvent[], running?: boolean
       const activity = event.activity === undefined ? before?.activity
         : clipTail(before?.activity ? `${before.activity}\n${event.activity}` : event.activity, MAX_ACTIVITY);
       const parent = event.parent ?? before?.parent, stats = event.stats ?? before?.stats, at = event.at ?? before?.at, background = event.background ?? before?.background, resultTokens = event.result_tokens ?? before?.result_tokens;
+      // When the reported duration was measured, and when the client first said
+      // anything timed: a running card counts on from these between reports.
+      const msAt = event.stats?.ms !== undefined && event.at !== undefined ? event.at : before?.ms_at, since = before?.since ?? event.at;
       const label = before?.label ?? (event.status === 'running' ? toolLabel(event.text) : undefined);
-      const next: ToolItem = { ...event, text: event.text ?? before?.text ?? '', ...(activity === undefined ? {} : { activity }), ...(parent === undefined ? {} : { parent }), ...(stats === undefined ? {} : { stats }), ...(at === undefined ? {} : { at }), ...(label === undefined ? {} : { label }), ...(background ? { background } : {}), ...(resultTokens === undefined ? {} : { result_tokens: resultTokens }) };
+      const next: ToolItem = { ...event, text: event.text ?? before?.text ?? '', ...(activity === undefined ? {} : { activity }), ...(parent === undefined ? {} : { parent }), ...(stats === undefined ? {} : { stats }), ...(at === undefined ? {} : { at }), ...(msAt === undefined ? {} : { ms_at: msAt }), ...(since === undefined ? {} : { since }), ...(label === undefined ? {} : { label }), ...(background ? { background } : {}), ...(resultTokens === undefined ? {} : { result_tokens: resultTokens }) };
       // A parent trimmed out of history leaves its calls at the top rather than nowhere.
       if (parent !== undefined && index === undefined && parent !== event.id && (indexes.has('tool:' + parent) || nested.has(parent))) {
         if (!nested.has(event.id)) childrenOf.set(parent, [...(childrenOf.get(parent) ?? []), event.id]);

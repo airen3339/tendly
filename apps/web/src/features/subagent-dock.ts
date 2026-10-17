@@ -1,7 +1,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch, type Ref } from 'vue';
 import type { ChatItem, ToolItem } from './chat-model';
 import { dockHeading as dockHeadingText } from './chat-format';
-import { dockRoots, isLive, runningSubagents, stalledFor, toolsById } from './tool-runs';
+import { dockRoots, isLive, liveStats, runningSubagents, stalledFor, toolsById } from './tool-runs';
 
 type Translate = (text: string, values?: Record<string, string | number>) => string;
 
@@ -42,19 +42,22 @@ export function useSubagentDock(options: SubagentDockOptions) {
   const { running, t } = options;
   const now = ref(Date.now());
   const subagents = computed(() => running.value ? runningSubagents(options.items()) : []);
-  // The clock only ticks while something could go quiet; an idle pane holds no timer.
-  let clock: ReturnType<typeof setInterval> | undefined;
-  watch(() => subagents.value.length > 0, active => {
-    clearInterval(clock); clock = undefined;
-    if (active) { now.value = Date.now(); clock = setInterval(() => { now.value = Date.now(); }, 30_000); }
-  }, { immediate: true });
-  onBeforeUnmount(() => clearInterval(clock));
   /** Rows in the order their subagents started; one joins when it is first seen running. */
   const dockIds = ref<readonly string[]>([]), dockOpen = ref(true), expandedAgent = ref<string | null>(null), dock = ref<HTMLElement>();
   watch(options.sessionId, () => { dockIds.value = []; expandedAgent.value = null; });
   watch(() => dockRoots(options.items()).map(tool => tool.id), ids => { dockIds.value = joinDock(dockIds.value, ids); }, { immediate: true });
   const dockAgents = computed(() => running.value ? dockedAgents(dockIds.value, toolsById(options.items())) : []);
   const dockRunning = computed(() => dockAgents.value.filter(isLive).length);
+  // The clock only ticks while something in the dock runs, once a second so
+  // its timers count; an idle pane holds no timer.
+  let clock: ReturnType<typeof setInterval> | undefined;
+  watch(() => subagents.value.length > 0 || dockRunning.value > 0, active => {
+    clearInterval(clock); clock = undefined;
+    if (active) { now.value = Date.now(); clock = setInterval(() => { now.value = Date.now(); }, 1000); }
+  }, { immediate: true });
+  onBeforeUnmount(() => clearInterval(clock));
+  /** What the history's rows re-render on: the quiet line only moves by the minute. */
+  const slowNow = computed(() => Math.floor(now.value / 30_000));
   const dockHeading = computed(() => dockHeadingText(dockAgents.value, t));
   function dismissAgent(id: string) { dockIds.value = dockIds.value.filter(entry => entry !== id); if (expandedAgent.value === id) expandedAgent.value = null; }
   function clearFinished() { for (const agent of dockAgents.value) if (agent.status !== 'running') dismissAgent(agent.id); }
@@ -70,6 +73,7 @@ export function useSubagentDock(options: SubagentDockOptions) {
     const quiet = running.value ? stalledFor(tool, now.value) : undefined;
     return quiet === undefined ? '' : t('No progress for {minutes} min', { minutes: Math.floor(quiet / 60_000) });
   }
-  // `now` is also what re-renders a row whose quiet line has changed.
-  return { now, dock, dockIds, dockOpen, expandedAgent, dockAgents, dockRunning, dockHeading, dismissAgent, clearFinished, logScrolled, quietLine };
+  function agentStats(tool: ToolItem) { return liveStats(tool, now.value); }
+  // `slowNow` is also what re-renders a history row whose quiet line has changed.
+  return { now, slowNow, agentStats, dock, dockIds, dockOpen, expandedAgent, dockAgents, dockRunning, dockHeading, dismissAgent, clearFinished, logScrolled, quietLine };
 }

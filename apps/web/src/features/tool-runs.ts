@@ -1,4 +1,4 @@
-import { SUBAGENT_TOOLS, type ChatItem, type ToolItem } from './chat-model';
+import { SUBAGENT_TOOLS, type ChatItem, type ToolItem, type ToolStats } from './chat-model';
 /** A stretch of tool calls the agent made one after another, shown as one card. */
 export interface ToolRun { type: 'tool_run'; id: string; tools: ToolItem[] }
 export type DisplayItem = Exclude<ChatItem, { type: 'tool' }> | ToolRun;
@@ -83,6 +83,17 @@ export function toolsById(items: readonly ChatItem[]): Map<string, ToolItem> {
   const visit = (tool: ToolItem) => { found.set(tool.id, tool); tool.children?.forEach(visit); };
   for (const item of items) if (item.type === 'tool') visit(item);
   return found;
+}
+
+/** A card's figures as of `now`: a running one's duration counts on from the
+ * client's last report, or from when it started if it has reported none, so
+ * the timer moves every second rather than only when progress arrives. */
+export function liveStats(tool: ToolItem, now: number): ToolStats | undefined {
+  if (!isLive(tool)) return tool.stats;
+  const ms = tool.stats?.ms;
+  if (ms !== undefined && tool.ms_at !== undefined) return { ...tool.stats, ms: ms + Math.max(0, now - tool.ms_at) };
+  if (ms === undefined && tool.since !== undefined) return { ...tool.stats, ms: Math.max(0, now - tool.since) };
+  return tool.stats;
 }
 
 /** Long enough that a subagent thinking through a hard step is not called stuck. */

@@ -63,3 +63,13 @@ test('the cached share shows a decimal, and 100.0 only when all of it was cached
   assert.equal(cachedPercent(1000, 0), '0.0');
   assert.equal(cachedPercent(0, 0), '0.0');
 });
+
+test('a running card counts on from its last reported duration, or from its start', async () => {
+  const { liveStats } = await import('./tool-runs.ts');
+  const reported = { type: 'tool', id: 'a', name: 'Agent', status: 'running', text: '', stats: { tools: 2, ms: 10_000 }, ms_at: 1_000, since: 0 };
+  assert.deepEqual(liveStats(reported, 4_000), { tools: 2, ms: 13_000 });
+  assert.deepEqual(liveStats({ ...reported, stats: undefined, ms_at: undefined }, 4_000), { ms: 4_000 });
+  assert.deepEqual(liveStats({ ...reported, status: 'completed' }, 4_000), { tools: 2, ms: 10_000 }, 'a finished card keeps the final figure');
+  assert.deepEqual(liveStats({ ...reported, ended: true }, 4_000), { tools: 2, ms: 10_000 });
+  assert.equal(liveStats({ ...reported, stats: undefined, ms_at: undefined, since: undefined }, 4_000), undefined);
+});

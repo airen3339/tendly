@@ -443,6 +443,21 @@ test('file references are found where agents write them, and ordinary words are 
   assert.ok(markdownInline('`set_model`').every(p => p.type === 'code'));
 });
 
+test('a card remembers when it started and when its duration was last reported', () => {
+  const tool = (extra) => ({ type: 'tool', id: 'agent', name: 'Agent', status: 'running', ...extra });
+  const view = conversationView([
+    tool({ text: '{}' }),
+    tool({ at: 100, stats: { ms: 0 } }),
+    tool({ at: 900, stats: { tools: 1, ms: 700 } }),
+    // Activity alone moves `at` but not the time the duration was measured.
+    tool({ at: 2_000, activity: 'Reading' }),
+  ]);
+  const [agent] = view.items;
+  assert.equal(agent.since, 100);
+  assert.equal(agent.ms_at, 900);
+  assert.equal(agent.at, 2_000);
+});
+
 test('a subagent\'s calls hang under it, as deep as they went, and keep its counts', () => {
   const tool = (id, extra = {}) => ({ type: 'tool', id, name: extra.name ?? 'Read', status: 'running', ...extra });
   const view = conversationView([
